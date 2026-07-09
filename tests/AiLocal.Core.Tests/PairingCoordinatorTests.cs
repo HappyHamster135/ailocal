@@ -66,18 +66,55 @@ public class PairingCoordinatorTests
     }
 
     [Fact]
-    public void Inbound_AddThenAccept_RemovesFromPending()
+    public void Inbound_GetThenRemoveIfMatches_RemovesFromPending()
     {
         var pairing = new PairingCoordinator();
 
         pairing.AddInbound("h1", "Host1", "http://h1:5080", "abc123");
         Assert.Single(pairing.PendingInbound());
 
-        var taken = pairing.TakeInbound("h1");
+        var peeked = pairing.GetInbound("h1");
+        Assert.NotNull(peeked);
+        Assert.Equal("abc123", peeked!.Nonce);
+        Assert.Single(pairing.PendingInbound()); // peeking must not consume it
 
-        Assert.NotNull(taken);
-        Assert.Equal("abc123", taken!.Nonce);
+        pairing.RemoveInboundIfMatches("h1", "abc123");
+
         Assert.Empty(pairing.PendingInbound());
+    }
+
+    [Fact]
+    public void Inbound_FailedApprovalCallback_LeavesRequestAvailableToRetry()
+    {
+        // Reproduces the real-world case: the operator clicked Accept, but the
+        // callback to the Host failed (network/firewall). The request must
+        // still be there afterwards so a second Accept click can succeed.
+        var pairing = new PairingCoordinator();
+        pairing.AddInbound("h1", "Host1", "http://h1:5080", "abc123");
+
+        var firstAttempt = pairing.GetInbound("h1");
+        Assert.NotNull(firstAttempt);
+        // ... callback fails here in the real flow, RemoveInboundIfMatches is never called ...
+
+        var secondAttempt = pairing.GetInbound("h1");
+        Assert.NotNull(secondAttempt);
+        Assert.Equal("abc123", secondAttempt!.Nonce);
+    }
+
+    [Fact]
+    public void RemoveInboundIfMatches_StaleNonce_DoesNotRemoveNewerRequest()
+    {
+        // Guards against a slow first attempt clobbering a fresh request that
+        // arrived (with a new nonce) while the first one was still in flight.
+        var pairing = new PairingCoordinator();
+        pairing.AddInbound("h1", "Host1", "http://h1:5080", "old-nonce");
+        pairing.AddInbound("h1", "Host1", "http://h1:5080", "new-nonce");
+
+        pairing.RemoveInboundIfMatches("h1", "old-nonce");
+
+        var stillThere = pairing.GetInbound("h1");
+        Assert.NotNull(stillThere);
+        Assert.Equal("new-nonce", stillThere!.Nonce);
     }
 
     [Fact]
@@ -89,7 +126,7 @@ public class PairingCoordinatorTests
         pairing.RejectInbound("h1");
 
         Assert.Empty(pairing.PendingInbound());
-        Assert.Null(pairing.TakeInbound("h1"));
+        Assert.Null(pairing.GetInbound("h1"));
     }
 
     [Fact]

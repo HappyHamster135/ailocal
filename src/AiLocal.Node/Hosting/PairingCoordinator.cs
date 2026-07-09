@@ -101,10 +101,24 @@ public sealed class PairingCoordinator
         return _inbound.Values.OrderByDescending(r => r.ReceivedAt).ToList();
     }
 
-    public InboundPairingRequest? TakeInbound(string requesterId)
+    /// <summary>Reads a pending inbound request without consuming it - the
+    /// caller must call <see cref="RemoveInboundIfMatches"/> only once the
+    /// approval callback to the peer has actually succeeded, so a transient
+    /// network failure leaves the request available to retry instead of
+    /// silently discarding it.</summary>
+    public InboundPairingRequest? GetInbound(string requesterId)
     {
         Prune();
-        return _inbound.TryRemove(requesterId, out var request) ? request : null;
+        return _inbound.TryGetValue(requesterId, out var request) ? request : null;
+    }
+
+    /// <summary>Removes a completed inbound request, but only if it still
+    /// matches the given nonce - guards against removing a newer request
+    /// that arrived (with a fresh nonce) while an earlier attempt was in flight.</summary>
+    public void RemoveInboundIfMatches(string requesterId, string nonce)
+    {
+        if (_inbound.TryGetValue(requesterId, out var existing) && existing.Nonce == nonce)
+            _inbound.TryRemove(requesterId, out _);
     }
 
     public void RejectInbound(string requesterId) => _inbound.TryRemove(requesterId, out _);

@@ -86,7 +86,11 @@ public static class WorkerRole
             string hostId, PairingCoordinator pairing, PersistentSettingsStore store, HostLocator hostLocator,
             NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
-            var request = pairing.TakeInbound(hostId);
+            // Peek, don't consume: only remove the pending request once the
+            // callback below actually succeeds, so a transient network/
+            // firewall failure leaves it available to retry instead of
+            // silently discarding an accept the operator already clicked.
+            var request = pairing.GetInbound(hostId);
             if (request is null)
                 return Results.NotFound(new { error = "no pending request from that host - it may have expired" });
 
@@ -106,6 +110,7 @@ public static class WorkerRole
                     return Results.Problem(
                         detail: "Host skickade ingen klusternyckel.", statusCode: StatusCodes.Status502BadGateway);
 
+                pairing.RemoveInboundIfMatches(hostId, request.Nonce);
                 store.Update(new SettingsUpdate(HostEndpoint: request.RequesterEndpoint, ClusterToken: token), hostLocator);
                 return Results.Ok(new { connected = true, host = request.RequesterName });
             }

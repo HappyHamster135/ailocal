@@ -926,7 +926,8 @@ internal static class Dashboard
           authToken: null,
           discoveredWorkers: [],
           pairingInbound: [],
-          pairingConnecting: new Set()
+          pairingConnecting: new Set(),
+          pairingErrors: {}
         };
 
         const $ = id => document.getElementById(id);
@@ -1095,12 +1096,14 @@ internal static class Dashboard
           section.style.display = 'block';
           $('discoveredWorkers').innerHTML = state.discoveredWorkers.map(w => {
             const connecting = state.pairingConnecting.has(w.id);
+            const error = state.pairingErrors[w.id];
             return `<div class="node" style="cursor:default">
               <div class="node-main"><strong>${esc(w.name)}</strong><span class="pill">Worker</span></div>
               <div class="small">${esc(w.endpoint)}</div>
+              ${error ? `<div class="small" style="color:var(--bad)">${esc(error)}</div>` : ''}
               <div class="detail-actions">
                 <button class="primary" data-connect-worker="${esc(w.id)}" ${connecting ? 'disabled' : ''}>
-                  ${connecting ? 'Väntar på godkännande...' : 'Anslut'}
+                  ${connecting ? 'Väntar på godkännande...' : (error ? 'Försök igen' : 'Anslut')}
                 </button>
               </div>
             </div>`;
@@ -1112,18 +1115,19 @@ internal static class Dashboard
         }
 
         async function connectToDiscoveredWorker(id) {
+          delete state.pairingErrors[id];
           state.pairingConnecting.add(id);
           renderDiscoveredWorkers();
           try {
             const result = await fetchJson(`/api/discovered-workers/${id}/connect`, { method: 'POST' });
             if (!result?.requested) {
               state.pairingConnecting.delete(id);
-              showComposerNotice('Kunde inte skicka anslutningsförfrågan.', true);
+              state.pairingErrors[id] = 'Kunde inte skicka anslutningsförfrågan.';
               renderDiscoveredWorkers();
             }
           } catch (error) {
             state.pairingConnecting.delete(id);
-            showComposerNotice(error.message, true);
+            state.pairingErrors[id] = error.message;
             renderDiscoveredWorkers();
           }
         }
@@ -1824,8 +1828,13 @@ internal static class Dashboard
               try {
                 state.discoveredWorkers = await fetchJson('/api/discovered-workers') ?? [];
                 const pending = await fetchJson('/api/pairing-status') ?? [];
+                // Once the outbound request is gone - either the Worker
+                // connected (it'll also vanish from discoveredWorkers) or the
+                // request expired after 5 minutes without a reply - drop the
+                // "waiting" state so a stuck/failed attempt can be retried
+                // instead of leaving the button disabled forever.
                 for (const id of [...state.pairingConnecting]) {
-                  if (!pending.some(p => p.peerId === id) && !state.discoveredWorkers.some(w => w.id === id))
+                  if (!pending.some(p => p.peerId === id))
                     state.pairingConnecting.delete(id);
                 }
               } catch { state.discoveredWorkers = []; }
