@@ -17,6 +17,14 @@ public static class WorkerRole
 
     public static void MapEndpoints(WebApplication app)
     {
+        // A Worker was originally headless-only (no reason for a human to
+        // look at it), so unlike Host/Launcher/Overseer it never served the
+        // dashboard at all - http://127.0.0.1:{port}/ was always a 404. Now
+        // that click-to-pair needs a human to actually see and accept/reject
+        // a pending request, that gap is a hard blocker. Dashboard.Html
+        // already adapts to whatever role /api/local reports.
+        app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
+
         // Host calls this to run a delegated unit of work.
         app.MapPost("/execute", async (ChatRequest req, FallbackChatProvider provider, CancellationToken ct) =>
         {

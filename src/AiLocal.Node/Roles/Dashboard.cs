@@ -653,7 +653,7 @@ internal static class Dashboard
               <span class="pill" id="providerSummary">Local</span>
             </div>
             <div class="messages" id="messages"></div>
-            <div class="composer">
+            <div class="composer" id="composer">
               <div class="notice" id="composerNotice"></div>
               <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
               <div class="composer-actions">
@@ -1030,8 +1030,13 @@ internal static class Dashboard
           });
           $('chatSub').textContent = local.role === 'Launcher'
             ? 'Starta Host eller Overseer för att skicka mål.'
-            : `${local.role}`;
+            : local.role === 'Worker'
+              ? 'Workers tar emot jobb från en Host - mål skickas från Host eller Overseer.'
+              : `${local.role}`;
           $('quickstartBtn').style.display = local.role === 'Launcher' ? 'block' : 'none';
+          // A Worker has no /api/chat endpoint - it receives dispatched work
+          // from a Host, it doesn't accept goals directly.
+          $('composer').style.display = local.role === 'Worker' ? 'none' : 'grid';
           renderInspector();
         }
 
