@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Hardware;
 using AiLocal.Core.Providers;
@@ -209,6 +210,39 @@ public static class NodeWebHost
 
         app.MapPost("/api/launch", async (LaunchNodeRequest req, LocalNodeLauncher launcher, CancellationToken ct) =>
             Results.Ok(await launcher.StartAsync(req, ct)));
+
+        // Surfaces roles started from THIS page (typically the Launcher,
+        // since starting a Worker deliberately doesn't navigate away from it)
+        // with a pending-pairing-request count fetched over loopback, so a
+        // click-to-pair request on a Worker the operator can't see (because
+        // they're still looking at the Launcher screen) doesn't go unnoticed.
+        app.MapGet("/api/local-nodes", async (LocalNodeLauncher launcher, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            var client = httpFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMilliseconds(800);
+            var results = new List<object>();
+            foreach (var node in launcher.KnownLocalNodes)
+            {
+                var pendingCount = 0;
+                try
+                {
+                    using var response = await client.GetAsync($"{node.Endpoint}/pairing/pending", ct);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        using var stream = await response.Content.ReadAsStreamAsync(ct);
+                        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                        pendingCount = document.RootElement.ValueKind == JsonValueKind.Array
+                            ? document.RootElement.GetArrayLength()
+                            : 0;
+                    }
+                }
+                catch { /* that node may not be a Worker, or isn't up right now */ }
+
+                results.Add(new { role = node.Role.ToString(), port = node.Port, endpoint = node.Endpoint, pendingPairingRequests = pendingCount });
+            }
+
+            return Results.Ok(results);
+        });
 
         app.MapGet("/api/version", () => Results.Ok(new { version = CurrentVersion }));
 

@@ -24,17 +24,29 @@ public sealed record LaunchNodeResponse(
     string? Error,
     bool Reused = false);
 
+public sealed record LocalNodeRecord(NodeRole Role, int Port, string Endpoint);
+
 public sealed class LocalNodeLauncher
 {
     private readonly NodeSettings _settings;
     private readonly IHttpClientFactory _httpFactory;
     private readonly SemaphoreSlim _launchGate = new(1, 1);
 
+    // Roles started (or found already running) from THIS node process's own
+    // "start a role" buttons. Lets the page the operator is actually looking
+    // at - typically the Launcher, since starting a Worker deliberately
+    // doesn't navigate away from it - show what it spawned and surface things
+    // like a pending click-to-pair request without the operator needing to
+    // know a port number and navigate there themselves.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<NodeRole, LocalNodeRecord> _known = new();
+
     public LocalNodeLauncher(NodeSettings settings, IHttpClientFactory httpFactory)
     {
         _settings = settings;
         _httpFactory = httpFactory;
     }
+
+    public IReadOnlyList<LocalNodeRecord> KnownLocalNodes => _known.Values.OrderBy(n => n.Role).ToList();
 
     public async Task<LaunchNodeResponse> StartAsync(
         LaunchNodeRequest request,
@@ -66,7 +78,10 @@ public sealed class LocalNodeLauncher
         // is trying to reach "the Worker" might hit either process).
         if (request.Port is not > 0 &&
             await FindRunningInstanceAsync(request.Role, ct) is { } running)
+        {
+            _known[request.Role] = new LocalNodeRecord(request.Role, running.Port, running.Endpoint);
             return new LaunchNodeResponse(true, request.Role, running.Port, running.Endpoint, null, null, Reused: true);
+        }
 
         var port = request.Port is > 0 ? request.Port.Value : DefaultPort(request.Role);
         if (!IsPortAvailable(port))
@@ -130,6 +145,7 @@ public sealed class LocalNodeLauncher
                 return new LaunchNodeResponse(false, request.Role, port, endpoint, process.Id, error);
             }
 
+            _known[request.Role] = new LocalNodeRecord(request.Role, port, endpoint);
             return new LaunchNodeResponse(true, request.Role, port, endpoint, process.Id, null);
         }
         catch (Exception ex)

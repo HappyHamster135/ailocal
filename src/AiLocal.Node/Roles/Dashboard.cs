@@ -602,6 +602,7 @@ internal static class Dashboard
 
         <div style="padding:0 14px">
           <div id="pairingRequests"></div>
+          <div id="localNodesBanner"></div>
           <div class="notice" id="firstRunBanner" style="margin-top:10px"></div>
           <div class="notice" id="updateBanner" style="margin-top:10px"></div>
         </div>
@@ -1171,6 +1172,34 @@ internal static class Dashboard
           } catch (error) {
             showComposerNotice(error.message, true);
           }
+        }
+
+        // Starting a Worker deliberately doesn't navigate this page away from
+        // wherever the operator already is (see launchRole) - so a pending
+        // click-to-pair request on that Worker could otherwise go completely
+        // unnoticed. This surfaces it right where the operator already is,
+        // with a one-click link to the Worker's own dashboard to act on it.
+        function renderLocalNodes(nodes) {
+          const box = $('localNodesBanner');
+          const withRequests = (nodes || []).filter(n => n.pendingPairingRequests > 0);
+          if (!withRequests.length) {
+            box.innerHTML = '';
+            return;
+          }
+          box.innerHTML = withRequests.map(n => `
+            <div class="pairing-card">
+              <div>
+                <strong>${esc(n.role)}</strong> (${esc(n.endpoint)}) har
+                ${n.pendingPairingRequests} väntande anslutningsförfrågan${n.pendingPairingRequests > 1 ? 'ar' : ''}.
+              </div>
+              <div class="detail-actions">
+                <button class="primary" data-open-local-node="${esc(n.endpoint)}">Öppna</button>
+              </div>
+            </div>`).join('');
+
+          document.querySelectorAll('[data-open-local-node]').forEach(button => {
+            button.onclick = () => { window.location.href = withCurrentTheme(button.dataset.openLocalNode); };
+          });
         }
 
         function switchView(view) {
@@ -1847,6 +1876,10 @@ internal static class Dashboard
               } catch { state.pairingInbound = []; }
               renderPairingRequests();
             }
+
+            try {
+              renderLocalNodes(await fetchJson('/api/local-nodes'));
+            } catch { renderLocalNodes([]); }
 
             renderFirstRunBanner();
             checkForUpdate();
