@@ -2244,7 +2244,8 @@ internal static class Dashboard
               $('launchResult').textContent = data?.error || `Could not start ${role}.`;
               return;
             }
-            $('launchResult').innerHTML = `Started ${role} on <span class="mono">${esc(data.endpoint)}</span>`;
+            const verb = data.reused ? 'Already running' : 'Started';
+            $('launchResult').innerHTML = `${verb} ${role} on <span class="mono">${esc(data.endpoint)}</span>`;
             if (role !== 'Worker') window.location.href = withCurrentTheme(data.endpoint);
           } catch (error) {
             $('launchResult').textContent = error.message;

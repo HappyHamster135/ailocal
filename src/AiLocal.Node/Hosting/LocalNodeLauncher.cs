@@ -21,7 +21,8 @@ public sealed record LaunchNodeResponse(
     int Port,
     string Endpoint,
     int? ProcessId,
-    string? Error);
+    string? Error,
+    bool Reused = false);
 
 public sealed class LocalNodeLauncher
 {
@@ -56,6 +57,16 @@ public sealed class LocalNodeLauncher
     {
         if (request.Role == NodeRole.Launcher)
             return new LaunchNodeResponse(false, request.Role, _settings.Port, "", null, "Launcher cannot launch Launcher.");
+
+        // Idempotent: reuse an already-running instance of this role instead
+        // of spawning a duplicate. Clicking the same role button twice used
+        // to silently start a second process on the next free port, sharing
+        // the same persisted node identity but broadcasting from a different
+        // port - confusing on its own, and it breaks click-to-pair (whoever
+        // is trying to reach "the Worker" might hit either process).
+        if (request.Port is not > 0 &&
+            await FindRunningInstanceAsync(request.Role, ct) is { } running)
+            return new LaunchNodeResponse(true, request.Role, running.Port, running.Endpoint, null, null, Reused: true);
 
         var port = request.Port is > 0 ? request.Port.Value : DefaultPort(request.Role);
         if (!IsPortAvailable(port))
@@ -125,6 +136,37 @@ public sealed class LocalNodeLauncher
         {
             return new LaunchNodeResponse(false, request.Role, port, endpoint, null, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Checks whether this role is already running on its default port and
+    /// actually answering as that role - not just that something occupies the
+    /// port. Only checks the default port: a role that already got bumped to
+    /// a non-default port (an existing duplicate from before this guard
+    /// existed) won't be found here, but no new duplicate will be created on
+    /// top of it either since the default port is what a fresh launch would try.
+    /// </summary>
+    private async Task<(int Port, string Endpoint)?> FindRunningInstanceAsync(NodeRole role, CancellationToken ct)
+    {
+        var port = DefaultPort(role);
+        var endpoint = $"http://127.0.0.1:{port}";
+        try
+        {
+            var client = _httpFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMilliseconds(500);
+            using var response = await client.GetAsync($"{endpoint}/health", ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("role", out var roleProperty) &&
+                string.Equals(roleProperty.GetString(), role.ToString(), StringComparison.OrdinalIgnoreCase))
+                return (port, endpoint);
+        }
+        catch { /* nothing there, or it's not a health endpoint - fall through to a normal launch */ }
+
+        return null;
     }
 
     private async Task<bool> WaitUntilReadyAsync(
