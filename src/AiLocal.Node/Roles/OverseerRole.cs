@@ -1,0 +1,378 @@
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+using AiLocal.Core.Configuration;
+using AiLocal.Node.Hosting;
+
+namespace AiLocal.Node.Roles;
+
+/// <summary>
+/// Operator-facing role. It aggregates every discovered Host and keeps a
+/// Worker-to-Host index so node operations reach the correct cluster branch.
+/// </summary>
+public static class OverseerRole
+{
+    private sealed record HostPayload(string Endpoint, JsonNode? Json);
+
+    public static void ConfigureServices(IServiceCollection services) { }
+
+    public static void MapEndpoints(WebApplication app)
+    {
+        app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
+
+        app.MapGet("/api/host", (HostLocator locator, HostRegistry hosts) => Results.Ok(new
+        {
+            host = locator.HostEndpoint ?? hosts.PrimaryEndpoint,
+            hosts = hosts.All
+        }));
+        app.MapGet("/api/hosts", (HostRegistry hosts) => Results.Ok(hosts.All));
+
+        app.MapGet("/api/nodes", AggregateNodes);
+        app.MapGet("/api/topology", AggregateTopology);
+
+        app.MapGet("/api/nodes/{id}", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Get, $"/api/nodes/{Esc(id)}", null, ct));
+        app.MapDelete("/api/nodes/{id}", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Delete, $"/api/nodes/{Esc(id)}", null, ct));
+        app.MapGet("/api/nodes/{id}/settings", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Get, $"/api/nodes/{Esc(id)}/settings", null, ct));
+        app.MapPut("/api/nodes/{id}/settings", (string id, SettingsUpdate req, HostLocator locator,
+            HostRegistry hosts, IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Put, $"/api/nodes/{Esc(id)}/settings", req, ct));
+        app.MapGet("/api/nodes/{id}/runtime", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Get, $"/api/nodes/{Esc(id)}/runtime", null, ct));
+        app.MapPost("/api/nodes/{id}/runtime/pull", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Post, $"/api/nodes/{Esc(id)}/runtime/pull", null, ct));
+        app.MapPost("/api/nodes/{id}/runtime/setup", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Post, $"/api/nodes/{Esc(id)}/runtime/setup", null, ct));
+        app.MapGet("/api/nodes/{id}/tasks", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorker(id, locator, hosts, hf, HttpMethod.Get, $"/api/nodes/{Esc(id)}/tasks", null, ct));
+
+        app.MapGet("/api/tasks", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            AggregateArrays(locator, hosts, hf, "/tasks", mapWorkers: false, ct));
+
+        app.MapGet("/api/chat", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/chat", null, ct));
+        app.MapPost("/api/chat", (SubmitTaskRequest req, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/chat", req, ct));
+        app.MapPost("/api/tasks", (SubmitTaskRequest req, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/tasks", req, ct));
+
+        app.MapGet("/api/providers", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/providers", null, ct));
+        app.MapPut("/api/providers", (ProviderOrderUpdate req, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Put, "/providers", req, ct));
+    }
+
+    private static async Task<IResult> AggregateNodes(
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+    {
+        var payloads = await FetchAll(locator, hosts, httpFactory, "/api/nodes", ct);
+        var nodes = new JsonArray();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var payload in payloads)
+        {
+            if (payload.Json is not JsonArray array)
+                continue;
+
+            foreach (var node in array.OfType<JsonObject>())
+            {
+                var id = StringProperty(node, "id");
+                if (id is null || !seen.Add(id))
+                    continue;
+                hosts.MapWorker(id, payload.Endpoint);
+                nodes.Add(node.DeepClone());
+            }
+        }
+
+        return Results.Json(nodes);
+    }
+
+    private static async Task<IResult> AggregateTopology(
+        NodeSettings settings,
+        PersistentSettingsStore persistentSettings,
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+    {
+        var payloads = await FetchAll(locator, hosts, httpFactory, "/api/topology", ct);
+        var nodes = new JsonArray();
+        var edges = new JsonArray();
+        var overseerId = $"overseer-{persistentSettings.NodeId}";
+        var seenNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { overseerId };
+        var seenHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        nodes.Add(new JsonObject
+        {
+            ["id"] = overseerId,
+            ["name"] = settings.NodeName,
+            ["role"] = "Overseer",
+            ["status"] = "Online",
+            ["endpoint"] = $"http://127.0.0.1:{settings.Port}",
+            ["activeTasks"] = 0,
+            ["skills"] = new JsonArray()
+        });
+
+        foreach (var payload in payloads)
+        {
+            if (payload.Json is not JsonObject topology ||
+                topology["nodes"] is not JsonArray sourceNodes)
+                continue;
+
+            JsonObject? hostNode = null;
+            foreach (var sourceNode in sourceNodes.OfType<JsonObject>())
+            {
+                var role = StringProperty(sourceNode, "role");
+                if (role == "Overseer")
+                    continue;
+
+                var id = StringProperty(sourceNode, "id");
+                if (id is null)
+                    continue;
+
+                var copy = (JsonObject)sourceNode.DeepClone();
+                if (role == "Host")
+                {
+                    hosts.UpdateIdentity(
+                        payload.Endpoint,
+                        id.StartsWith("host-", StringComparison.OrdinalIgnoreCase) ? id[5..] : id,
+                        StringProperty(copy, "name") ?? payload.Endpoint);
+                }
+
+                if (!seenNodes.Add(id))
+                    continue;
+
+                if (role == "Host")
+                {
+                    copy["endpoint"] = payload.Endpoint;
+                    copy["status"] = "Online";
+                    hostNode = copy;
+                    seenHosts.Add(payload.Endpoint);
+                }
+                else if (role == "Worker")
+                {
+                    hosts.MapWorker(id, payload.Endpoint);
+                }
+
+                nodes.Add(copy);
+            }
+
+            if (hostNode is not null)
+            {
+                var hostId = StringProperty(hostNode, "id")!;
+                edges.Add(new JsonObject { ["source"] = overseerId, ["target"] = hostId });
+
+                if (topology["edges"] is JsonArray sourceEdges)
+                {
+                    foreach (var edge in sourceEdges.OfType<JsonObject>())
+                    {
+                        var source = StringProperty(edge, "source");
+                        if (source == "overseer-local")
+                            continue;
+                        edges.Add(edge.DeepClone());
+                    }
+                }
+            }
+        }
+
+        foreach (var host in hosts.All.Where(host => !seenHosts.Contains(host.Endpoint)))
+        {
+            var hostId = host.Id.StartsWith("host-", StringComparison.OrdinalIgnoreCase)
+                ? host.Id
+                : $"host-{host.Id}";
+            if (!seenNodes.Add(hostId))
+                continue;
+
+            nodes.Add(new JsonObject
+            {
+                ["id"] = hostId,
+                ["name"] = host.Name,
+                ["role"] = "Host",
+                ["status"] = "Offline",
+                ["endpoint"] = host.Endpoint,
+                ["activeTasks"] = 0,
+                ["skills"] = new JsonArray()
+            });
+            edges.Add(new JsonObject { ["source"] = overseerId, ["target"] = hostId });
+        }
+
+        return Results.Json(new JsonObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges
+        });
+    }
+
+    private static async Task<IResult> AggregateArrays(
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        string path,
+        bool mapWorkers,
+        CancellationToken ct)
+    {
+        var payloads = await FetchAll(locator, hosts, httpFactory, path, ct);
+        var result = new JsonArray();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var payload in payloads)
+        {
+            if (payload.Json is not JsonArray array)
+                continue;
+
+            foreach (var item in array.OfType<JsonObject>())
+            {
+                var id = StringProperty(item, "id");
+                if (id is not null && !seen.Add(id))
+                    continue;
+                if (mapWorkers && id is not null)
+                    hosts.MapWorker(id, payload.Endpoint);
+                result.Add(item.DeepClone());
+            }
+        }
+
+        return Results.Json(result);
+    }
+
+    private static async Task<IResult> ProxyWorker(
+        string workerId,
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken ct)
+    {
+        var endpoint = hosts.HostForWorker(workerId);
+        if (endpoint is null)
+        {
+            await RefreshWorkerIndex(locator, hosts, httpFactory, ct);
+            endpoint = hosts.HostForWorker(workerId);
+        }
+
+        if (endpoint is null)
+            return Results.NotFound(new { error = "worker is not mapped to a known host" });
+        return await ProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+    }
+
+    private static async Task RefreshWorkerIndex(
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+    {
+        var payloads = await FetchAll(locator, hosts, httpFactory, "/api/nodes", ct);
+        foreach (var payload in payloads)
+        {
+            if (payload.Json is not JsonArray nodes)
+                continue;
+            foreach (var node in nodes.OfType<JsonObject>())
+            {
+                if (StringProperty(node, "id") is { } id)
+                    hosts.MapWorker(id, payload.Endpoint);
+            }
+        }
+    }
+
+    private static Task<IResult> ProxyPrimary(
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken ct)
+    {
+        var endpoint = locator.HostEndpoint ?? hosts.PrimaryEndpoint;
+        return endpoint is null
+            ? Task.FromResult<IResult>(Results.Problem("host not yet discovered"))
+            : ProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+    }
+
+    private static async Task<IResult> ProxyEndpoint(
+        string endpoint,
+        IHttpClientFactory httpFactory,
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken ct)
+    {
+        try
+        {
+            var client = httpFactory.CreateClient("cluster");
+            client.Timeout = TimeSpan.FromSeconds(15);
+            using var request = new HttpRequestMessage(method, $"{endpoint.TrimEnd('/')}{path}");
+            if (body is not null)
+                request.Content = JsonContent.Create(body);
+            using var response = await client.SendAsync(request, ct);
+            var content = await response.Content.ReadAsStringAsync(ct);
+            var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+            return Results.Content(content, contentType, statusCode: (int)response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
+    private static async Task<IReadOnlyList<HostPayload>> FetchAll(
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        string path,
+        CancellationToken ct)
+    {
+        var endpoints = hosts.All
+            .Select(host => host.Endpoint)
+            .Append(locator.HostEndpoint ?? "")
+            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var tasks = endpoints.Select(endpoint =>
+            Fetch(endpoint, httpFactory, path, ct));
+        return await Task.WhenAll(tasks);
+    }
+
+    private static async Task<HostPayload> Fetch(
+        string endpoint,
+        IHttpClientFactory httpFactory,
+        string path,
+        CancellationToken ct)
+    {
+        try
+        {
+            var client = httpFactory.CreateClient("cluster");
+            client.Timeout = TimeSpan.FromSeconds(4);
+            var json = await client.GetStringAsync($"{endpoint.TrimEnd('/')}{path}", ct);
+            return new HostPayload(endpoint.TrimEnd('/'), JsonNode.Parse(json));
+        }
+        catch
+        {
+            return new HostPayload(endpoint.TrimEnd('/'), null);
+        }
+    }
+
+    private static string? StringProperty(JsonObject value, string property) =>
+        value[property]?.GetValue<string>();
+
+    private static string Esc(string value) => Uri.EscapeDataString(value);
+}

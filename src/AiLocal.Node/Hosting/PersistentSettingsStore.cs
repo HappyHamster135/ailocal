@@ -1,0 +1,432 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using AiLocal.Core.Configuration;
+using AiLocal.Core.Roles;
+using Microsoft.AspNetCore.DataProtection;
+
+namespace AiLocal.Node.Hosting;
+
+public sealed record SettingsUpdate(
+    string? NodeName = null,
+    string? HostEndpoint = null,
+    bool? DiscoveryEnabled = null,
+    List<string>? Skills = null,
+    int? MaxConcurrentTasks = null,
+    string? ClusterToken = null,
+    bool ClearClusterToken = false,
+    bool RegenerateClusterToken = false,
+    string? OperatorToken = null,
+    bool ClearOperatorToken = false,
+    bool RegenerateOperatorToken = false,
+    bool? StartWithWindows = null,
+    List<string>? ProviderPriority = null,
+    string? AnthropicModel = null,
+    string? GeminiModel = null,
+    string? OllamaModel = null,
+    string? OllamaEndpoint = null,
+    int? MaxTokens = null,
+    bool? AutoPullOllamaModel = null,
+    string? AnthropicApiKey = null,
+    string? GeminiApiKey = null,
+    bool ClearAnthropicApiKey = false,
+    bool ClearGeminiApiKey = false);
+
+internal sealed class StoredNodeSettings
+{
+    public string? NodeId { get; set; }
+    public string? NodeName { get; set; }
+    public string? HostEndpoint { get; set; }
+    public bool DiscoveryEnabled { get; set; } = true;
+    public List<string> Skills { get; set; } = ["general"];
+    public int MaxConcurrentTasks { get; set; } = 1;
+    public string? ProtectedClusterToken { get; set; }
+    public string? ProtectedOperatorToken { get; set; }
+    public bool StartWithWindows { get; set; }
+    public List<string> ProviderPriority { get; set; } = ["anthropic", "gemini", "ollama"];
+    public string AnthropicModel { get; set; } = "claude-opus-4-8";
+    public string GeminiModel { get; set; } = "gemini-2.5-flash";
+    public string? OllamaModel { get; set; }
+    public string OllamaEndpoint { get; set; } = "http://localhost:11434";
+    public int MaxTokens { get; set; } = 4096;
+    public bool AutoPullOllamaModel { get; set; }
+    public string? ProtectedAnthropicApiKey { get; set; }
+    public string? ProtectedGeminiApiKey { get; set; }
+}
+
+public static class SettingsPaths
+{
+    public static string DataDirectory =>
+        Environment.GetEnvironmentVariable("AILOCAL_DATA_DIR")
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiLocal");
+
+    public static string SettingsFile(NodeRole role) =>
+        Path.Combine(DataDirectory, $"{role.ToString().ToLowerInvariant()}.settings.json");
+}
+
+public sealed class PersistentSettingsStore
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
+    private readonly object _gate = new();
+    private readonly NodeSettings _settings;
+    private readonly IDataProtector _protector;
+    private StoredNodeSettings _stored;
+
+    public PersistentSettingsStore(NodeSettings settings, IDataProtectionProvider dataProtection)
+    {
+        _settings = settings;
+        _protector = dataProtection.CreateProtector("AiLocal.ProviderCredentials.v1");
+        _stored = ReadStored(settings.Role);
+        if (string.IsNullOrWhiteSpace(_stored.NodeId))
+        {
+            _stored.NodeId = Guid.NewGuid().ToString("n")[..8];
+
+            // First run only: adopt a token passed in from a co-located launch
+            // (Quickstart), or - for a brand-new Host - mint one automatically so
+            // the cluster is paired-by-default instead of open to the whole LAN.
+            if (!string.IsNullOrWhiteSpace(settings.SeedClusterToken))
+                _stored.ProtectedClusterToken = _protector.Protect(settings.SeedClusterToken.Trim());
+            else if (settings.Role == NodeRole.Host)
+                _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());
+
+            CopyCurrentIntoStored();
+            Save();
+        }
+
+        ApplyAutoStart();
+    }
+
+    private static string GenerateToken() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+
+    public static void LoadInto(NodeSettings settings)
+    {
+        var stored = ReadStored(settings.Role);
+        if (!string.IsNullOrWhiteSpace(stored.NodeName))
+            settings.NodeName = stored.NodeName;
+
+        settings.HostEndpoint = stored.HostEndpoint;
+        settings.Discovery.Enabled = stored.DiscoveryEnabled;
+        settings.Worker.Skills = NormalizeSkills(stored.Skills);
+        settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
+        settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
+        settings.Providers.DefaultModel = stored.AnthropicModel;
+        settings.Providers.GeminiModel = stored.GeminiModel;
+        settings.Providers.OllamaModel = stored.OllamaModel;
+        settings.Providers.OllamaEndpoint = stored.OllamaEndpoint;
+        settings.Providers.MaxTokens = stored.MaxTokens;
+        settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
+    }
+
+    public object Read()
+    {
+        lock (_gate)
+        {
+            return new
+            {
+                nodeName = _settings.NodeName,
+                hostEndpoint = _settings.HostEndpoint,
+                discoveryEnabled = _settings.Discovery.Enabled,
+                skills = _settings.Worker.Skills,
+                maxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
+                clusterTokenConfigured = HasClusterToken(),
+                clusterToken = GetClusterToken(),
+                operatorTokenConfigured = HasOperatorToken(),
+                operatorToken = GetOperatorToken(),
+                startWithWindows = _stored.StartWithWindows,
+                startWithWindowsSupported = AutoStartManager.IsSupported,
+                providerPriority = _settings.Providers.Priority,
+                anthropicModel = _settings.Providers.DefaultModel,
+                geminiModel = _settings.Providers.GeminiModel,
+                ollamaModel = _settings.Providers.OllamaModel,
+                ollamaEndpoint = _settings.Providers.OllamaEndpoint,
+                maxTokens = _settings.Providers.MaxTokens,
+                autoPullOllamaModel = _settings.Installer.AutoPullOllamaModel,
+                anthropicKeyConfigured = HasKey("anthropic"),
+                geminiKeyConfigured = HasKey("gemini"),
+                settingsPath = SettingsPaths.SettingsFile(_settings.Role)
+            };
+        }
+    }
+
+    public string NodeId
+    {
+        get
+        {
+            lock (_gate)
+                return _stored.NodeId!;
+        }
+    }
+
+    public object Update(SettingsUpdate update, HostLocator hostLocator)
+    {
+        lock (_gate)
+        {
+            if (update.NodeName is not null)
+            {
+                var value = update.NodeName.Trim();
+                if (value.Length is < 1 or > 80)
+                    throw new ArgumentException("Node name must contain 1-80 characters.");
+                _settings.NodeName = value;
+            }
+
+            if (update.HostEndpoint is not null)
+            {
+                var value = NormalizeEndpoint(update.HostEndpoint);
+                _settings.HostEndpoint = value;
+                hostLocator.HostEndpoint = value;
+            }
+
+            if (update.DiscoveryEnabled.HasValue)
+                _settings.Discovery.Enabled = update.DiscoveryEnabled.Value;
+
+            if (update.Skills is not null)
+                _settings.Worker.Skills = NormalizeSkills(update.Skills);
+
+            if (update.MaxConcurrentTasks.HasValue)
+            {
+                if (update.MaxConcurrentTasks.Value is < 1 or > 32)
+                    throw new ArgumentException("Max concurrent tasks must be between 1 and 32.");
+                _settings.Worker.MaxConcurrentTasks = update.MaxConcurrentTasks.Value;
+            }
+
+            if (update.RegenerateClusterToken)
+                _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());
+            else if (update.ClearClusterToken)
+                _stored.ProtectedClusterToken = null;
+            else if (!string.IsNullOrWhiteSpace(update.ClusterToken))
+            {
+                var token = update.ClusterToken.Trim();
+                if (token.Length < 16)
+                    throw new ArgumentException("Cluster token must contain at least 16 characters.");
+                _stored.ProtectedClusterToken = _protector.Protect(token);
+            }
+
+            if (update.RegenerateOperatorToken)
+                _stored.ProtectedOperatorToken = _protector.Protect(GenerateToken());
+            else if (update.ClearOperatorToken)
+                _stored.ProtectedOperatorToken = null;
+            else if (!string.IsNullOrWhiteSpace(update.OperatorToken))
+            {
+                var token = update.OperatorToken.Trim();
+                if (token.Length < 16)
+                    throw new ArgumentException("Operator token must contain at least 16 characters.");
+                _stored.ProtectedOperatorToken = _protector.Protect(token);
+            }
+
+            if (update.StartWithWindows.HasValue)
+                _stored.StartWithWindows = update.StartWithWindows.Value;
+
+            if (update.ProviderPriority is not null)
+                _settings.Providers.Priority = ProviderOrderApi.Normalize(update.ProviderPriority);
+
+            if (update.AnthropicModel is not null)
+                _settings.Providers.DefaultModel = Required(update.AnthropicModel, "Claude model");
+            if (update.GeminiModel is not null)
+                _settings.Providers.GeminiModel = Required(update.GeminiModel, "Gemini model");
+            if (update.OllamaModel is not null)
+                _settings.Providers.OllamaModel = NullIfWhiteSpace(update.OllamaModel);
+            if (update.OllamaEndpoint is not null)
+                _settings.Providers.OllamaEndpoint = RequiredEndpoint(update.OllamaEndpoint, "Ollama endpoint");
+
+            if (update.MaxTokens.HasValue)
+            {
+                if (update.MaxTokens.Value is < 128 or > 131072)
+                    throw new ArgumentException("Max tokens must be between 128 and 131072.");
+                _settings.Providers.MaxTokens = update.MaxTokens.Value;
+            }
+
+            if (update.AutoPullOllamaModel.HasValue)
+                _settings.Installer.AutoPullOllamaModel = update.AutoPullOllamaModel.Value;
+
+            if (update.ClearAnthropicApiKey)
+                _stored.ProtectedAnthropicApiKey = null;
+            else if (!string.IsNullOrWhiteSpace(update.AnthropicApiKey))
+                _stored.ProtectedAnthropicApiKey = _protector.Protect(update.AnthropicApiKey.Trim());
+
+            if (update.ClearGeminiApiKey)
+                _stored.ProtectedGeminiApiKey = null;
+            else if (!string.IsNullOrWhiteSpace(update.GeminiApiKey))
+                _stored.ProtectedGeminiApiKey = _protector.Protect(update.GeminiApiKey.Trim());
+
+            CopyCurrentIntoStored();
+            Save();
+            ApplyAutoStart();
+            return Read();
+        }
+    }
+
+    private void ApplyAutoStart()
+    {
+        if (!AutoStartManager.IsSupported)
+            return;
+
+        try
+        {
+            if (_stored.StartWithWindows)
+                AutoStartManager.Enable(_settings);
+            else
+                AutoStartManager.Disable(_settings.Role);
+        }
+        catch
+        {
+            // Best-effort only - a registry failure should never block settings.
+        }
+    }
+
+    public string? GetApiKey(string provider)
+    {
+        lock (_gate)
+        {
+            var environmentName = provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                ? "ANTHROPIC_API_KEY"
+                : provider.Equals("gemini", StringComparison.OrdinalIgnoreCase)
+                    ? "GEMINI_API_KEY"
+                    : null;
+
+            if (environmentName is not null &&
+                Environment.GetEnvironmentVariable(environmentName) is { Length: > 0 } environmentValue)
+                return environmentValue;
+
+            var protectedValue = provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                ? _stored.ProtectedAnthropicApiKey
+                : provider.Equals("gemini", StringComparison.OrdinalIgnoreCase)
+                    ? _stored.ProtectedGeminiApiKey
+                    : null;
+
+            if (string.IsNullOrWhiteSpace(protectedValue))
+                return null;
+
+            try { return _protector.Unprotect(protectedValue); }
+            catch { return null; }
+        }
+    }
+
+    public string? GetClusterToken()
+    {
+        lock (_gate)
+        {
+            if (Environment.GetEnvironmentVariable("AILOCAL_CLUSTER_TOKEN") is { Length: > 0 } environmentValue)
+                return environmentValue;
+
+            if (string.IsNullOrWhiteSpace(_stored.ProtectedClusterToken))
+                return null;
+
+            try { return _protector.Unprotect(_stored.ProtectedClusterToken); }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>
+    /// Lower-privilege token: can submit/view goals, chat, and cancel tasks, but
+    /// cannot remove/restore nodes, change settings, run worker setup, or manage
+    /// the admin (cluster) token itself. See ClusterSecurity.RequiresAdminTier.
+    /// </summary>
+    public string? GetOperatorToken()
+    {
+        lock (_gate)
+        {
+            if (Environment.GetEnvironmentVariable("AILOCAL_OPERATOR_TOKEN") is { Length: > 0 } environmentValue)
+                return environmentValue;
+
+            if (string.IsNullOrWhiteSpace(_stored.ProtectedOperatorToken))
+                return null;
+
+            try { return _protector.Unprotect(_stored.ProtectedOperatorToken); }
+            catch { return null; }
+        }
+    }
+
+    private bool HasClusterToken() => !string.IsNullOrWhiteSpace(GetClusterToken());
+
+    private bool HasOperatorToken() => !string.IsNullOrWhiteSpace(GetOperatorToken());
+
+    private bool HasKey(string provider) => !string.IsNullOrWhiteSpace(GetApiKey(provider));
+
+    private void CopyCurrentIntoStored()
+    {
+        _stored.NodeName = _settings.NodeName;
+        _stored.HostEndpoint = _settings.HostEndpoint;
+        _stored.DiscoveryEnabled = _settings.Discovery.Enabled;
+        _stored.Skills = [.. _settings.Worker.Skills];
+        _stored.MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks;
+        // StartWithWindows and the cluster token are edited only through Update() -
+        // do not overwrite them from NodeSettings here (NodeSettings has no field
+        // for them, so this stays intentionally silent about that pair).
+        _stored.ProviderPriority = [.. _settings.Providers.Priority];
+        _stored.AnthropicModel = _settings.Providers.DefaultModel;
+        _stored.GeminiModel = _settings.Providers.GeminiModel;
+        _stored.OllamaModel = _settings.Providers.OllamaModel;
+        _stored.OllamaEndpoint = _settings.Providers.OllamaEndpoint;
+        _stored.MaxTokens = _settings.Providers.MaxTokens;
+        _stored.AutoPullOllamaModel = _settings.Installer.AutoPullOllamaModel;
+    }
+
+    private void Save()
+    {
+        Directory.CreateDirectory(SettingsPaths.DataDirectory);
+        var settingsFile = SettingsPaths.SettingsFile(_settings.Role);
+        var temporary = settingsFile + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(_stored, JsonOptions));
+        File.Move(temporary, settingsFile, true);
+    }
+
+    private static StoredNodeSettings ReadStored(NodeRole role)
+    {
+        try
+        {
+            var settingsFile = SettingsPaths.SettingsFile(role);
+            if (!File.Exists(settingsFile))
+                return new StoredNodeSettings();
+
+            return JsonSerializer.Deserialize<StoredNodeSettings>(
+                File.ReadAllText(settingsFile), JsonOptions) ?? new StoredNodeSettings();
+        }
+        catch
+        {
+            return new StoredNodeSettings();
+        }
+    }
+
+    private static string Required(string value, string label) =>
+        !string.IsNullOrWhiteSpace(value) ? value.Trim() : throw new ArgumentException($"{label} is required.");
+
+    private static string? NullIfWhiteSpace(string value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeEndpoint(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        return RequiredEndpoint(value, "Host endpoint");
+    }
+
+    private static string RequiredEndpoint(string value, string label)
+    {
+        var trimmed = value.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            throw new ArgumentException($"{label} must be an http or https URL.");
+        return trimmed;
+    }
+
+    private static List<string> NormalizeSkills(IEnumerable<string>? skills)
+    {
+        var normalized = (skills ?? [])
+            .SelectMany(skill => skill.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(skill => skill.Trim().ToLowerInvariant())
+            .Where(skill => skill.Length is > 0 and <= 40)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        if (normalized.Count == 0)
+            normalized.Add("general");
+
+        return normalized;
+    }
+}
