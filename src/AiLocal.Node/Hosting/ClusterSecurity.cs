@@ -143,6 +143,10 @@ public static class ClusterSecurity
             string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        if (path.StartsWithSegments("/api/hosts") &&
+            string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         return false;
     }
 

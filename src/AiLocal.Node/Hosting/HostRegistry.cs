@@ -90,6 +90,24 @@ public sealed class HostRegistry
     public string? HostForWorker(string workerId) =>
         _workerHosts.TryGetValue(workerId, out var endpoint) ? endpoint : null;
 
+    /// <summary>Forgets a Host this Overseer has seen (by its "host-{id}" or
+    /// raw id). Lets an operator clean up a stale entry from an old test
+    /// setup or reconfiguration - there's no automatic expiry, since a Host
+    /// that's merely offline right now (network blip, machine asleep) should
+    /// still show up once it's back, not silently vanish.</summary>
+    public bool Remove(string id)
+    {
+        var raw = id.StartsWith("host-", StringComparison.OrdinalIgnoreCase) ? id[5..] : id;
+        var match = _hosts.FirstOrDefault(pair => pair.Value.Id.Equals(raw, StringComparison.OrdinalIgnoreCase));
+        if (match.Key is null)
+            return false;
+
+        var removed = _hosts.TryRemove(match.Key, out _);
+        if (removed)
+            Save(force: true);
+        return removed;
+    }
+
     private void Upsert(string id, string name, string endpoint, bool isExplicit)
     {
         var normalized = NormalizeEndpoint(endpoint);

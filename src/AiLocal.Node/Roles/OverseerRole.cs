@@ -25,6 +25,8 @@ public static class OverseerRole
             hosts = hosts.All
         }));
         app.MapGet("/api/hosts", (HostRegistry hosts) => Results.Ok(hosts.All));
+        app.MapDelete("/api/hosts/{id}", (string id, HostRegistry hosts) =>
+            hosts.Remove(id) ? Results.NoContent() : Results.NotFound());
 
         app.MapGet("/api/nodes", AggregateNodes);
         app.MapGet("/api/topology", AggregateTopology);
@@ -292,7 +294,7 @@ public static class OverseerRole
         }
     }
 
-    private static Task<IResult> ProxyPrimary(
+    private static async Task<IResult> ProxyPrimary(
         HostLocator locator,
         HostRegistry hosts,
         IHttpClientFactory httpFactory,
@@ -301,13 +303,51 @@ public static class OverseerRole
         object? body,
         CancellationToken ct)
     {
-        var endpoint = locator.HostEndpoint ?? hosts.PrimaryEndpoint;
-        return endpoint is null
-            ? Task.FromResult<IResult>(Results.Problem("host not yet discovered"))
-            : ProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+        // locator.HostEndpoint only ever gets set ONCE - the first Host
+        // beacon this Overseer ever saw (see ClusterHostedService.OnBeacon) -
+        // and never updates again, so betting solely on it can permanently
+        // stick to a Host that's since gone away or been reconfigured.
+        // hosts.All is ordered most-recently-seen first and self-updates on
+        // every beacon, so it's a much better signal for "which Host is
+        // actually alive right now" - try it first, and only fall back to
+        // the sticky locator endpoint (useful for an explicitly-configured,
+        // cross-subnet Host that LAN discovery would never see) if needed.
+        var candidates = hosts.All
+            .Select(h => h.Endpoint)
+            .Append(locator.HostEndpoint ?? "")
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (candidates.Count == 0)
+            return Results.Problem("host not yet discovered");
+
+        IResult? lastResult = null;
+        foreach (var endpoint in candidates)
+        {
+            var (reached, result) = await TryProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+            if (reached)
+                return result;
+            lastResult = result;
+        }
+
+        return lastResult!;
     }
 
     private static async Task<IResult> ProxyEndpoint(
+        string endpoint,
+        IHttpClientFactory httpFactory,
+        HttpMethod method,
+        string path,
+        object? body,
+        CancellationToken ct) =>
+        (await TryProxyEndpoint(endpoint, httpFactory, method, path, body, ct)).Result;
+
+    /// <summary>Reached=true means the target answered (even a non-2xx status
+    /// is a real answer worth relaying to the caller); Reached=false means the
+    /// connection itself failed, so a multi-candidate caller should try the
+    /// next endpoint instead of giving up.</summary>
+    private static async Task<(bool Reached, IResult Result)> TryProxyEndpoint(
         string endpoint,
         IHttpClientFactory httpFactory,
         HttpMethod method,
@@ -325,11 +365,11 @@ public static class OverseerRole
             using var response = await client.SendAsync(request, ct);
             var content = await response.Content.ReadAsStringAsync(ct);
             var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
-            return Results.Content(content, contentType, statusCode: (int)response.StatusCode);
+            return (true, Results.Content(content, contentType, statusCode: (int)response.StatusCode));
         }
         catch (Exception ex)
         {
-            return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+            return (false, Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway));
         }
     }
 

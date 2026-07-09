@@ -928,7 +928,9 @@ internal static class Dashboard
           discoveredWorkers: [],
           pairingInbound: [],
           pairingConnecting: new Set(),
-          pairingErrors: {}
+          pairingErrors: {},
+          pairingResponding: new Set(),
+          pairingRequestErrors: {}
         };
 
         const $ = id => document.getElementById(id);
@@ -1147,17 +1149,24 @@ internal static class Dashboard
             box.innerHTML = '';
             return;
           }
-          box.innerHTML = state.pairingInbound.map(r => `
+          box.innerHTML = state.pairingInbound.map(r => {
+            const busy = state.pairingResponding.has(r.requesterId);
+            const error = state.pairingRequestErrors[r.requesterId];
+            return `
             <div class="pairing-card">
               <div>
                 <strong>${esc(r.requesterName)}</strong> vill ansluta den här datorn till sitt kluster.
                 <div class="small mono">${esc(r.requesterEndpoint)}</div>
+                ${error ? `<div class="small" style="color:var(--bad)">${esc(error)}</div>` : ''}
               </div>
               <div class="detail-actions">
-                <button class="primary" data-accept-pairing="${esc(r.requesterId)}">Anslut</button>
-                <button data-reject-pairing="${esc(r.requesterId)}">Avvisa</button>
+                <button class="primary" data-accept-pairing="${esc(r.requesterId)}" ${busy ? 'disabled' : ''}>
+                  ${busy ? 'Ansluter...' : (error ? 'Försök igen' : 'Anslut')}
+                </button>
+                <button data-reject-pairing="${esc(r.requesterId)}" ${busy ? 'disabled' : ''}>Avvisa</button>
               </div>
-            </div>`).join('');
+            </div>`;
+          }).join('');
 
           document.querySelectorAll('[data-accept-pairing]').forEach(button => {
             button.onclick = () => respondToPairingRequest(button.dataset.acceptPairing, true);
@@ -1169,13 +1178,22 @@ internal static class Dashboard
 
         async function respondToPairingRequest(hostId, accept) {
           const path = accept ? 'accept' : 'reject';
+          delete state.pairingRequestErrors[hostId];
+          state.pairingResponding.add(hostId);
+          renderPairingRequests();
           try {
             await fetchJson(`/pairing/pending/${hostId}/${path}`, { method: 'POST' });
+            state.pairingResponding.delete(hostId);
             state.pairingInbound = state.pairingInbound.filter(r => r.requesterId !== hostId);
             renderPairingRequests();
             if (accept) await refresh();
           } catch (error) {
-            showComposerNotice(error.message, true);
+            // Surfaced right on the request card, not the chat composer's
+            // notice - that's hidden entirely on a Worker's dashboard (no
+            // /api/chat here), so an error shown there would be invisible.
+            state.pairingResponding.delete(hostId);
+            state.pairingRequestErrors[hostId] = error.message;
+            renderPairingRequests();
           }
         }
 
@@ -1355,6 +1373,11 @@ internal static class Dashboard
           $('topologyDetailSub').textContent = `${graphNode.role} | ${graphNode.status}`;
           const worker = state.nodes.find(node => node.id === graphNode.id);
           if (!worker) {
+            // A Host that's been reconfigured or torn down during testing
+            // stays listed forever otherwise (no automatic expiry, since a
+            // merely-offline Host should keep showing up once it's back) -
+            // give the operator a way to forget it.
+            const canForget = graphNode.role === 'Host';
             $('topologyDetail').innerHTML = `
               <section class="detail-section">
                 <div class="kv">
@@ -1362,7 +1385,11 @@ internal static class Dashboard
                   <div class="kv-row"><span>Status</span><span>${esc(graphNode.status)}</span></div>
                   <div class="kv-row"><span>Endpoint</span><span class="mono">${esc(graphNode.endpoint || '-')}</span></div>
                 </div>
+                ${canForget ? `<div class="detail-actions"><button id="topologyForgetHostBtn">Glöm den här Host</button></div>` : ''}
               </section>`;
+            if (canForget) {
+              $('topologyForgetHostBtn').onclick = () => forgetHost(graphNode.id, graphNode.name);
+            }
             return;
           }
 
@@ -1517,6 +1544,18 @@ internal static class Dashboard
             await refresh();
           } catch (error) {
             showNodeAction(error.message, true);
+          }
+        }
+
+        async function forgetHost(id, name) {
+          if (!window.confirm(`Glöm ${name}? Den dyker upp igen om den hörs av på nätverket.`))
+            return;
+          try {
+            await fetchJson(`/api/hosts/${id}`, { method: 'DELETE' });
+            state.selectedTopologyId = null;
+            await refresh();
+          } catch (error) {
+            $('topologyDetailSub').textContent = error.message;
           }
         }
 
