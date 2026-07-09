@@ -93,14 +93,21 @@ public static class NodeWebHost
         // certificate warning). An additive HTTPS listener with a self-signed,
         // auto-generated certificate is used for node-to-node cluster traffic
         // when enabled - see TlsSettings for what this does and does not buy.
-        var httpsPort = settings.Port + settings.Tls.PortOffset;
+        //
+        // The desktop app's Launcher role binds an OS-assigned ephemeral port
+        // (see AiLocal.App/Program.cs GetFreeTcpPort), which can land anywhere
+        // up to 65535 - adding PortOffset can then overflow the valid TCP port
+        // range (0-65535) and crash Kestrel at startup. HttpsPortFor returns
+        // null in that case; skip the HTTPS listener rather than crash - the
+        // plain-HTTP listener still always works.
+        var httpsPort = settings.Tls.HttpsPortFor(settings.Port);
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.ListenAnyIP(settings.Port);
-            if (settings.Tls.Enabled)
+            if (httpsPort is { } port)
             {
                 var cert = TlsCertificateManager.GetOrCreate(settings.NodeName);
-                kestrel.ListenAnyIP(httpsPort, listen => listen.UseHttps(cert));
+                kestrel.ListenAnyIP(port, listen => listen.UseHttps(cert));
             }
         });
 

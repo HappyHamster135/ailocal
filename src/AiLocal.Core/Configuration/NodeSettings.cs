@@ -127,4 +127,17 @@ public sealed class TlsSettings
 
     /// <summary>HTTPS port = Port + Offset.</summary>
     public int PortOffset { get; set; } = 10000;
+
+    /// <summary>
+    /// The HTTPS port for <paramref name="port"/>, or null if TLS is disabled
+    /// or the sum would fall outside the valid TCP port range (0-65535) - e.g.
+    /// the desktop app's Launcher role binds an OS-assigned ephemeral port,
+    /// which can be high enough that adding PortOffset overflows. Callers must
+    /// treat null as "no HTTPS for this node" rather than binding/advertising
+    /// an invalid port.
+    /// </summary>
+    public int? HttpsPortFor(int port) =>
+        Enabled && port > 0 && port + PortOffset is > 0 and <= 65535
+            ? port + PortOffset
+            : null;
 }

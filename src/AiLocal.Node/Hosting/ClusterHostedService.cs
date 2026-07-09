@@ -48,8 +48,8 @@ public sealed class ClusterHostedService : BackgroundService
 
     private string SelfEndpoint => $"http://{NetworkUtil.LocalIPv4()}:{_settings.Port}";
 
-    private string? SelfTlsEndpoint => _settings.Tls.Enabled
-        ? $"https://{NetworkUtil.LocalIPv4()}:{_settings.Port + _settings.Tls.PortOffset}"
+    private string? SelfTlsEndpoint => _settings.Tls.HttpsPortFor(_settings.Port) is { } port
+        ? $"https://{NetworkUtil.LocalIPv4()}:{port}"
         : null;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
