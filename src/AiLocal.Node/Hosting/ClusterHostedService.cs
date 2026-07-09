@@ -19,6 +19,7 @@ public sealed class ClusterHostedService : BackgroundService
     private readonly LocalModelRecommendation _recommendation;
     private readonly HostLocator _hostLocator;
     private readonly HostRegistry _hostRegistry;
+    private readonly PairingCoordinator _pairing;
     private readonly RegistrationStatus _registrationStatus;
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<ClusterHostedService> _log;
@@ -31,6 +32,7 @@ public sealed class ClusterHostedService : BackgroundService
         PersistentSettingsStore settingsStore,
         HostLocator hostLocator,
         HostRegistry hostRegistry,
+        PairingCoordinator pairing,
         RegistrationStatus registrationStatus,
         IHttpClientFactory httpFactory,
         ILogger<ClusterHostedService> log)
@@ -41,6 +43,7 @@ public sealed class ClusterHostedService : BackgroundService
         _nodeId = settingsStore.NodeId;
         _hostLocator = hostLocator;
         _hostRegistry = hostRegistry;
+        _pairing = pairing;
         _registrationStatus = registrationStatus;
         _httpFactory = httpFactory;
         _log = log;
@@ -69,12 +72,24 @@ public sealed class ClusterHostedService : BackgroundService
             case NodeRole.Host:
                 _log.LogInformation("Host announcing at {Endpoint}", SelfEndpoint);
                 if (_settings.Discovery.Enabled)
+                {
+                    // Also listen, not just announce: a Host needs to see
+                    // unpaired Workers' own beacons for the click-to-pair flow
+                    // (PairingCoordinator/HostRole's "discovered workers" list).
+                    _ = discovery.ListenAsync(OnBeacon, ct);
                     await discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct);
+                }
                 break;
 
             case NodeRole.Worker:
                 if (_settings.Discovery.Enabled)
+                {
                     _ = discovery.ListenAsync(OnBeacon, ct);
+                    // A Worker announces itself too (not just listens for the
+                    // Host), so a Host that doesn't have it registered yet can
+                    // still discover and offer to pair with it.
+                    _ = discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct);
+                }
                 await RegisterLoopAsync(ct);
                 break;
 
@@ -87,6 +102,9 @@ public sealed class ClusterHostedService : BackgroundService
 
     private void OnBeacon(DiscoveryBeacon beacon)
     {
+        if (beacon.NodeId != _nodeId)
+            _pairing.NoteDiscovered(beacon);
+
         if (beacon.Role == NodeRole.Host && _hostLocator.HostEndpoint is null)
         {
             _hostLocator.HostEndpoint = beacon.Endpoint;

@@ -55,6 +55,7 @@ The current version is intentionally small, but it already has the core shape:
 - Two-tier cluster tokens: an admin token (full control) and an optional operator token (submit/view goals, chat, cancel - no node management or settings).
 - Cross-platform Worker engine: `AiLocal.Core`/`AiLocal.Node` build and run on Linux/macOS too, including an automatic Ollama install path for each OS (Windows via winget/installer, Linux via the official install script, macOS via Homebrew). The desktop shell (`AiLocal.App`) is Windows-only.
 - Automated tests (`tests/AiLocal.Core.Tests`) and a GitHub Actions CI workflow that builds and tests on both Windows and Linux.
+- Click-to-pair: a Host lists Workers it sees on the LAN before they're even paired; connecting requires an explicit click on both sides, and the cluster token is only exchanged after both have agreed - no copy-pasting required for same-LAN setups.
 
 ## Build
 
@@ -186,12 +187,16 @@ This lets Host and Worker run on the same computer without overwriting each othe
 
 A fresh Host generates its own cluster token automatically the first time it runs - the cluster is paired, not open, by default. Node-to-node endpoints (registration, task dispatch, runtime control) always require that token; each computer can still reach its own local dashboard without it.
 
-To add a Worker or Overseer on another computer:
+### Click-to-pair (recommended, no typing)
+
+If the Host and Worker are on the same LAN, they can find each other automatically: a Host lists every not-yet-paired Worker it sees broadcasting on the network under "Upptäckta enheter" in the Cluster panel. Click **Anslut** next to one, and that Worker's own dashboard shows a "Host X vill ansluta" banner with **Anslut**/**Avvisa** buttons. Nothing is trusted until *both* sides click - no token to copy or type. Under the hood: the Host sends a connect request with a random one-time nonce; the cluster token is only ever handed to the Worker after it echoes that nonce back, which only happens once its own operator approves.
+
+### Manual pairing (cross-subnet, or when discovery doesn't reach)
 
 1. On the Host, open `Inställningar` -> `Klustersäkerhet` and copy the current cluster token (there's a show/hide toggle and a Copy button).
 2. On the new node, open `Inställningar` and paste the token into "Klistra in en nyckel för att para ihop den här noden", or paste it into the "Klusternyckel" field before clicking `Worker`/`Overseer` to launch it.
 
-Starting a Worker via the Launcher's one-click **Quickstart** button skips this step entirely - the Launcher fetches the freshly-generated token from the Host it just started and hands it to the co-located Worker automatically.
+Starting a Worker via the Launcher's one-click **Quickstart** button skips both of these entirely - the Launcher fetches the freshly-generated token from the Host it just started and hands it to the co-located Worker automatically.
 
 Rotate the token any time with `Generera ny` in Settings; every node still using the old token is rejected until it is updated. The token is encrypted at rest and never appears in logs. It can also be set via environment variable or CLI flag (useful for scripted/unattended launches), both of which take priority over the stored value:
 

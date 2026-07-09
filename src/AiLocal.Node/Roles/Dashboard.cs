@@ -483,6 +483,19 @@ internal static class Dashboard
         .hist-body { padding: 8px 10px 10px; border-top: 1px solid var(--line); white-space: pre-wrap; }
         .hist-body .small { margin-bottom: 6px; }
         .chain { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+        .pairing-card {
+          border: 1px solid var(--accent);
+          border-radius: 7px;
+          padding: 10px 12px;
+          margin-top: 10px;
+          background: var(--surface-active);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .pairing-card .detail-actions { margin-top: 0; }
         .notice {
           min-height: 38px;
           padding: 9px 10px;
@@ -588,6 +601,7 @@ internal static class Dashboard
         </header>
 
         <div style="padding:0 14px">
+          <div id="pairingRequests"></div>
           <div class="notice" id="firstRunBanner" style="margin-top:10px"></div>
           <div class="notice" id="updateBanner" style="margin-top:10px"></div>
         </div>
@@ -622,6 +636,10 @@ internal static class Dashboard
                 <div class="launch-result" id="launchResult"></div>
               </div>
               <div class="node-list" id="nodes"></div>
+              <div class="detail-section" id="discoveredWorkersSection" style="display:none;margin-top:12px">
+                <div class="panel-title" style="margin-bottom:8px">Upptäckta enheter (ej anslutna)</div>
+                <div class="node-list" id="discoveredWorkers"></div>
+              </div>
             </div>
           </aside>
 
@@ -905,7 +923,10 @@ internal static class Dashboard
           streamUnavailable: new Set(),
           updateInfo: null,
           firstRunDismissed: false,
-          authToken: null
+          authToken: null,
+          discoveredWorkers: [],
+          pairingInbound: [],
+          pairingConnecting: new Set()
         };
 
         const $ = id => document.getElementById(id);
@@ -1059,6 +1080,93 @@ internal static class Dashboard
             };
           });
           renderInspector();
+        }
+
+        // Click-to-pair, no typing: a Host sees Workers on the LAN before
+        // they're registered (via beacon) and can request to connect with one
+        // click; the Worker's own operator must still accept it on their side
+        // (see renderPairingRequests) before any credential is exchanged.
+        function renderDiscoveredWorkers() {
+          const section = $('discoveredWorkersSection');
+          if (state.local?.role !== 'Host' || !state.discoveredWorkers.length) {
+            section.style.display = 'none';
+            return;
+          }
+          section.style.display = 'block';
+          $('discoveredWorkers').innerHTML = state.discoveredWorkers.map(w => {
+            const connecting = state.pairingConnecting.has(w.id);
+            return `<div class="node" style="cursor:default">
+              <div class="node-main"><strong>${esc(w.name)}</strong><span class="pill">Worker</span></div>
+              <div class="small">${esc(w.endpoint)}</div>
+              <div class="detail-actions">
+                <button class="primary" data-connect-worker="${esc(w.id)}" ${connecting ? 'disabled' : ''}>
+                  ${connecting ? 'Väntar på godkännande...' : 'Anslut'}
+                </button>
+              </div>
+            </div>`;
+          }).join('');
+
+          document.querySelectorAll('[data-connect-worker]').forEach(button => {
+            button.onclick = () => connectToDiscoveredWorker(button.dataset.connectWorker);
+          });
+        }
+
+        async function connectToDiscoveredWorker(id) {
+          state.pairingConnecting.add(id);
+          renderDiscoveredWorkers();
+          try {
+            const result = await fetchJson(`/api/discovered-workers/${id}/connect`, { method: 'POST' });
+            if (!result?.requested) {
+              state.pairingConnecting.delete(id);
+              showComposerNotice('Kunde inte skicka anslutningsförfrågan.', true);
+              renderDiscoveredWorkers();
+            }
+          } catch (error) {
+            state.pairingConnecting.delete(id);
+            showComposerNotice(error.message, true);
+            renderDiscoveredWorkers();
+          }
+        }
+
+        // The other half of the same handshake: this node received a connect
+        // request from a Host (see /pairing/request) and its own operator must
+        // explicitly accept or reject it before anything is trusted.
+        function renderPairingRequests() {
+          const box = $('pairingRequests');
+          if (!state.pairingInbound.length) {
+            box.innerHTML = '';
+            return;
+          }
+          box.innerHTML = state.pairingInbound.map(r => `
+            <div class="pairing-card">
+              <div>
+                <strong>${esc(r.requesterName)}</strong> vill ansluta den här datorn till sitt kluster.
+                <div class="small mono">${esc(r.requesterEndpoint)}</div>
+              </div>
+              <div class="detail-actions">
+                <button class="primary" data-accept-pairing="${esc(r.requesterId)}">Anslut</button>
+                <button data-reject-pairing="${esc(r.requesterId)}">Avvisa</button>
+              </div>
+            </div>`).join('');
+
+          document.querySelectorAll('[data-accept-pairing]').forEach(button => {
+            button.onclick = () => respondToPairingRequest(button.dataset.acceptPairing, true);
+          });
+          document.querySelectorAll('[data-reject-pairing]').forEach(button => {
+            button.onclick = () => respondToPairingRequest(button.dataset.rejectPairing, false);
+          });
+        }
+
+        async function respondToPairingRequest(hostId, accept) {
+          const path = accept ? 'accept' : 'reject';
+          try {
+            await fetchJson(`/pairing/pending/${hostId}/${path}`, { method: 'POST' });
+            state.pairingInbound = state.pairingInbound.filter(r => r.requesterId !== hostId);
+            renderPairingRequests();
+            if (accept) await refresh();
+          } catch (error) {
+            showComposerNotice(error.message, true);
+          }
         }
 
         function switchView(view) {
@@ -1710,6 +1818,25 @@ internal static class Dashboard
             } catch {
               $('queueRow').style.display = 'none';
               $('costRow').style.display = 'none';
+            }
+
+            if (state.local?.role === 'Host') {
+              try {
+                state.discoveredWorkers = await fetchJson('/api/discovered-workers') ?? [];
+                const pending = await fetchJson('/api/pairing-status') ?? [];
+                for (const id of [...state.pairingConnecting]) {
+                  if (!pending.some(p => p.peerId === id) && !state.discoveredWorkers.some(w => w.id === id))
+                    state.pairingConnecting.delete(id);
+                }
+              } catch { state.discoveredWorkers = []; }
+              renderDiscoveredWorkers();
+            }
+
+            if (state.local?.role === 'Worker') {
+              try {
+                state.pairingInbound = await fetchJson('/pairing/pending') ?? [];
+              } catch { state.pairingInbound = []; }
+              renderPairingRequests();
             }
 
             renderFirstRunBanner();

@@ -579,6 +579,64 @@ public static class HostRole
         app.MapPost("/api/nodes/{id}/runtime/setup", SetupWorkerRuntime);
         app.MapGet("/api/nodes/{id}/tasks", (string id, TaskBoard board) => Results.Ok(board.TasksForWorker(id)));
 
+        // Click-to-pair, no typing: this Host sees Workers on the LAN via
+        // their discovery beacon (ClusterHostedService) even before they're
+        // registered. Clicking "connect" sends them a request with a random
+        // nonce; the Worker's own operator must accept it (WorkerRole) before
+        // /pairing/approved below ever gets called back - see PairingCoordinator.
+        app.MapGet("/api/discovered-workers", (PairingCoordinator pairing, WorkerRegistry reg) =>
+        {
+            var known = reg.All.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var discovered = pairing.Discovered(NodeRole.Worker).Where(p => !known.Contains(p.Id));
+            return Results.Ok(discovered);
+        });
+
+        app.MapGet("/api/pairing-status", (PairingCoordinator pairing) => Results.Ok(pairing.PendingOutbound()));
+
+        app.MapPost("/api/discovered-workers/{workerId}/connect", async (
+            string workerId, PairingCoordinator pairing, PersistentSettingsStore store, NodeSettings settings,
+            IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            var peer = pairing.Get(workerId);
+            if (peer is null)
+                return Results.NotFound(new { error = "worker not currently visible on the network" });
+
+            var nonce = pairing.BeginOutbound(peer.Id, peer.Name, peer.Endpoint);
+            try
+            {
+                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
+                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, nonce);
+                var client = httpFactory.CreateClient("cluster");
+                using var response = await client.PostAsJsonAsync($"{peer.Endpoint}/pairing/request", payload, ct);
+                if (!response.IsSuccessStatusCode)
+                    return Results.Problem(
+                        detail: $"Worker {peer.Endpoint} svarade {(int)response.StatusCode}.",
+                        statusCode: StatusCodes.Status502BadGateway);
+
+                return Results.Ok(new { requested = true, worker = peer.Name });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Public (see ClusterSecurity.IsPublic): called back by a Worker only
+        // after ITS operator accepted the request above, echoing the same
+        // nonce this Host generated. The cluster token is only ever handed
+        // over here - after both sides have explicitly consented.
+        app.MapPost("/pairing/approved", (PairingHandshakePayload req, PairingCoordinator pairing, PersistentSettingsStore store) =>
+        {
+            if (!pairing.TryCompleteOutbound(req.PeerId, req.Nonce, out _))
+                return Results.Json(new { error = "no matching pairing request" }, statusCode: StatusCodes.Status404NotFound);
+
+            var token = store.GetClusterToken();
+            if (string.IsNullOrWhiteSpace(token))
+                return Results.Problem(detail: "This Host has no cluster token configured.", statusCode: StatusCodes.Status500InternalServerError);
+
+            return Results.Ok(new PairingApprovalResponse(token));
+        });
+
         app.MapPost("/chat", SubmitChat);
         app.MapPost("/api/chat", SubmitChat);
         app.MapPost("/tasks", SubmitTask);

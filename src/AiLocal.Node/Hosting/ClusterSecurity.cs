@@ -88,7 +88,17 @@ public static class ClusterSecurity
     private static bool IsPublic(PathString path) =>
         path == "/" ||
         path.StartsWithSegments("/health") ||
-        path.StartsWithSegments("/api/local");
+        path.StartsWithSegments("/api/local") ||
+        // The click-to-pair handshake is deliberately reachable without the
+        // cluster token - that's the credential being negotiated. Each call
+        // is instead bound to a random per-request nonce (see
+        // PairingCoordinator) that only the two consenting parties ever see,
+        // and the actual cluster token is never sent until both sides have
+        // explicitly approved. Every other /pairing/* route (viewing or
+        // approving pending requests) stays behind the normal token/loopback
+        // gate - only these two exact handshake endpoints are public.
+        path == "/pairing/request" ||
+        path == "/pairing/approved";
 
     private static bool IsNodeOnly(PathString path) =>
         path.StartsWithSegments("/cluster") ||
