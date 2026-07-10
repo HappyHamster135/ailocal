@@ -7,6 +7,7 @@ namespace AiLocal.Core.Tests;
 /// Uses a per-test scratch AILOCAL_DATA_DIR so HostRegistry never touches a
 /// real installation's overseer-hosts.json.
 /// </summary>
+[Collection("EnvIsolated")]
 public class HostRegistryTests : IDisposable
 {
     private readonly string _dataDir;

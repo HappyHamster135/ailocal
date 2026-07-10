@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Hardware;
@@ -5,6 +6,7 @@ using AiLocal.Core.Providers;
 using AiLocal.Core.Roles;
 using AiLocal.Node.Roles;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AiLocal.Node.Hosting;
 
@@ -180,19 +182,22 @@ public static class NodeWebHost
         }));
 
         app.MapGet("/providers", (NodeSettings s) => Results.Ok(ProviderOrderApi.Read(s)));
-        app.MapPut("/providers", (ProviderOrderUpdate req, PersistentSettingsStore store, HostLocator locator) =>
-            UpdateSettings(store, locator, new SettingsUpdate(ProviderPriority: req.Priority)));
+        app.MapPut("/providers", (ProviderOrderUpdate req, PersistentSettingsStore store, HostLocator locator,
+                [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
+            UpdateSettings(store, locator, new SettingsUpdate(ProviderPriority: req.Priority), registry, hf, lf));
 
         if (settings.Role != NodeRole.Overseer)
         {
             app.MapGet("/api/providers", (NodeSettings s) => Results.Ok(ProviderOrderApi.Read(s)));
-            app.MapPut("/api/providers", (ProviderOrderUpdate req, PersistentSettingsStore store, HostLocator locator) =>
-                UpdateSettings(store, locator, new SettingsUpdate(ProviderPriority: req.Priority)));
+            app.MapPut("/api/providers", (ProviderOrderUpdate req, PersistentSettingsStore store, HostLocator locator,
+                    [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
+                UpdateSettings(store, locator, new SettingsUpdate(ProviderPriority: req.Priority), registry, hf, lf));
         }
 
         app.MapGet("/api/settings", (PersistentSettingsStore store) => Results.Ok(store.Read()));
-        app.MapPut("/api/settings", (SettingsUpdate req, PersistentSettingsStore store, HostLocator locator) =>
-            UpdateSettings(store, locator, req));
+        app.MapPut("/api/settings", (SettingsUpdate req, PersistentSettingsStore store, HostLocator locator,
+                [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
+            UpdateSettings(store, locator, req, registry, hf, lf));
 
         app.MapGet("/api/local", (NodeSettings s, RegistrationStatus registrationStatus) =>
         {
@@ -286,18 +291,87 @@ public static class NodeWebHost
     private static string CurrentVersion =>
         typeof(NodeWebHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
-    private static IResult UpdateSettings(
+    private static async Task<IResult> UpdateSettings(
         PersistentSettingsStore store,
         HostLocator locator,
-        SettingsUpdate update)
+        SettingsUpdate update,
+        WorkerRegistry? registry,
+        IHttpClientFactory httpFactory,
+        ILoggerFactory loggerFactory)
     {
         try
         {
-            return Results.Ok(store.Update(update, locator));
+            var oldToken = store.GetClusterToken();
+            var result = store.Update(update, locator);
+            var newToken = store.GetClusterToken();
+
+            // Rotating the token (manually here, or the pairing self-heal in
+            // HostRole) otherwise silently orphans every already-registered
+            // Worker - they keep using the old token until an operator
+            // notices something broke and manually re-enters it everywhere.
+            if (registry is not null && !string.IsNullOrWhiteSpace(oldToken) &&
+                !string.IsNullOrWhiteSpace(newToken) && oldToken != newToken)
+            {
+                await PropagateTokenToKnownWorkersAsync(
+                    oldToken, newToken, registry, httpFactory, loggerFactory.CreateLogger("token-rotation"));
+            }
+
+            return Results.Ok(result);
         }
         catch (ArgumentException ex)
         {
             return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Best-effort push of a freshly-rotated cluster token to every currently
+    /// -known Worker, authenticating with the OLD token (the only one they
+    /// still recognize at this point - they haven't heard about the new one
+    /// yet). Internal so HostRole's pairing self-heal can reuse it too.
+    /// </summary>
+    internal static async Task PropagateTokenToKnownWorkersAsync(
+        string? oldToken,
+        string newToken,
+        WorkerRegistry registry,
+        IHttpClientFactory httpFactory,
+        ILogger log)
+    {
+        foreach (var worker in registry.All)
+        {
+            try
+            {
+                // Deliberately NOT the "cluster" named client: it has a
+                // DelegatingHandler that auto-attaches this Host's CURRENT
+                // (already-rotated) token to every request, which would
+                // stomp the OLD token this call needs to authenticate with.
+                // That client also prefers each worker's TLS endpoint, whose
+                // self-signed cert only the "cluster" client is configured to
+                // trust - so this uses the plain endpoint on the default client.
+                var client = httpFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+                using var request = new HttpRequestMessage(HttpMethod.Put, $"{worker.Endpoint}/api/settings")
+                {
+                    Content = JsonContent.Create(new SettingsUpdate(ClusterToken: newToken))
+                };
+                // No old token to present (the Host had none, e.g. the
+                // pairing self-heal case) means the Worker itself is very
+                // likely also token-less right now, in which case it accepts
+                // any call unauthenticated - same "fail open" rule this Host
+                // was just running under. If the Worker DOES have a token
+                // already, this push simply fails and it stays stale, same as
+                // before this method existed.
+                if (!string.IsNullOrWhiteSpace(oldToken))
+                    request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, oldToken);
+                using var response = await client.SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                    log.LogWarning("failed to push rotated cluster token to {Worker}: HTTP {Status}",
+                        worker.Name, (int)response.StatusCode);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning("failed to push rotated cluster token to {Worker}: {Message}", worker.Name, ex.Message);
+            }
         }
     }
 }

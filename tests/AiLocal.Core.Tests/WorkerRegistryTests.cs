@@ -8,10 +8,13 @@ namespace AiLocal.Core.Tests;
 
 /// <summary>
 /// Uses a per-test scratch AILOCAL_DATA_DIR so HostStateStore never touches a
-/// real installation's host-state.json. Tests in this class must not run in
-/// parallel with each other (they mutate a process-wide environment variable),
-/// which xUnit already guarantees by default within one collection/class.
+/// real installation's host-state.json. [Collection("EnvIsolated")] keeps
+/// this from running concurrently with other classes that also mutate that
+/// same process-wide environment variable (e.g. HostRegistryTests) - xUnit
+/// only guarantees sequential execution within one class by default, not
+/// across classes, and two racing to set/restore it corrupts each other.
 /// </summary>
+[Collection("EnvIsolated")]
 public class WorkerRegistryTests : IDisposable
 {
     private readonly string _dataDir;

@@ -625,8 +625,9 @@ public static class HostRole
         // after ITS operator accepted the request above, echoing the same
         // nonce this Host generated. The cluster token is only ever handed
         // over here - after both sides have explicitly consented.
-        app.MapPost("/pairing/approved", (PairingHandshakePayload req, PairingCoordinator pairing,
-            PersistentSettingsStore store, HostLocator hostLocator) =>
+        app.MapPost("/pairing/approved", async (PairingHandshakePayload req, PairingCoordinator pairing,
+            PersistentSettingsStore store, HostLocator hostLocator, WorkerRegistry registry,
+            IHttpClientFactory httpFactory, ILoggerFactory loggerFactory) =>
         {
             if (!pairing.TryCompleteOutbound(req.PeerId, req.Nonce, out _))
                 return Results.Json(new { error = "no matching pairing request" }, statusCode: StatusCodes.Status404NotFound);
@@ -637,8 +638,16 @@ public static class HostRole
                 // Click-to-pair promises no manual setup - a Host that never
                 // got a token (or had it cleared) shouldn't make pairing fail
                 // outright; mint one now so the handshake can still complete.
+                var oldToken = token; // null/empty - the Host was running open
                 store.Update(new SettingsUpdate(RegenerateClusterToken: true), hostLocator);
                 token = store.GetClusterToken();
+
+                // Any Worker already registered was relying on that open
+                // access - without this, minting a token here would silently
+                // lock every one of them out the moment this response lands.
+                if (!string.IsNullOrWhiteSpace(token))
+                    await NodeWebHost.PropagateTokenToKnownWorkersAsync(
+                        oldToken, token, registry, httpFactory, loggerFactory.CreateLogger("token-rotation"));
             }
 
             if (string.IsNullOrWhiteSpace(token))
