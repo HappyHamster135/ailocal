@@ -1064,6 +1064,26 @@ internal static class Dashboard
         }
 
         function renderHost() {
+          // A Worker has no /api/host route at all (it doesn't proxy to
+          // anything, unlike Host/Overseer) - state.host stays permanently
+          // null there, which used to pin this indicator on "host not
+          // connected" forever, even seconds after a fully successful
+          // pairing. RegistrationStatus (surfaced on /api/local as
+          // local.pairing) is the actual truth for a Worker - it reflects
+          // its real ~15s register-heartbeat to the Host, not just whether
+          // some endpoint string is saved - so use that instead, including
+          // the real reason (bad token, unreachable, ...) when it's not connected.
+          if (state.local?.role === 'Worker') {
+            const pairing = state.local.pairing;
+            const connected = pairing?.state === 'Connected';
+            $('hostDot').className = `dot ${connected ? 'ok' : 'bad'}`;
+            $('hostStatus').textContent = connected
+              ? (state.local.hostEndpoint ?? 'connected')
+              : (pairing?.detail || 'host not connected');
+            if (state.local.hostEndpoint) $('hostInput').value = state.local.hostEndpoint;
+            return;
+          }
+
           const hasHost = !!state.host;
           $('hostDot').className = `dot ${hasHost ? 'ok' : 'bad'}`;
           $('hostStatus').textContent = hasHost ? state.host : 'host not connected';

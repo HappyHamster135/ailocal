@@ -200,7 +200,7 @@ public static class NodeWebHost
                 [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
             UpdateSettings(store, locator, req, registry, hf, lf));
 
-        app.MapGet("/api/local", (NodeSettings s, RegistrationStatus registrationStatus) =>
+        app.MapGet("/api/local", (NodeSettings s, RegistrationStatus registrationStatus, HostLocator hostLocator) =>
         {
             var (state, detail) = registrationStatus.Read();
             return Results.Ok(new
@@ -210,7 +210,11 @@ public static class NodeWebHost
                 port = s.Port,
                 endpoint = $"http://127.0.0.1:{s.Port}",
                 isLauncher = s.Role == NodeRole.Launcher,
-                pairing = new { state = state.ToString(), detail }
+                // Only a Worker actually runs the register-loop that keeps this
+                // meaningful (see ClusterHostedService.RegisterLoopAsync) - null
+                // for every other role, same as hostEndpoint below.
+                pairing = new { state = state.ToString(), detail },
+                hostEndpoint = s.Role == NodeRole.Worker ? hostLocator.HostEndpoint : null
             });
         });
 
