@@ -39,13 +39,31 @@ public sealed class PairingCoordinator
     private static readonly TimeSpan RequestTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DiscoveredTtl = TimeSpan.FromSeconds(60);
 
+    // Defense in depth against a flood of distinct fake peer/requester ids
+    // from a sender nobody has authenticated yet - NoteDiscovered comes
+    // straight off a UDP beacon, AddInbound straight off the deliberately-
+    // public POST /pairing/request. Prune() alone only bounds growth to
+    // "however long until TTL expiry", which is still unbounded *within*
+    // that window under a flood. A real cluster is a handful of machines;
+    // this is nowhere close to that in normal use.
+    private const int MaxTrackedEntries = 500;
+
     private readonly ConcurrentDictionary<string, DiscoveredPeer> _discovered = new();
     private readonly ConcurrentDictionary<string, OutboundPairingRequest> _outbound = new();
     private readonly ConcurrentDictionary<string, InboundPairingRequest> _inbound = new();
 
-    public void NoteDiscovered(DiscoveryBeacon beacon) =>
+    public void NoteDiscovered(DiscoveryBeacon beacon)
+    {
+        Prune();
+        // Re-announcing an already-known peer (the normal case - a Worker
+        // re-beacons every few seconds) must never be blocked by the cap,
+        // only genuinely new entries should be.
+        if (!_discovered.ContainsKey(beacon.NodeId) && _discovered.Count >= MaxTrackedEntries)
+            return;
+
         _discovered[beacon.NodeId] = new DiscoveredPeer(
             beacon.NodeId, beacon.Name, beacon.Role, beacon.Endpoint, DateTimeOffset.UtcNow);
+    }
 
     public IReadOnlyList<DiscoveredPeer> Discovered(NodeRole role)
     {
@@ -65,6 +83,11 @@ public sealed class PairingCoordinator
     /// <summary>Starts an outbound request to a peer and returns the nonce to send it.</summary>
     public string BeginOutbound(string peerId, string peerName, string peerEndpoint)
     {
+        // Not cap-checked like the two below - this is only reachable via an
+        // already-authenticated Host action (/api/discovered-workers/{id}/connect
+        // sits behind the normal token gate), not directly by an unauthenticated
+        // network sender, so it isn't part of the same flood surface.
+        Prune();
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         _outbound[peerId] = new OutboundPairingRequest(peerId, peerName, peerEndpoint, nonce, DateTimeOffset.UtcNow);
         return nonce;
@@ -91,9 +114,15 @@ public sealed class PairingCoordinator
         return false;
     }
 
-    public void AddInbound(string requesterId, string requesterName, string requesterEndpoint, string nonce) =>
+    public void AddInbound(string requesterId, string requesterName, string requesterEndpoint, string nonce)
+    {
+        Prune();
+        if (!_inbound.ContainsKey(requesterId) && _inbound.Count >= MaxTrackedEntries)
+            return;
+
         _inbound[requesterId] = new InboundPairingRequest(
             requesterId, requesterName, requesterEndpoint, nonce, DateTimeOffset.UtcNow);
+    }
 
     public IReadOnlyList<InboundPairingRequest> PendingInbound()
     {

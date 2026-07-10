@@ -621,6 +621,7 @@ internal static class Dashboard
         </header>
 
         <div style="padding:0 14px">
+          <div class="notice" id="globalNotice" style="margin-top:10px"></div>
           <div id="pairingRequests"></div>
           <div id="localNodesBanner"></div>
           <div class="notice" id="firstRunBanner" style="margin-top:10px"></div>
@@ -951,11 +952,24 @@ internal static class Dashboard
           pairingErrors: {},
           pairingResponding: new Set(),
           pairingRequestErrors: {},
-          openHistoryIds: new Set()
+          openHistoryIds: new Set(),
+          // renderInspector() rebuilds these buttons from scratch via
+          // innerHTML on every ~3s refresh, which used to silently re-enable
+          // them mid-install even while btn.disabled was set directly on the
+          // (about-to-be-discarded) DOM node - inviting a duplicate click on
+          // an operation the UI already says can "take several minutes".
+          nodeBusyAction: null
         };
 
         const $ = id => document.getElementById(id);
-        const esc = s => (s ?? '').toString().replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+        // Must cover quotes too, not just <>& - every call site below embeds
+        // this inside double-quoted HTML attributes (data-node-id="${esc(...)}"
+        // etc), fed by network input nobody has authenticated yet (a raw LAN
+        // discovery beacon's NodeId/Name, or the body of the deliberately-public
+        // POST /pairing/request). An unescaped `"` breaks out of the attribute
+        // and injects a live event handler - this is exploitable script
+        // execution in the dashboard's own origin, not just malformed markup.
+        const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         const trunc = (s, n) => { s = s ?? ''; return s.length > n ? s.slice(0, n) + '...' : s; };
         const statusText = value => typeof value === 'number' ? ['Idle','Busy','Offline','Error'][value] : value;
         const statusClass = value => {
@@ -1513,9 +1527,9 @@ internal static class Dashboard
               </div>
               <div class="notice" id="nodeActionStatus"></div>
               <div class="detail-actions">
-                <button class="primary" id="setupAiBtn">Installera lokal AI</button>
+                <button class="primary" id="setupAiBtn" ${state.nodeBusyAction ? 'disabled' : ''}>Installera lokal AI</button>
                 <button id="inspectRuntimeBtn">Kontrollera Ollama</button>
-                <button id="pullModelBtn">Hämta lokal modell</button>
+                <button id="pullModelBtn" ${state.nodeBusyAction ? 'disabled' : ''}>Hämta lokal modell</button>
                 <button id="removeNodeBtn">Ta bort från gruppen</button>
               </div>
             </section>
@@ -1561,16 +1575,17 @@ internal static class Dashboard
 
         async function pullWorkerModel() {
           if (!state.selectedNodeId) return;
-          const button = $('pullModelBtn');
-          button.disabled = true;
+          state.nodeBusyAction = 'pull';
           showNodeAction('Hämtar modellen. Det kan ta en stund...');
+          renderInspector();
           try {
             const result = await fetchJson(`/api/nodes/${state.selectedNodeId}/runtime/pull`, { method: 'POST' });
             showNodeAction(result.success ? `${result.model} är installerad.` : result.output, !result.success);
           } catch (error) {
             showNodeAction(error.message, true);
           } finally {
-            button.disabled = false;
+            state.nodeBusyAction = null;
+            renderInspector();
           }
         }
 
@@ -1598,7 +1613,10 @@ internal static class Dashboard
             state.selectedTopologyId = null;
             await refresh();
           } catch (error) {
-            $('topologyDetailSub').textContent = error.message;
+            // Not topologyDetailSub - that's plain unstyled text and the next
+            // 3s refresh() poll rebuilds it back to normal status, silently
+            // erasing the error within seconds either way.
+            showGlobalNotice(error.message, true);
           }
         }
 
@@ -1652,9 +1670,9 @@ internal static class Dashboard
 
         async function setupWorkerAi() {
           if (!state.selectedNodeId) return;
-          const btn = $('setupAiBtn');
-          btn.disabled = true;
+          state.nodeBusyAction = 'setup';
           showNodeAction('Installerar Ollama och hämtar modellen. Det kan ta flera minuter...');
+          renderInspector();
           try {
             const result = await fetchJson(`/api/nodes/${state.selectedNodeId}/runtime/setup`, { method: 'POST' });
             const lines = (result.steps || []).map(s => `${s.ok ? 'OK' : 'FEL'}  ${s.step}: ${s.detail}`).join('\n');
@@ -1662,7 +1680,8 @@ internal static class Dashboard
           } catch (error) {
             showNodeAction(error.message, true);
           } finally {
-            btn.disabled = false;
+            state.nodeBusyAction = null;
+            renderInspector();
           }
         }
 
@@ -1692,11 +1711,12 @@ internal static class Dashboard
         }
 
         async function cancelTask(id) {
+          if (!window.confirm('Avbryt den här uppgiften?')) return;
           try {
             await fetchJson(`/api/tasks/${id}/cancel`, { method: 'POST' });
             await refresh();
           } catch (error) {
-            showComposerNotice(error.message, true);
+            showGlobalNotice(error.message, true);
           }
         }
 
@@ -2005,7 +2025,18 @@ internal static class Dashboard
             if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
           } else if (state.local.role === 'Host' && !state.nodes.length) {
             box.innerHTML =
-              'Ingen Worker ansluten ännu. Starta en Worker på den här eller en annan dator och klistra in klusternyckeln (Inställningar -> Klustersäkerhet) för att para ihop den. ' +
+              'Ingen Worker ansluten ännu. Starta en Worker på den här eller en annan dator på samma nätverk - den dyker upp under ' +
+              '"Upptäckta enheter" här nedanför, redo att anslutas med ett klick. Ser du den inte? Klistra in klusternyckeln ' +
+              '(Inställningar -> Klustersäkerhet) på Worker-datorn istället. ' +
+              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">✕</button>';
+            box.className = 'notice show';
+            const dismiss = $('dismissFirstRun');
+            if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
+          } else if (state.local.role === 'Worker' && !state.local.hostEndpoint) {
+            box.innerHTML =
+              'Den här Workern är inte ansluten till någon Host än. Öppna Host-datorns instrumentpanel - den ser den här ' +
+              'datorn automatiskt under "Upptäckta enheter" och kan ansluta med ett klick. Väntar du på en bekräftelse ' +
+              'istället? Kolla om det ligger en väntande förfrågan högst upp på den här sidan. ' +
               '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">✕</button>';
             box.className = 'notice show';
             const dismiss = $('dismissFirstRun');
@@ -2061,7 +2092,7 @@ internal static class Dashboard
             }
             renderProviders();
           } catch (error) {
-            showComposerNotice(error.message, true);
+            showGlobalNotice(error.message, true);
           }
         }
 
@@ -2173,6 +2204,8 @@ internal static class Dashboard
         }
 
         async function regenerateOperatorToken() {
+          if (!confirm('Generera en ny operatörsnyckel? Alla som använder den nuvarande nyckeln tappar åtkomst tills de får den nya.'))
+            return;
           const button = $('regenerateOperatorToken');
           button.disabled = true;
           try {
@@ -2322,6 +2355,23 @@ internal static class Dashboard
           box.className = `notice show ${isError ? 'bad' : ''}`;
         }
 
+        // For errors from actions that exist regardless of role (cancel a
+        // task, reorder providers, forget a host) - #composerNotice lives
+        // inside #composer, which is hidden entirely on a Worker's dashboard
+        // (no /api/chat there), so those errors would otherwise be invisible
+        // exactly like the pairing-request errors were before that got fixed.
+        // #globalNotice sits in the page header instead, outside any
+        // role-conditional element, and auto-hides after a few seconds so a
+        // stale error doesn't linger forever once the operator's moved on.
+        let globalNoticeTimer = null;
+        function showGlobalNotice(message, isError = false) {
+          const box = $('globalNotice');
+          box.textContent = message;
+          box.className = `notice show ${isError ? 'bad' : ''}`;
+          clearTimeout(globalNoticeTimer);
+          globalNoticeTimer = setTimeout(() => { box.className = 'notice'; }, 8000);
+        }
+
         async function sendMessage() {
           const prompt = $('prompt').value.trim();
           if (!prompt) return;
@@ -2367,7 +2417,7 @@ internal static class Dashboard
         async function launchRole(role, roleValue) {
           const hostEndpoint = $('hostInput').value.trim();
           const clusterToken = $('launchClusterToken').value.trim() || null;
-          $('launchResult').textContent = `Starting ${role}...`;
+          $('launchResult').textContent = `Startar ${role}...`;
           try {
             const data = await fetchJson('/api/launch', {
               method: 'POST',
@@ -2375,11 +2425,11 @@ internal static class Dashboard
               body: JSON.stringify({ role: Number(roleValue), hostEndpoint, clusterToken })
             });
             if (!data?.started) {
-              $('launchResult').textContent = data?.error || `Could not start ${role}.`;
+              $('launchResult').textContent = data?.error || `Kunde inte starta ${role}.`;
               return;
             }
-            const verb = data.reused ? 'Already running' : 'Started';
-            $('launchResult').innerHTML = `${verb} ${role} on <span class="mono">${esc(data.endpoint)}</span>`;
+            const verb = data.reused ? 'Kör redan' : 'Startade';
+            $('launchResult').innerHTML = `${verb} ${role} på <span class="mono">${esc(data.endpoint)}</span>`;
             if (role !== 'Worker') window.location.href = withCurrentTheme(data.endpoint);
           } catch (error) {
             $('launchResult').textContent = error.message;

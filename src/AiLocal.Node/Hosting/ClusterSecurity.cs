@@ -26,6 +26,7 @@ public sealed class ClusterTokenHandler : DelegatingHandler
 public static class ClusterSecurity
 {
     public const string HeaderName = "X-AiLocal-Token";
+    private const string AdminTierItemKey = "AiLocal.AdminTier";
 
     public static async Task Authorize(
         HttpContext context,
@@ -35,6 +36,7 @@ public static class ClusterSecurity
         var adminToken = settings.GetClusterToken();
         if (string.IsNullOrWhiteSpace(adminToken) || IsPublic(context.Request.Path))
         {
+            context.Items[AdminTierItemKey] = true;
             await next();
             return;
         }
@@ -50,6 +52,7 @@ public static class ClusterSecurity
         // co-located rogue process should not be able to impersonate the cluster.
         if (!nodeOnly && isLoopback)
         {
+            context.Items[AdminTierItemKey] = true;
             await next();
             return;
         }
@@ -61,6 +64,7 @@ public static class ClusterSecurity
             ?? context.Request.Query["token"].FirstOrDefault();
         if (SecureEquals(adminToken, presented))
         {
+            context.Items[AdminTierItemKey] = true;
             await next();
             return;
         }
@@ -73,6 +77,7 @@ public static class ClusterSecurity
             settings.GetOperatorToken() is { Length: > 0 } operatorToken &&
             SecureEquals(operatorToken, presented))
         {
+            context.Items[AdminTierItemKey] = false;
             await next();
             return;
         }
@@ -84,6 +89,17 @@ public static class ClusterSecurity
             error = "invalid or missing cluster token"
         });
     }
+
+    /// <summary>True only when this request was authorized at admin tier (or
+    /// auth is fully open, or came from the trusted-loopback bypass) - false
+    /// for the restricted operator tier, and false (fail closed) if Authorize
+    /// never ran for some reason. RequiresAdminTier only gates whether a
+    /// request is ALLOWED through at all; endpoints that hand back secrets
+    /// (e.g. GET /api/settings) must check this separately and redact for
+    /// anything less than admin tier, since operator tier is allowed to GET
+    /// plenty of endpoints that admin-gating alone would never distinguish.</summary>
+    public static bool IsAdminTier(HttpContext context) =>
+        context.Items.TryGetValue(AdminTierItemKey, out var value) && value is true;
 
     private static bool IsPublic(PathString path) =>
         path == "/" ||
@@ -107,9 +123,12 @@ public static class ClusterSecurity
 
     /// <summary>
     /// Actions an operator-tier token must never be allowed to perform: node
-    /// membership changes, settings writes (local or proxied to a worker),
-    /// worker runtime installs, and deleting a schedule. Everything else that
-    /// passes the security gate (goal/chat submission, task cancel, viewing
+    /// membership changes, settings reads or writes (local or proxied to a
+    /// worker - a GET here proxies straight to that worker's own /api/settings,
+    /// which hands back the same shared cluster token /api/settings redacts
+    /// for non-admin callers, see the redaction below), worker runtime
+    /// installs, and deleting a schedule. Everything else that passes the
+    /// security gate (goal/chat submission, task cancel, viewing
     /// nodes/tasks/stats/schedules, creating/running a schedule) is operator-safe.
     /// </summary>
     private static bool RequiresAdminTier(string method, PathString path)
@@ -125,7 +144,8 @@ public static class ClusterSecurity
                 return true;
 
             if (segments.EndsWith("/settings", StringComparison.Ordinal) &&
-                string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase))
+                (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase)))
                 return true;
 
             if ((segments.EndsWith("/runtime/pull", StringComparison.Ordinal) ||

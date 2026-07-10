@@ -76,27 +76,55 @@ public sealed class ClusterHostedService : BackgroundService
                     // Also listen, not just announce: a Host needs to see
                     // unpaired Workers' own beacons for the click-to-pair flow
                     // (PairingCoordinator/HostRole's "discovered workers" list).
-                    _ = discovery.ListenAsync(OnBeacon, ct);
-                    await discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct);
+                    _ = RunDiscoveryAsync(() => discovery.ListenAsync(OnBeacon, ct), "listen");
+                    await RunDiscoveryAsync(() => discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct), "announce");
                 }
                 break;
 
             case NodeRole.Worker:
                 if (_settings.Discovery.Enabled)
                 {
-                    _ = discovery.ListenAsync(OnBeacon, ct);
+                    _ = RunDiscoveryAsync(() => discovery.ListenAsync(OnBeacon, ct), "listen");
                     // A Worker announces itself too (not just listens for the
                     // Host), so a Host that doesn't have it registered yet can
                     // still discover and offer to pair with it.
-                    _ = discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct);
+                    _ = RunDiscoveryAsync(() => discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct), "announce");
                 }
                 await RegisterLoopAsync(ct);
                 break;
 
             case NodeRole.Overseer:
                 if (_settings.Discovery.Enabled)
-                    await discovery.ListenAsync(OnBeacon, ct);
+                    await RunDiscoveryAsync(() => discovery.ListenAsync(OnBeacon, ct), "listen");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Runs a LanDiscovery call (announce or listen) and degrades gracefully
+    /// instead of taking the whole node down with it. UdpClient's initial
+    /// bind/JoinMulticastGroup happens before that method's own loop - and
+    /// its own try/catch - even starts, so a SocketException there (multicast
+    /// blocked by a VPN, some corporate/hotel Wi-Fi, certain virtual adapters)
+    /// used to propagate out of ExecuteAsync. For the Host/Overseer cases that
+    /// await this directly, BackgroundService's default unhandled-exception
+    /// behavior (StopHost) then killed the entire process just because LAN
+    /// discovery didn't work - not something click-to-pair strictly needs if
+    /// an explicit HostEndpoint is configured instead.
+    /// </summary>
+    private async Task RunDiscoveryAsync(Func<Task> discover, string what)
+    {
+        try
+        {
+            await discover();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "LAN discovery ({What}) could not start, continuing without it - " +
+                "this usually means multicast is blocked on this network (VPN, some " +
+                "corporate/hotel Wi-Fi, certain virtual adapters). Configure an explicit " +
+                "Host endpoint in Installningar if this persists.", what);
         }
     }
 
@@ -183,6 +211,11 @@ public sealed class ClusterHostedService : BackgroundService
         else if (state == RegistrationState.Unauthorized)
             _log.LogWarning("{Detail}", detail);
         else
-            _log.LogDebug("register failed: {Detail}", detail);
+            // Unreachable (host offline, wrong IP, blocked by firewall/network
+            // profile) is the single most common real-world failure this app
+            // hits - Debug is below the default Information threshold and
+            // never surfaces anywhere by default, which is exactly backwards
+            // for the fault an operator is most likely to actually need to see.
+            _log.LogWarning("register failed: {Detail}", detail);
     }
 }

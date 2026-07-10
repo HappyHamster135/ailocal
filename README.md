@@ -42,7 +42,7 @@ The current version is intentionally small, but it already has the core shape:
 - Secure-by-default cluster pairing: a fresh Host mints its own cluster token automatically; every node-to-node call requires it. Quickstart hands the token to its co-located Worker automatically, so the one-click flow keeps working unchanged.
 - View, copy, and regenerate the current cluster token from Settings; a Worker/Overseer joins by pasting that token into its own Settings (or into the launch form when starting one manually).
 - Optional "start automatically when you log in" toggle per node, so a reboot after a power outage brings the cluster back without you re-launching anything by hand.
-- Unhandled errors are written to `%LOCALAPPDATA%\AiLocal\logs\` instead of silently vanishing.
+- Day-to-day logs (one rolling file per role, 14-day retention) and unhandled errors are both written to `%LOCALAPPDATA%\AiLocal\logs\` instead of only ever living in a console window nobody's looking at - Host/Worker/Overseer are routinely launched with no console at all (desktop app, autostart-at-login).
 - Conversation memory: chat-originated goals include recent turns as context, not just the latest message.
 - Real work queue: an overloaded cluster queues a task until a worker has a free capacity slot, instead of force-assigning it.
 - Configurable dispatch/provider timeouts and bounded automatic retries, with reassignment to a different worker on retry.
@@ -55,7 +55,8 @@ The current version is intentionally small, but it already has the core shape:
 - Two-tier cluster tokens: an admin token (full control) and an optional operator token (submit/view goals, chat, cancel - no node management or settings).
 - Cross-platform Worker engine: `AiLocal.Core`/`AiLocal.Node` build and run on Linux/macOS too, including an automatic Ollama install path for each OS (Windows via winget/installer, Linux via the official install script, macOS via Homebrew). The desktop shell (`AiLocal.App`) is Windows-only.
 - Automated tests (`tests/AiLocal.Core.Tests`) and a GitHub Actions CI workflow that builds and tests on both Windows and Linux.
-- Click-to-pair: a Host lists Workers it sees on the LAN before they're even paired; connecting requires an explicit click on both sides, and the cluster token is only exchanged after both have agreed - no copy-pasting required for same-LAN setups.
+- Click-to-pair: a Host lists Workers it sees on the LAN before they're even paired; connecting requires an explicit click on both sides, and the cluster token is only exchanged after both have agreed - no copy-pasting required for same-LAN setups. A Worker that was previously removed from the cluster (and would otherwise stay permanently blocked) is automatically un-blocked the moment both sides re-consent this way.
+- A Worker's own dashboard shows a live, accurate connected/not-connected indicator for its Host - not just "is an endpoint configured", but the real outcome of its most recent registration attempt, including the specific reason (wrong cluster token, Host unreachable, ...) when it isn't connected.
 
 ## Build
 
@@ -208,6 +209,8 @@ ailocal.exe --role Worker --host http://192.168.1.10:5080 --cluster-token "use-a
 
 Current LAN transport is still plain HTTP (the token travels in a request header, not over TLS), so treat this as LAN-trusted-network security, not Internet-facing security, until transport encryption is added.
 
+An operator token can never read the raw admin cluster token back out of Settings, even though it's allowed to view most other settings - only the admin token itself can see or copy the admin token.
+
 ## Start automatically after a reboot
 
 Each node (Host, Worker, Overseer, or the Launcher/desktop app) can register itself to start when you log in to Windows. Toggle "Starta automatiskt vid inloggning" in `Inställningar`. This writes a value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` pointing at the exe with its current role/port/name (and Host endpoint, for a Worker/Overseer); unchecking it removes the value. Combined with the durable Host state below, this means a power outage or reboot does not require you to manually restart or reconfigure anything - the machine comes back into the same role with the same cluster membership.
@@ -239,6 +242,20 @@ The resulting executable is:
 ```text
 dist\win-x64\ailocal.exe
 ```
+
+## Troubleshooting
+
+**A Worker on another computer never gets a connect request / a Worker shows "host not connected" even after pairing.**
+Almost always Windows' network profile. If either machine's network is set to "Public" instead of "Private", Windows Firewall silently drops the inbound connection with no error on either side - it just looks like nothing happened. Check: Windows Settings -> Network & Internet -> (your network) -> Network profile type, and set it to **Private** on both machines. A Worker's own dashboard now shows the real reason it isn't connected (see the connection indicator above) - if it says "unreachable" rather than a token error, this is the most likely cause.
+
+**"invalid or missing cluster token" / a Worker shows "Unauthorized".**
+The Worker's stored cluster token doesn't match the Host's current one - usually because the token was regenerated on the Host after the Worker last paired (`Generera ny` in Settings invalidates every node still using the old token). Re-pair the Worker: either click-to-pair again from the Host's "Upptäckta enheter" list, or copy the Host's current token from `Inställningar` -> `Klustersäkerhet` and paste it into the Worker's settings.
+
+**A Worker shows Offline and won't reappear in "Upptäckta enheter" to reconnect.**
+Fixed as of the click-to-pair reliability pass - a Worker that goes offline (network blip, restart, expired token) now reappears in the Host's discovered-devices list on its next LAN announcement, ready to re-pair with one click. If you're on an older build, download the latest release.
+
+**Nothing seems to be happening and there's no window to check.**
+Host/Worker/Overseer are usually launched without a console window (the desktop app, or autostart-at-login). Check `%LOCALAPPDATA%\AiLocal\logs\` - each role writes its own rolling daily log file there (`host-yyyyMMdd.log`, `worker-...`, `overseer-...`), plus a separate `crash-yyyyMMdd.log` for unhandled exceptions.
 
 ## Current limitations
 

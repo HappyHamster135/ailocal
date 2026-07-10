@@ -58,9 +58,9 @@ public sealed class FallbackChatProvider
             ApplyCooldown(provider, result);
         }
 
-        return ProviderResponse.Fail(
-            ProviderOutcome.FatalError,
-            "all providers failed: " + string.Join(" | ", errors));
+        var summary = "all providers failed: " + string.Join(" | ", errors);
+        _log?.Invoke(summary);
+        return ProviderResponse.Fail(ProviderOutcome.FatalError, summary);
     }
 
     /// <summary>
@@ -132,9 +132,9 @@ public sealed class FallbackChatProvider
                 yield break;
         }
 
-        yield return new StreamChunk(null, ProviderResponse.Fail(
-            ProviderOutcome.FatalError,
-            "all providers failed: " + string.Join(" | ", errors)));
+        var summary = "all providers failed: " + string.Join(" | ", errors);
+        _log?.Invoke(summary);
+        yield return new StreamChunk(null, ProviderResponse.Fail(ProviderOutcome.FatalError, summary));
     }
 
     private static async IAsyncEnumerable<StreamChunk> SafeStream(

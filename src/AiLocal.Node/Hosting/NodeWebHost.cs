@@ -93,6 +93,17 @@ public static class NodeWebHost
 
         RoleResolver.ApplyOverrides(args, settings);
 
+        // Host/Worker/Overseer are routinely launched with no console window
+        // (LocalNodeLauncher.StartCoreAsync's CreateNoWindow, AutoStartManager's
+        // login launch) - without this, CrashLog's unhandled-exceptions-only
+        // record was the ONLY diagnostic trail a headless process ever left
+        // behind. Every debugging session this app has needed so far required
+        // live-attaching to a running process's own console output instead.
+        builder.Logging.AddProvider(new FileLoggerProvider(
+            Path.Combine(SettingsPaths.DataDirectory, "logs"),
+            settings.Role.ToString().ToLowerInvariant(),
+            LogLevel.Information));
+
         // Plain HTTP always listens (loopback dashboard access never sees a
         // certificate warning). An additive HTTPS listener with a self-signed,
         // auto-generated certificate is used for node-to-node cluster traffic
@@ -195,7 +206,8 @@ public static class NodeWebHost
                 UpdateSettings(store, locator, new SettingsUpdate(ProviderPriority: req.Priority), registry, hf, lf));
         }
 
-        app.MapGet("/api/settings", (PersistentSettingsStore store) => Results.Ok(store.Read()));
+        app.MapGet("/api/settings", (PersistentSettingsStore store, HttpContext ctx) =>
+            Results.Ok(store.Read(includeSecrets: ClusterSecurity.IsAdminTier(ctx))));
         app.MapPut("/api/settings", (SettingsUpdate req, PersistentSettingsStore store, HostLocator locator,
                 [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
             UpdateSettings(store, locator, req, registry, hf, lf));

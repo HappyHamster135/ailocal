@@ -122,7 +122,16 @@ public sealed class PersistentSettingsStore
         settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
     }
 
-    public object Read()
+    /// <param name="includeSecrets">False redacts clusterToken/operatorToken
+    /// (nulled, not omitted, so callers don't need to special-case a missing
+    /// field) while keeping the *Configured booleans and everything else -
+    /// use for any caller not verified at admin tier (see
+    /// ClusterSecurity.IsAdminTier). The actual admin-facing settings UI
+    /// needs the real values (e.g. to display/copy the cluster token to
+    /// paste into a Worker manually), so this defaults to true for the many
+    /// internal call sites (Update() below, etc.) that were already trusted
+    /// before this parameter existed.</param>
+    public object Read(bool includeSecrets = true)
     {
         lock (_gate)
         {
@@ -134,9 +143,9 @@ public sealed class PersistentSettingsStore
                 skills = _settings.Worker.Skills,
                 maxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
                 clusterTokenConfigured = HasClusterToken(),
-                clusterToken = GetClusterToken(),
+                clusterToken = includeSecrets ? GetClusterToken() : null,
                 operatorTokenConfigured = HasOperatorToken(),
-                operatorToken = GetOperatorToken(),
+                operatorToken = includeSecrets ? GetOperatorToken() : null,
                 startWithWindows = _stored.StartWithWindows,
                 startWithWindowsSupported = AutoStartManager.IsSupported,
                 providerPriority = _settings.Providers.Priority,
@@ -370,24 +379,66 @@ public sealed class PersistentSettingsStore
     {
         Directory.CreateDirectory(SettingsPaths.DataDirectory);
         var settingsFile = SettingsPaths.SettingsFile(_settings.Role);
+        var backupFile = settingsFile + ".bak";
         var temporary = settingsFile + ".tmp";
+
+        // Keep a backup of the last-known-good file before overwriting it -
+        // mirrors HostStateStore's already-proven primary+backup pattern, so
+        // a settingsFile that somehow ends up corrupted (this app's own write
+        // path is already crash-safe via the temp+move below, but the file
+        // can still be damaged by something outside this app's control - a
+        // bad backup/AV tool, disk corruption, manual editing) has a fallback
+        // in ReadStored below instead of silently resetting to blank -
+        // losing this node's identity, cluster/operator tokens, and API keys.
+        if (File.Exists(settingsFile))
+        {
+            try { File.Copy(settingsFile, backupFile, overwrite: true); }
+            catch { /* best effort - the primary write below still proceeds */ }
+        }
+
         File.WriteAllText(temporary, JsonSerializer.Serialize(_stored, JsonOptions));
         File.Move(temporary, settingsFile, true);
     }
 
     private static StoredNodeSettings ReadStored(NodeRole role)
     {
+        var settingsFile = SettingsPaths.SettingsFile(role);
         try
         {
-            var settingsFile = SettingsPaths.SettingsFile(role);
             if (!File.Exists(settingsFile))
                 return new StoredNodeSettings();
 
             return JsonSerializer.Deserialize<StoredNodeSettings>(
                 File.ReadAllText(settingsFile), JsonOptions) ?? new StoredNodeSettings();
         }
-        catch
+        catch (Exception ex)
         {
+            // This used to silently return a blank StoredNodeSettings() here,
+            // with no trace anywhere - the caller then mints a brand new
+            // NodeId, so a corrupted file meant silently losing this node's
+            // cluster identity, tokens, and API keys with zero indication why
+            // pairing/logins started asking for everything again. Try the
+            // backup Save() now maintains before giving up to blank, and log
+            // either way via CrashLog (no ILogger available yet this early -
+            // this runs from the constructor, before DI's logging pipeline
+            // exists for this class).
+            CrashLog.Write($"SettingsCorrupted({role})", ex);
+            try
+            {
+                var backupFile = settingsFile + ".bak";
+                if (File.Exists(backupFile))
+                {
+                    var restored = JsonSerializer.Deserialize<StoredNodeSettings>(
+                        File.ReadAllText(backupFile), JsonOptions);
+                    if (restored is not null)
+                        return restored;
+                }
+            }
+            catch (Exception backupEx)
+            {
+                CrashLog.Write($"SettingsBackupAlsoCorrupted({role})", backupEx);
+            }
+
             return new StoredNodeSettings();
         }
     }

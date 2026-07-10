@@ -1177,6 +1177,7 @@ public static class HostRole
             task.State = TaskState.Failed;
             task.Error = ex.Message;
             RecordHealth(worker, success: false, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
+            log.LogWarning("dispatch to {Worker} failed: {Message}", worker.Name, ex.Message);
         }
         catch (OperationCanceledException) when (taskCt.IsCancellationRequested)
         {
@@ -1188,6 +1189,7 @@ public static class HostRole
             task.State = TaskState.Failed;
             task.Error = $"Timed out after {hostSettings.DispatchTimeoutSeconds}s.";
             RecordHealth(worker, success: false, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
+            log.LogWarning("dispatch to {Worker} timed out after {Seconds}s", worker.Name, hostSettings.DispatchTimeoutSeconds);
         }
         catch (Exception ex)
         {
@@ -1223,6 +1225,15 @@ public static class HostRole
         chat.Messages.Add(new ChatMessage("user", task.Prompt));
 
         var client = httpFactory.CreateClient("cluster");
+        // The caller already computed the real deadline (DispatchTimeoutSeconds,
+        // linked with the operator-cancel token) into `ct` - the "cluster"
+        // client's own inherited HttpClient.Timeout (100s default) is a
+        // SEPARATE timer that races it independently and can fire first, since
+        // .NET enforces HttpClient.Timeout regardless of what token the caller
+        // passed in. A large local model that takes >100s to load on first
+        // inference would spuriously fail here well before the configured
+        // (often much longer) dispatch timeout the operator actually set.
+        client.Timeout = Timeout.InfiniteTimeSpan;
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{worker.PreferredEndpoint}/execute/stream")
         {
             Content = JsonContent.Create(chat)

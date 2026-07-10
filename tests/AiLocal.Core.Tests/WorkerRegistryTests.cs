@@ -162,4 +162,79 @@ public class WorkerRegistryTests : IDisposable
         Assert.Equal("renamed-worker", live.Name);
         Assert.Equal("http://127.0.0.1:9999", live.Endpoint);
     }
+
+    [Fact]
+    public void Remove_BlocksTheIdFromReRegistering()
+    {
+        // "Ta bort fran gruppen" in the dashboard - removeNodeFromCluster's
+        // own confirm dialog says the Worker can't register again until
+        // restored. A heartbeat landing after Remove (HostRole's
+        // POST /cluster/register handler) must be rejected, not silently
+        // re-added.
+        var registry = new WorkerRegistry(new HostStateStore());
+        registry.Upsert(Heartbeat("w1"));
+
+        var removed = registry.Remove("w1");
+        var reRegistered = registry.Upsert(Heartbeat("w1"));
+
+        Assert.True(removed);
+        Assert.False(reRegistered);
+        Assert.Null(registry.Get("w1"));
+    }
+
+    [Fact]
+    public void Restore_UnblocksAPreviouslyRemovedId_AllowingReRegistration()
+    {
+        // Regression coverage for the v1.2.6 fix: a click-to-pair handshake
+        // completing (HostRole's /pairing/approved, after the nonce has
+        // verified both sides explicitly re-consented) calls Restore() so a
+        // Worker removed long ago isn't stuck rejecting its heartbeat forever
+        // with no way to fix it from the UI.
+        var registry = new WorkerRegistry(new HostStateStore());
+        registry.Upsert(Heartbeat("w1"));
+        registry.Remove("w1");
+
+        var restored = registry.Restore("w1");
+        var reRegistered = registry.Upsert(Heartbeat("w1"));
+
+        Assert.True(restored);
+        Assert.True(reRegistered);
+        Assert.NotNull(registry.Get("w1"));
+    }
+
+    [Fact]
+    public void Restore_IdThatWasNeverBlocked_ReturnsFalse()
+    {
+        var registry = new WorkerRegistry(new HostStateStore());
+
+        Assert.False(registry.Restore("never-existed"));
+    }
+
+    [Fact]
+    public void Remove_OnlyBlocksTheRemovedId_OtherWorkersUnaffected()
+    {
+        var registry = new WorkerRegistry(new HostStateStore());
+        registry.Upsert(Heartbeat("w1"));
+        registry.Upsert(new NodeInfo
+        {
+            Id = "w2",
+            Name = "worker-2",
+            Role = NodeRole.Worker,
+            Endpoint = "http://127.0.0.1:5082",
+            MaxConcurrentTasks = 1
+        });
+
+        registry.Remove("w1");
+        var stillWorks = registry.Upsert(new NodeInfo
+        {
+            Id = "w2",
+            Name = "worker-2",
+            Role = NodeRole.Worker,
+            Endpoint = "http://127.0.0.1:5082",
+            MaxConcurrentTasks = 1
+        });
+
+        Assert.True(stillWorks);
+        Assert.NotNull(registry.Get("w2"));
+    }
 }
