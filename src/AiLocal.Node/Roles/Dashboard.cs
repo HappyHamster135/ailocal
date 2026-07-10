@@ -467,7 +467,27 @@ internal static class Dashboard
         }
         .detail-section:last-child { border-bottom: 0; }
         .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-        .history-list { display: grid; gap: 6px; }
+        .history-list {
+          display: grid;
+          gap: 6px;
+          max-height: 340px;
+          overflow-y: auto;
+          /* Scrolling to the top/bottom of this list must not "chain" into
+             scrolling the panel behind it - the list should absorb the wheel
+             input on its own. */
+          overscroll-behavior: contain;
+        }
+        /* Scroll stays fully functional everywhere (wheel, trackpad, drag,
+           keyboard) - only the visible track+thumb is hidden, on every
+           scrollable region in the app. */
+        .content, .messages, .history-list, .topology-scroll, #tasks, .dialog-body {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .content::-webkit-scrollbar, .messages::-webkit-scrollbar, .history-list::-webkit-scrollbar,
+        .topology-scroll::-webkit-scrollbar, #tasks::-webkit-scrollbar, .dialog-body::-webkit-scrollbar {
+          display: none;
+        }
         .hist { border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); }
         .hist > summary {
           cursor: pointer;
@@ -930,7 +950,8 @@ internal static class Dashboard
           pairingConnecting: new Set(),
           pairingErrors: {},
           pairingResponding: new Set(),
-          pairingRequestErrors: {}
+          pairingRequestErrors: {},
+          openHistoryIds: new Set()
         };
 
         const $ = id => document.getElementById(id);
@@ -1416,6 +1437,7 @@ internal static class Dashboard
 
           $('topologyConfigureBtn').onclick = () => openSettings(worker.id);
           $('topologyRemoveBtn').onclick = () => removeNodeFromCluster(worker.id);
+          wireHistoryToggles();
         }
 
         function renderInspector() {
@@ -1491,6 +1513,7 @@ internal static class Dashboard
             box.textContent = state.nodeAction.message;
             box.className = `notice show ${state.nodeAction.isError ? 'bad' : ''}`;
           }
+          wireHistoryToggles();
         }
 
         function showNodeAction(message, isError = false) {
@@ -1574,11 +1597,25 @@ internal static class Dashboard
             const assignment = t.assignmentReason
               ? `<div class="small" style="margin-top:6px">${esc(t.assignmentReason)}</div>`
               : '';
-            return `<details class="hist">
+            // The 3s refresh cycle rebuilds this whole list from scratch, which
+            // would otherwise silently re-collapse an entry the operator just
+            // opened to read - re-apply the "open" attribute from tracked state.
+            const isOpen = state.openHistoryIds.has(t.id);
+            return `<details class="hist" data-hist-id="${esc(t.id)}" ${isOpen ? 'open' : ''}>
               <summary><span class="hist-title">${esc(t.title || t.prompt)}</span><span class="pill">${esc(status)}</span></summary>
               <div class="hist-body"><div class="small">${esc(meta)}</div>${assignment}<div>${esc(trunc(body, 1200))}</div></div>
             </details>`;
           }).join('');
+        }
+
+        function wireHistoryToggles() {
+          document.querySelectorAll('[data-hist-id]').forEach(details => {
+            details.addEventListener('toggle', () => {
+              const id = details.dataset.histId;
+              if (details.open) state.openHistoryIds.add(id);
+              else state.openHistoryIds.delete(id);
+            });
+          });
         }
 
         async function loadWorkerTasks(id) {
