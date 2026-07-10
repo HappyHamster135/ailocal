@@ -641,6 +641,18 @@ public static class HostRole
             if (!pairing.TryCompleteOutbound(req.PeerId, req.Nonce, out _))
                 return Results.Json(new { error = "no matching pairing request" }, statusCode: StatusCodes.Status404NotFound);
 
+            // A Worker removed via "Ta bort fran gruppen" stays on a permanent
+            // block list (WorkerRegistry._blockedNodeIds) so it can't silently
+            // re-register - that's by design (removeNodeFromCluster's own
+            // confirm dialog says as much). But reaching this point means both
+            // operators just explicitly re-consented through click-to-pair -
+            // the Host clicked Anslut, the Worker's own operator clicked
+            // Accept, and the nonce matched - which is a strictly stronger
+            // signal than a heartbeat. That supersedes an old removal instead
+            // of silently 403ing every register call afterward with no way to
+            // fix it from the UI.
+            registry.Restore(req.PeerId);
+
             var token = store.GetClusterToken();
             if (string.IsNullOrWhiteSpace(token))
             {
