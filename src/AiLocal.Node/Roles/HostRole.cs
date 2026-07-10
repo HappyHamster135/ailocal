@@ -586,8 +586,17 @@ public static class HostRole
         // /pairing/approved below ever gets called back - see PairingCoordinator.
         app.MapGet("/api/discovered-workers", (PairingCoordinator pairing, WorkerRegistry reg) =>
         {
-            var known = reg.All.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var discovered = pairing.Discovered(NodeRole.Worker).Where(p => !known.Contains(p.Id));
+            // Only hide a peer that's actually connected right now. Filtering
+            // by "ever registered" instead of "currently online" meant a
+            // Worker that went offline (stopped, lost its token, whatever)
+            // stayed a permanent registry entry and could never be re-paired
+            // through this list again - the Anslut button would simply never
+            // come back for it.
+            var connected = reg.All
+                .Where(n => n.Status != NodeStatus.Offline)
+                .Select(n => n.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var discovered = pairing.Discovered(NodeRole.Worker).Where(p => !connected.Contains(p.Id));
             return Results.Ok(discovered);
         });
 

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AiLocal.Core.Configuration;
@@ -221,12 +222,46 @@ public static class NodeWebHost
         // with a pending-pairing-request count fetched over loopback, so a
         // click-to-pair request on a Worker the operator can't see (because
         // they're still looking at the Launcher screen) doesn't go unnoticed.
-        app.MapGet("/api/local-nodes", async (LocalNodeLauncher launcher, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        app.MapGet("/api/local-nodes", async (
+            LocalNodeLauncher launcher, NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
             var client = httpFactory.CreateClient();
-            client.Timeout = TimeSpan.FromMilliseconds(800);
-            var results = new List<object>();
-            foreach (var node in launcher.KnownLocalNodes)
+            client.Timeout = TimeSpan.FromMilliseconds(500);
+
+            var candidates = new Dictionary<NodeRole, LocalNodeRecord>();
+            foreach (var record in launcher.KnownLocalNodes)
+                candidates[record.Role] = record;
+
+            // KnownLocalNodes only remembers roles THIS process itself started
+            // or reused via /api/launch - a sibling role started independently
+            // (a separate tray action, or relaunched after this process itself
+            // restarted, e.g. for an update) is invisible to it, which meant
+            // its pending click-to-pair requests silently never surfaced here.
+            // Probe the well-known default ports directly, in parallel, so an
+            // already-running sibling is found either way.
+            var missingRoles = new[] { NodeRole.Host, NodeRole.Worker, NodeRole.Overseer }
+                .Where(role => role != settings.Role && !candidates.ContainsKey(role));
+            var probed = await Task.WhenAll(missingRoles.Select(async role =>
+            {
+                var port = LocalNodeLauncher.DefaultPort(role);
+                var endpoint = $"http://127.0.0.1:{port}";
+                try
+                {
+                    using var health = await client.GetAsync($"{endpoint}/health", ct);
+                    if (!health.IsSuccessStatusCode) return (LocalNodeRecord?)null;
+                    using var stream = await health.Content.ReadAsStreamAsync(ct);
+                    using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("role", out var roleProp) &&
+                        string.Equals(roleProp.GetString(), role.ToString(), StringComparison.OrdinalIgnoreCase))
+                        return (LocalNodeRecord?)new LocalNodeRecord(role, port, endpoint);
+                }
+                catch { /* nothing listening on that default port */ }
+                return (LocalNodeRecord?)null;
+            }));
+            foreach (var found in probed)
+                if (found is { } record) candidates[record.Role] = record;
+
+            var results = await Task.WhenAll(candidates.Values.OrderBy(n => n.Role).Select(async node =>
             {
                 var pendingCount = 0;
                 try
@@ -243,8 +278,8 @@ public static class NodeWebHost
                 }
                 catch { /* that node may not be a Worker, or isn't up right now */ }
 
-                results.Add(new { role = node.Role.ToString(), port = node.Port, endpoint = node.Endpoint, pendingPairingRequests = pendingCount });
-            }
+                return (object)new { role = node.Role.ToString(), port = node.Port, endpoint = node.Endpoint, pendingPairingRequests = pendingCount };
+            }));
 
             return Results.Ok(results);
         });
