@@ -109,9 +109,13 @@ public static class WorkerRole
                 var client = httpFactory.CreateClient("cluster");
                 using var response = await client.PostAsJsonAsync($"{request.RequesterEndpoint}/pairing/approved", payload, ct);
                 if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)response.StatusCode}";
                     return Results.Problem(
-                        detail: $"Host {request.RequesterEndpoint} svarade {(int)response.StatusCode}.",
+                        detail: $"Host {request.RequesterEndpoint} svarade: {reason}",
                         statusCode: StatusCodes.Status502BadGateway);
+                }
 
                 var approval = await response.Content.ReadFromJsonAsync<PairingApprovalResponse>(ct);
                 if (approval?.ClusterToken is not { Length: > 0 } token)
@@ -127,5 +131,27 @@ public static class WorkerRole
                 return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         });
+    }
+
+    /// <summary>Pulls a human-readable reason out of a failed response body -
+    /// either a ProblemDetails "detail" field or a plain {"error": "..."}
+    /// shape (both are used across this app's endpoints) - so a pairing
+    /// failure shows the Host's actual reason instead of just a status code.</summary>
+    private static string? ExtractErrorReason(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("detail", out var detail) && detail.ValueKind == JsonValueKind.String)
+                return detail.GetString();
+            if (document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String)
+                return error.GetString();
+        }
+        catch { /* not JSON, or an unexpected shape - fall back to the status code */ }
+
+        return null;
     }
 }

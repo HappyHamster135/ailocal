@@ -625,14 +625,24 @@ public static class HostRole
         // after ITS operator accepted the request above, echoing the same
         // nonce this Host generated. The cluster token is only ever handed
         // over here - after both sides have explicitly consented.
-        app.MapPost("/pairing/approved", (PairingHandshakePayload req, PairingCoordinator pairing, PersistentSettingsStore store) =>
+        app.MapPost("/pairing/approved", (PairingHandshakePayload req, PairingCoordinator pairing,
+            PersistentSettingsStore store, HostLocator hostLocator) =>
         {
             if (!pairing.TryCompleteOutbound(req.PeerId, req.Nonce, out _))
                 return Results.Json(new { error = "no matching pairing request" }, statusCode: StatusCodes.Status404NotFound);
 
             var token = store.GetClusterToken();
             if (string.IsNullOrWhiteSpace(token))
-                return Results.Problem(detail: "This Host has no cluster token configured.", statusCode: StatusCodes.Status500InternalServerError);
+            {
+                // Click-to-pair promises no manual setup - a Host that never
+                // got a token (or had it cleared) shouldn't make pairing fail
+                // outright; mint one now so the handshake can still complete.
+                store.Update(new SettingsUpdate(RegenerateClusterToken: true), hostLocator);
+                token = store.GetClusterToken();
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+                return Results.Problem(detail: "Could not generate a cluster token.", statusCode: StatusCodes.Status500InternalServerError);
 
             return Results.Ok(new PairingApprovalResponse(token));
         });
