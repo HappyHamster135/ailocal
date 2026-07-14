@@ -204,4 +204,29 @@ public class OpenRouterProviderToolsTests
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
         Assert.False(sentBody.RootElement.TryGetProperty("tools", out _));
     }
+
+    /// <summary>Regression: see the matching test in OllamaProviderToolsTests.
+    /// OpenRouter ids are prefixed ("anthropic/claude-sonnet-4.5"); a bare
+    /// Anthropic ModelHint ("claude-sonnet-5") used to get sent as-is and
+    /// 404 instead of resolving - breaking OpenRouter as a fallback the
+    /// moment Anthropic itself failed over to it.</summary>
+    [Fact]
+    public async Task CompleteAsync_WithAnthropicModelHint_IgnoresItAndUsesOwnConfiguredModel()
+    {
+        const string plainBody = """
+            { "choices": [ { "message": { "role": "assistant", "content": "hi" } } ], "usage": {} }
+            """;
+        var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, plainBody));
+        var provider = new OpenRouterProvider(new HttpClient(handler), () => "fake-key", new ProviderSettings());
+
+        var result = await provider.CompleteAsync(new ChatRequest
+        {
+            Messages = { new ChatMessage("user", "hi") },
+            ModelHint = "claude-sonnet-5"
+        });
+
+        Assert.True(result.IsSuccess);
+        using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
+        Assert.Equal("anthropic/claude-sonnet-4.5", sentBody.RootElement.GetProperty("model").GetString());
+    }
 }

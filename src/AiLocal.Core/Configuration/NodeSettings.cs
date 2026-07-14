@@ -60,10 +60,10 @@ public sealed class WorkerProfileSettings
     public ModelTiers ModelTiers { get; set; } = new();
 }
 
-/// <summary>Which model the Host picks for an agent-mode task, keyed off the
-/// task's computed complexity (1-5). The operator can override any tier -
-/// values are model *ids* (Anthropic ids by default, or any OpenRouter
-/// id if that provider is first in the worker's chain).</summary>
+/// <summary>Which model the Host picks for a task, keyed off the task's
+/// computed complexity (1-5). Values are Anthropic model ids - the hint this
+/// produces is only ever honored by AnthropicProvider (see ChatRequest.ModelHint),
+/// so this only has an effect when Anthropic ends up serving the request.</summary>
 public sealed class ModelTiers
 {
     /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).</summary>

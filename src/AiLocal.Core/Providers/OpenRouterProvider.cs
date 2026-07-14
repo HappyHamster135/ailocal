@@ -41,7 +41,12 @@ public sealed class OpenRouterProvider : IChatProvider
         if (string.IsNullOrWhiteSpace(apiKey))
             return ProviderResponse.Fail(ProviderOutcome.AuthFailed, "OPENROUTER_API_KEY not set");
 
-        var model = request.ModelHint ?? _settings.OpenRouterModel;
+        // ModelHint is never honored here - see the matching note in
+        // GeminiProvider/OllamaProvider. OpenRouter ids are prefixed
+        // ("anthropic/claude-sonnet-4.5"); every current source of ModelHint
+        // sends a bare Anthropic id ("claude-sonnet-5"), which OpenRouter
+        // would 404 on just the same.
+        var model = _settings.OpenRouterModel;
 
         var payload = new Dictionary<string, object?>
         {

@@ -154,4 +154,50 @@ public class OllamaProviderToolsTests
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
         Assert.False(sentBody.RootElement.TryGetProperty("tools", out _));
     }
+
+    /// <summary>Regression: the dashboard's model dropdown and the Host's
+    /// per-complexity ModelTiers both only ever produce Anthropic ids
+    /// ("claude-sonnet-5"). Ollama used to take that at face value and send it
+    /// straight to /api/chat, which 404'd - breaking the fallback chain the
+    /// moment Anthropic itself failed over to Ollama, exactly the scenario
+    /// FallbackChatProvider exists to handle gracefully.</summary>
+    [Fact]
+    public async Task CompleteAsync_WithAnthropicModelHint_IgnoresItAndUsesOwnConfiguredModel()
+    {
+        const string plainBody = """
+            { "message": { "role": "assistant", "content": "hi" }, "prompt_eval_count": 1, "eval_count": 1 }
+            """;
+        var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, plainBody));
+        var provider = MakeProvider(handler);
+
+        var result = await provider.CompleteAsync(new ChatRequest
+        {
+            Messages = { new ChatMessage("user", "hi") },
+            ModelHint = "claude-sonnet-5"
+        });
+
+        Assert.True(result.IsSuccess);
+        using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
+        Assert.Equal("llama3.1:8b", sentBody.RootElement.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task StreamAsync_WithAnthropicModelHint_IgnoresItAndUsesOwnConfiguredModel()
+    {
+        const string ndjsonLine = """{"message":{"role":"assistant","content":"hi"},"done":true,"prompt_eval_count":1,"eval_count":1}""";
+        var handler = new StubHandler((_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ndjsonLine + "\n", Encoding.UTF8, "application/json")
+        });
+        var provider = MakeProvider(handler);
+
+        await foreach (var _ in provider.StreamAsync(new ChatRequest
+        {
+            Messages = { new ChatMessage("user", "hi") },
+            ModelHint = "claude-sonnet-5"
+        })) { }
+
+        using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
+        Assert.Equal("llama3.1:8b", sentBody.RootElement.GetProperty("model").GetString());
+    }
 }

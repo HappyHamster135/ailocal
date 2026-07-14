@@ -46,8 +46,11 @@ public sealed class OllamaProvider : IChatProvider
 
     public async Task<ProviderResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var model = !string.IsNullOrWhiteSpace(request.ModelHint) ? request.ModelHint
-            : !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+        // ModelHint is never honored here - see the matching note in
+        // GeminiProvider. Ollama's own model catalog has nothing in common
+        // with the Anthropic ids the dashboard can produce, so a hint from
+        // there ("claude-sonnet-5") 404s instead of resolving to anything.
+        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
             : _recommendation.OllamaTag;
 
         var payload = new Dictionary<string, object?>
@@ -195,8 +198,9 @@ public sealed class OllamaProvider : IChatProvider
         ChatRequest request,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var model = !string.IsNullOrWhiteSpace(request.ModelHint) ? request.ModelHint
-            : !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+        // See the matching note in CompleteAsync - ModelHint is never
+        // honored here, only this Worker's own configured/recommended model.
+        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
             : _recommendation.OllamaTag;
 
         var messages = new List<object>();

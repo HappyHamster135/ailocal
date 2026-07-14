@@ -17,12 +17,14 @@ public class GeminiProviderToolsTests
     {
         private readonly Func<HttpRequestMessage, string?, HttpResponseMessage> _respond;
         public string? CapturedRequestBody { get; private set; }
+        public Uri? CapturedRequestUri { get; private set; }
 
         public StubHandler(Func<HttpRequestMessage, string?, HttpResponseMessage> respond) => _respond = respond;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             CapturedRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
+            CapturedRequestUri = request.RequestUri;
             return _respond(request, CapturedRequestBody);
         }
     }
@@ -154,5 +156,30 @@ public class GeminiProviderToolsTests
 
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
         Assert.False(sentBody.RootElement.TryGetProperty("tools", out _));
+    }
+
+    /// <summary>Regression: see the matching test in OllamaProviderToolsTests.
+    /// A Claude-shaped ModelHint used to get baked straight into the request
+    /// URL ("/models/claude-sonnet-5:generateContent"), 404ing instead of
+    /// resolving - breaking Gemini as a fallback the moment Anthropic itself
+    /// failed over to it.</summary>
+    [Fact]
+    public async Task CompleteAsync_WithAnthropicModelHint_IgnoresItAndUsesOwnConfiguredModel()
+    {
+        const string plainBody = """
+            { "candidates": [ { "content": { "parts": [ { "text": "hi" } ] } } ], "usageMetadata": {} }
+            """;
+        var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, plainBody));
+        var provider = new GeminiProvider(new HttpClient(handler), () => "fake-key", new ProviderSettings());
+
+        var result = await provider.CompleteAsync(new ChatRequest
+        {
+            Messages = { new ChatMessage("user", "hi") },
+            ModelHint = "claude-sonnet-5"
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("gemini-2.5-flash", handler.CapturedRequestUri!.ToString());
+        Assert.DoesNotContain("claude", handler.CapturedRequestUri!.ToString());
     }
 }

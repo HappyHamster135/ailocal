@@ -38,7 +38,14 @@ public sealed class GeminiProvider : IChatProvider
         if (string.IsNullOrWhiteSpace(apiKey))
             return ProviderResponse.Fail(ProviderOutcome.AuthFailed, "GEMINI_API_KEY not set");
 
-        var model = request.ModelHint ?? _settings.GeminiModel;
+        // ModelHint is never honored here - every current source of it (the
+        // dashboard's model dropdown, the per-complexity ModelTiers default)
+        // only ever produces Anthropic model ids. Blindly forwarding one of
+        // those to Gemini instead of this Worker's own configured model used
+        // to break the very fallback chain it's supposed to be part of: the
+        // moment Anthropic failed over to Gemini, Gemini would get asked for
+        // a nonexistent "claude-..." model and fail too.
+        var model = _settings.GeminiModel;
 
         var payload = new Dictionary<string, object?>
         {

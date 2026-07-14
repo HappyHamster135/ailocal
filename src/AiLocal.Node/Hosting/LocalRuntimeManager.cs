@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Hardware;
@@ -55,6 +57,8 @@ public sealed class LocalRuntimeManager
             $"ollama pull {model}");
     }
 
+    private static readonly TimeSpan PullTimeout = TimeSpan.FromMinutes(30);
+
     public async Task<LocalRuntimePullResult> PullRecommendedModelAsync(CancellationToken ct = default)
     {
         var model = RecommendedModel;
@@ -77,7 +81,21 @@ public sealed class LocalRuntimeManager
 
             var outputTask = process.StandardOutput.ReadToEndAsync(ct);
             var errorTask = process.StandardError.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
+
+            // A stalled download (dead connection against a broken/unreachable
+            // ollama serve, network drop mid-pull) used to hang this call - and
+            // the HTTP request that triggered it (Setup, proxied cross-machine
+            // through a Host/Overseer) - forever. A large model can legitimately
+            // take a while, so this is generous, not tight.
+            try
+            {
+                await process.WaitForExitAsync(ct).WaitAsync(PullTimeout, ct);
+            }
+            catch (TimeoutException)
+            {
+                try { process.Kill(true); } catch { /* ignore */ }
+                return new LocalRuntimePullResult(false, model, -1, $"timed out after {PullTimeout.TotalMinutes:0} minutes");
+            }
 
             var output = (await outputTask) + (await errorTask);
             return new LocalRuntimePullResult(process.ExitCode == 0, model, process.ExitCode, output);
@@ -230,7 +248,11 @@ public sealed class LocalRuntimeManager
             $"brew install ollama exited {code}. {Trunc(output)}".Trim());
     }
 
-    private async Task<LocalRuntimeSetupStep> EnsureOllamaRunningAsync(CancellationToken ct)
+    /// <summary>internal (not private): also called directly by
+    /// LocalRuntimeBootstrapper's watchdog loop, which only ever wants this one
+    /// step - not the install-if-missing/pull-model steps SetupLocalAiAsync
+    /// bundles it with - run unattended in the background.</summary>
+    internal async Task<LocalRuntimeSetupStep> EnsureOllamaRunningAsync(CancellationToken ct)
     {
         if (await IsEndpointReachableAsync(ct))
             return new LocalRuntimeSetupStep("Start Ollama", true, "Service reachable");
@@ -273,6 +295,20 @@ public sealed class LocalRuntimeManager
             if (await IsEndpointReachableAsync(ct))
                 return new LocalRuntimeSetupStep("Start Ollama", true, "Service started");
             await Task.Delay(500, ct);
+        }
+
+        // UseShellExecute=true means stdout/stderr from `ollama serve` itself
+        // can't be captured (mutually exclusive with redirection), so there's
+        // no way to know WHY it didn't come up - the one extra signal
+        // available locally is whether *something* is already bound to the
+        // port. If so, this wasn't a failure to start - it's a stuck/zombie
+        // process (or an unrelated service) squatting on it, which a fresh
+        // `ollama serve` attempt can never fix by itself.
+        if (IsLoopbackEndpoint(out var port) && IsLocalPortBound(port))
+        {
+            return new LocalRuntimeSetupStep("Start Ollama", false,
+                $"Port {port} is already in use by something that isn't answering as Ollama. " +
+                "Check Task Manager for a stray ollama.exe/ollama app.exe process and end it, then retry.");
         }
 
         return new LocalRuntimeSetupStep("Start Ollama", false,
@@ -368,6 +404,39 @@ public sealed class LocalRuntimeManager
         ? _recommendation.OllamaTag
         : _settings.Providers.OllamaModel;
 
+    /// <summary>True only for a loopback endpoint (the overwhelmingly common
+    /// case) - a remote OllamaEndpoint would make a local port check
+    /// meaningless, since it'd be inspecting this machine's ports, not the
+    /// remote one.</summary>
+    private bool IsLoopbackEndpoint(out int port)
+    {
+        port = 0;
+        if (!Uri.TryCreate(_settings.Providers.OllamaEndpoint, UriKind.Absolute, out var uri))
+            return false;
+
+        var isLoopback = string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            (IPAddress.TryParse(uri.Host, out var ip) && IPAddress.IsLoopback(ip));
+        if (!isLoopback)
+            return false;
+
+        port = uri.Port;
+        return true;
+    }
+
+    private static bool IsLocalPortBound(int port)
+    {
+        try
+        {
+            return IPGlobalProperties.GetIPGlobalProperties()
+                .GetActiveTcpListeners()
+                .Any(endpoint => endpoint.Port == port);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static async Task<bool> CommandExistsAsync(string command, CancellationToken ct)
     {
         var tool = OperatingSystem.IsWindows() ? "where.exe" : "which";
@@ -411,12 +480,27 @@ public sealed class LocalRuntimeBootstrapper : BackgroundService
         _log = log;
     }
 
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromMinutes(2);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_settings.Role != NodeRole.Worker || !_settings.Installer.AutoPullOllamaModel)
+        if (_settings.Role != NodeRole.Worker)
             return;
 
-        var status = await _runtime.InspectAsync(stoppingToken);
+        if (_settings.Installer.AutoPullOllamaModel)
+            await AutoPullOnceAsync(stoppingToken);
+
+        // Runs regardless of AutoPullOllamaModel - that setting is about
+        // fetching the model, not about keeping the service itself up. A
+        // Worker that was working fine can otherwise go quietly dead until
+        // its operator happens to notice and click "Installera lokal AI"
+        // again - the only thing that currently retries a start.
+        await WatchdogLoopAsync(stoppingToken);
+    }
+
+    private async Task AutoPullOnceAsync(CancellationToken ct)
+    {
+        var status = await _runtime.InspectAsync(ct);
         if (!status.OllamaOnPath)
         {
             _log.LogWarning("Ollama is not installed or not on PATH. Install Ollama, then run: {Command}", status.PullCommand);
@@ -430,10 +514,39 @@ public sealed class LocalRuntimeBootstrapper : BackgroundService
         }
 
         _log.LogInformation("pulling recommended Ollama model: {Model}", status.RecommendedModel);
-        var result = await _runtime.PullRecommendedModelAsync(stoppingToken);
+        var result = await _runtime.PullRecommendedModelAsync(ct);
         if (result.Success)
             _log.LogInformation("pulled Ollama model: {Model}", result.Model);
         else
             _log.LogWarning("failed to pull Ollama model {Model}: {Output}", result.Model, result.Output);
+    }
+
+    private async Task WatchdogLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await CheckAndRecoverAsync(ct); }
+            catch (Exception ex) { _log.LogDebug(ex, "ollama watchdog check failed"); }
+
+            try { await Task.Delay(WatchdogInterval, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    private async Task CheckAndRecoverAsync(CancellationToken ct)
+    {
+        var status = await _runtime.InspectAsync(ct);
+        // Not installed: nothing this watchdog can safely do unattended -
+        // installing is still an explicit "Installera lokal AI" click only.
+        // Already reachable: nothing to do.
+        if (!status.OllamaOnPath || status.OllamaEndpointReachable)
+            return;
+
+        _log.LogWarning("Ollama is installed but not responding at {Endpoint} - attempting to restart it.", status.Endpoint);
+        var step = await _runtime.EnsureOllamaRunningAsync(ct);
+        if (step.Ok)
+            _log.LogInformation("Ollama restarted automatically.");
+        else
+            _log.LogWarning("Automatic Ollama restart did not succeed: {Detail}", step.Detail);
     }
 }
