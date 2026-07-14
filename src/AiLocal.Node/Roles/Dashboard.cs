@@ -1449,6 +1449,12 @@ internal static class Dashboard
           }
 
           const hardware = worker.hardware;
+          // Rebuilding innerHTML resets this element's own scrollTop to 0,
+          // same as it used to wipe an expanded <details>' open state - the
+          // fix for that (data-hist-id + wireHistoryToggles) didn't cover
+          // scroll position, so scrolling down to read older entries here
+          // got silently reset to the top on the next ~3s refresh.
+          const topologyHistoryScroll = $('topologyHistory')?.scrollTop ?? 0;
           $('topologyDetail').innerHTML = `
             <section class="detail-section">
               <div class="kv">
@@ -1466,8 +1472,9 @@ internal static class Dashboard
             </section>
             <section class="detail-section">
               <div class="panel-title" style="margin-bottom:8px">Historik</div>
-              <div class="history-list">${workerHistoryHtml()}</div>
+              <div class="history-list" id="topologyHistory">${workerHistoryHtml()}</div>
             </section>`;
+          $('topologyHistory').scrollTop = topologyHistoryScroll;
 
           $('topologyConfigureBtn').onclick = () => openSettings(worker.id);
           $('topologyRemoveBtn').onclick = () => removeNodeFromCluster(worker.id);
@@ -1495,6 +1502,10 @@ internal static class Dashboard
           const h = node.hardware;
           const providerPills = (node.providerPriority ?? []).map(id =>
             `<span class="pill">${esc(providerLabels[id] ?? id)}</span>`).join('');
+          // See the matching comment in renderTopologyDetail() - rebuilding
+          // innerHTML resets this element's own scrollTop to 0 on every
+          // ~3s refresh, silently undoing a scroll down to read older entries.
+          const workerHistoryScroll = $('workerHistory')?.scrollTop ?? 0;
           $('workerDetail').innerHTML = `
             <section class="detail-section">
               <div class="panel-title">Status</div>
@@ -1537,6 +1548,7 @@ internal static class Dashboard
               <div class="panel-title" style="margin-bottom:8px">Historik</div>
               <div class="history-list" id="workerHistory">${workerHistoryHtml()}</div>
             </section>`;
+          $('workerHistory').scrollTop = workerHistoryScroll;
 
           $('setupAiBtn').onclick = setupWorkerAi;
           $('inspectRuntimeBtn').onclick = inspectWorkerRuntime;
@@ -1726,6 +1738,19 @@ internal static class Dashboard
             box.innerHTML = `<div class="empty">Inga meddelanden ännu.</div>`;
             return;
           }
+          // The refresh loop calls this every ~3s (more often while a reply
+          // is streaming), and used to force-scroll to the bottom every
+          // single time, unconditionally - scrolling up to reread an earlier
+          // message got yanked back down within seconds. Only follow new
+          // messages automatically if the operator was already at (or near)
+          // the bottom before this render; otherwise leave their scroll
+          // position alone. Restore the exact previous position explicitly
+          // rather than relying on whatever the browser does by default after
+          // an innerHTML replacement (not guaranteed to leave scrollTop where
+          // it was - same class of state loss the history list had, just for
+          // scroll position instead of an expanded <details>' open attribute).
+          const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+          const previousScrollTop = box.scrollTop;
           box.innerHTML = state.messages.map(m => {
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
             const live = inFlight && state.streamBuffer && state.streamBuffer.taskId === m.taskId;
@@ -1741,7 +1766,7 @@ internal static class Dashboard
               <div>${esc(content)}</div>
             </article>`;
           }).join('');
-          box.scrollTop = box.scrollHeight;
+          box.scrollTop = wasNearBottom ? box.scrollHeight : previousScrollTop;
 
           document.querySelectorAll('#messages [data-cancel-task]').forEach(button => {
             button.onclick = () => cancelTask(button.dataset.cancelTask);
