@@ -522,6 +522,7 @@ public static class HostRole
         services.AddSingleton<TaskStreamHub>();
         services.AddSingleton<ScheduleStore>();
         services.AddHostedService<ScheduleRunner>();
+        services.AddHostedService<HostAutoConnectService>();
     }
 
     public static void MapEndpoints(WebApplication app)
@@ -612,24 +613,10 @@ public static class HostRole
             if (peer is null)
                 return Results.NotFound(new { error = "worker not currently visible on the network" });
 
-            var nonce = pairing.BeginOutbound(peer.Id, peer.Name, peer.Endpoint);
-            try
-            {
-                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
-                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, nonce);
-                var client = httpFactory.CreateClient("cluster");
-                using var response = await client.PostAsJsonAsync($"{peer.Endpoint}/pairing/request", payload, ct);
-                if (!response.IsSuccessStatusCode)
-                    return Results.Problem(
-                        detail: $"Worker {peer.Endpoint} svarade {(int)response.StatusCode}.",
-                        statusCode: StatusCodes.Status502BadGateway);
-
-                return Results.Ok(new { requested = true, worker = peer.Name });
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
-            }
+            var (success, error) = await PairingConnect.SendRequestAsync(peer, pairing, store, settings, httpFactory, ct);
+            return success
+                ? Results.Ok(new { requested = true, worker = peer.Name })
+                : Results.Problem(detail: error, statusCode: StatusCodes.Status502BadGateway);
         });
 
         // Public (see ClusterSecurity.IsPublic): called back by a Worker only

@@ -39,6 +39,16 @@ public static class NodeComposition
         services.AddHttpClient("anthropic", c => c.Timeout = providerTimeout);
         services.AddHttpClient("gemini", c => c.Timeout = providerTimeout);
         services.AddHttpClient("ollama", c => c.Timeout = providerTimeout);
+        services.AddHttpClient("openrouter", c => c.Timeout = providerTimeout);
+
+        // GitHub's API rejects requests with no User-Agent. Long timeout
+        // because this same client also streams down the ~100-200MB release
+        // exe for self-update (SelfUpdater), not just the small JSON check.
+        services.AddHttpClient("github", c =>
+        {
+            c.Timeout = TimeSpan.FromMinutes(15);
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("AiLocal-SelfUpdater");
+        });
 
         services.AddSingleton(sp =>
         {
@@ -64,6 +74,11 @@ public static class NodeComposition
                     httpFactory.CreateClient("ollama"),
                     ps,
                     recommendation),
+
+                ["openrouter"] = new OpenRouterProvider(
+                    httpFactory.CreateClient("openrouter"),
+                    () => credentials.GetApiKey("openrouter"),
+                    ps),
             };
 
             return new FallbackChatProvider(byName.Values, ps, msg => logger.LogInformation("{Message}", msg));

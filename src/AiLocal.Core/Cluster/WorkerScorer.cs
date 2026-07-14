@@ -174,7 +174,8 @@ public static class WorkerScorer
 
     private static bool IsCloudProvider(string provider) =>
         provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase) ||
-        provider.Equals("gemini", StringComparison.OrdinalIgnoreCase);
+        provider.Equals("gemini", StringComparison.OrdinalIgnoreCase) ||
+        provider.Equals("openrouter", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeSkill(string? skill) =>
         string.IsNullOrWhiteSpace(skill) ? "general" : skill.Trim().ToLowerInvariant();

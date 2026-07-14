@@ -302,45 +302,25 @@ public static class NodeWebHost
 
         app.MapGet("/api/version", () => Results.Ok(new { version = CurrentVersion }));
 
-        // No real update server exists yet - this is the mechanism only. Set
-        // Node:Host:UpdateManifestUrl to a hosted JSON file shaped like
-        // {"version":"1.2.0","url":"https://.../ailocal.exe","notes":"..."}
-        // to enable it.
-        app.MapGet("/api/update-check", async (NodeSettings s, IHttpClientFactory hf, CancellationToken ct) =>
+        app.MapGet("/api/update-check", async (IHttpClientFactory hf, CancellationToken ct) =>
+            Results.Ok(await SelfUpdater.CheckAsync(hf, ct)));
+
+        // Explicit, operator-clicked only (see the button in Settings) - this
+        // never runs on its own. Downloads the matching exe from this repo's
+        // latest GitHub release, hands off to an external script to swap it
+        // in (this process can't overwrite the file it's running from), and
+        // restarts. SelfUpdater responds before this process's own port goes
+        // away, so the caller still gets an HTTP response.
+        app.MapPost("/api/update-apply", async (IHttpClientFactory hf, IHostApplicationLifetime lifetime, CancellationToken ct) =>
         {
-            var manifestUrl = s.Host.UpdateManifestUrl;
-            if (string.IsNullOrWhiteSpace(manifestUrl))
-                return Results.Ok(new { enabled = false, currentVersion = CurrentVersion });
-
-            try
-            {
-                var client = hf.CreateClient();
-                client.Timeout = TimeSpan.FromSeconds(8);
-                var manifest = await client.GetFromJsonAsync<UpdateManifest>(manifestUrl, ct);
-                var updateAvailable = manifest is not null &&
-                    Version.TryParse(manifest.Version, out var latest) &&
-                    Version.TryParse(CurrentVersion, out var current) &&
-                    latest > current;
-
-                return Results.Ok(new
-                {
-                    enabled = true,
-                    currentVersion = CurrentVersion,
-                    latestVersion = manifest?.Version,
-                    updateAvailable,
-                    downloadUrl = manifest?.Url,
-                    notes = manifest?.Notes
-                });
-            }
-            catch (Exception ex)
-            {
-                return Results.Ok(new { enabled = true, currentVersion = CurrentVersion, error = ex.Message });
-            }
+            var result = await SelfUpdater.ApplyAsync(hf, lifetime, app.Logger, ct);
+            return result.Started
+                ? Results.Ok(new { restarting = true })
+                : Results.Problem(detail: result.Error ?? "Uppdateringen misslyckades.", statusCode: StatusCodes.Status502BadGateway);
         });
     }
 
-    private static string CurrentVersion =>
-        typeof(NodeWebHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    private static string CurrentVersion => SelfUpdater.CurrentVersion;
 
     private static async Task<IResult> UpdateSettings(
         PersistentSettingsStore store,
@@ -426,5 +406,3 @@ public static class NodeWebHost
         }
     }
 }
-
-internal sealed record UpdateManifest(string Version, string? Url, string? Notes);

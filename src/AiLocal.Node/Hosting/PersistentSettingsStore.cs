@@ -26,12 +26,15 @@ public sealed record SettingsUpdate(
     string? GeminiModel = null,
     string? OllamaModel = null,
     string? OllamaEndpoint = null,
+    string? OpenRouterModel = null,
     int? MaxTokens = null,
     bool? AutoPullOllamaModel = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
+    string? OpenRouterApiKey = null,
     bool ClearAnthropicApiKey = false,
-    bool ClearGeminiApiKey = false);
+    bool ClearGeminiApiKey = false,
+    bool ClearOpenRouterApiKey = false);
 
 internal sealed class StoredNodeSettings
 {
@@ -45,15 +48,17 @@ internal sealed class StoredNodeSettings
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
     public bool StartWithWindows { get; set; }
-    public List<string> ProviderPriority { get; set; } = ["anthropic", "gemini", "ollama"];
+    public List<string> ProviderPriority { get; set; } = ["anthropic", "gemini", "openrouter", "ollama"];
     public string AnthropicModel { get; set; } = "claude-opus-4-8";
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
     public string? OllamaModel { get; set; }
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
+    public string OpenRouterModel { get; set; } = "anthropic/claude-sonnet-4.5";
     public int MaxTokens { get; set; } = 4096;
     public bool AutoPullOllamaModel { get; set; }
     public string? ProtectedAnthropicApiKey { get; set; }
     public string? ProtectedGeminiApiKey { get; set; }
+    public string? ProtectedOpenRouterApiKey { get; set; }
 }
 
 public static class SettingsPaths
@@ -122,6 +127,7 @@ public sealed class PersistentSettingsStore
         settings.Providers.GeminiModel = stored.GeminiModel;
         settings.Providers.OllamaModel = stored.OllamaModel;
         settings.Providers.OllamaEndpoint = stored.OllamaEndpoint;
+        settings.Providers.OpenRouterModel = stored.OpenRouterModel;
         settings.Providers.MaxTokens = stored.MaxTokens;
         settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
     }
@@ -158,10 +164,12 @@ public sealed class PersistentSettingsStore
                 geminiModel = _settings.Providers.GeminiModel,
                 ollamaModel = _settings.Providers.OllamaModel,
                 ollamaEndpoint = _settings.Providers.OllamaEndpoint,
+                openRouterModel = _settings.Providers.OpenRouterModel,
                 maxTokens = _settings.Providers.MaxTokens,
                 autoPullOllamaModel = _settings.Installer.AutoPullOllamaModel,
                 anthropicKeyConfigured = HasKey("anthropic"),
                 geminiKeyConfigured = HasKey("gemini"),
+                openRouterKeyConfigured = HasKey("openrouter"),
                 settingsPath = SettingsPaths.SettingsFile(_settings.Role)
             };
         }
@@ -253,6 +261,8 @@ public sealed class PersistentSettingsStore
                 _settings.Providers.OllamaModel = NullIfWhiteSpace(update.OllamaModel);
             if (update.OllamaEndpoint is not null)
                 _settings.Providers.OllamaEndpoint = RequiredEndpoint(update.OllamaEndpoint, "Ollama endpoint");
+            if (update.OpenRouterModel is not null)
+                _settings.Providers.OpenRouterModel = Required(update.OpenRouterModel, "OpenRouter model");
 
             if (update.MaxTokens.HasValue)
             {
@@ -273,6 +283,11 @@ public sealed class PersistentSettingsStore
                 _stored.ProtectedGeminiApiKey = null;
             else if (!string.IsNullOrWhiteSpace(update.GeminiApiKey))
                 _stored.ProtectedGeminiApiKey = _protector.Protect(update.GeminiApiKey.Trim());
+
+            if (update.ClearOpenRouterApiKey)
+                _stored.ProtectedOpenRouterApiKey = null;
+            else if (!string.IsNullOrWhiteSpace(update.OpenRouterApiKey))
+                _stored.ProtectedOpenRouterApiKey = _protector.Protect(update.OpenRouterApiKey.Trim());
 
             CopyCurrentIntoStored();
             Save();
@@ -303,21 +318,25 @@ public sealed class PersistentSettingsStore
     {
         lock (_gate)
         {
-            var environmentName = provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
-                ? "ANTHROPIC_API_KEY"
-                : provider.Equals("gemini", StringComparison.OrdinalIgnoreCase)
-                    ? "GEMINI_API_KEY"
-                    : null;
+            var environmentName = provider.ToLowerInvariant() switch
+            {
+                "anthropic" => "ANTHROPIC_API_KEY",
+                "gemini" => "GEMINI_API_KEY",
+                "openrouter" => "OPENROUTER_API_KEY",
+                _ => null
+            };
 
             if (environmentName is not null &&
                 Environment.GetEnvironmentVariable(environmentName) is { Length: > 0 } environmentValue)
                 return environmentValue;
 
-            var protectedValue = provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
-                ? _stored.ProtectedAnthropicApiKey
-                : provider.Equals("gemini", StringComparison.OrdinalIgnoreCase)
-                    ? _stored.ProtectedGeminiApiKey
-                    : null;
+            var protectedValue = provider.ToLowerInvariant() switch
+            {
+                "anthropic" => _stored.ProtectedAnthropicApiKey,
+                "gemini" => _stored.ProtectedGeminiApiKey,
+                "openrouter" => _stored.ProtectedOpenRouterApiKey,
+                _ => null
+            };
 
             if (string.IsNullOrWhiteSpace(protectedValue))
                 return null;
@@ -384,6 +403,7 @@ public sealed class PersistentSettingsStore
         _stored.GeminiModel = _settings.Providers.GeminiModel;
         _stored.OllamaModel = _settings.Providers.OllamaModel;
         _stored.OllamaEndpoint = _settings.Providers.OllamaEndpoint;
+        _stored.OpenRouterModel = _settings.Providers.OpenRouterModel;
         _stored.MaxTokens = _settings.Providers.MaxTokens;
         _stored.AutoPullOllamaModel = _settings.Installer.AutoPullOllamaModel;
     }

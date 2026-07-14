@@ -682,6 +682,9 @@ internal static class Dashboard
                   <label class="small" for="parallelism">Parallellitet</label>
                   <input id="parallelism" type="number" min="1" max="32" value="4">
                 </div>
+                <label class="check-field" title="Skickar till en Worker med agentläge påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istället för ett vanligt engångssvar.">
+                  <input id="assignmentMode" type="checkbox"> Assignment (agentläge)
+                </label>
                 <button class="primary" id="sendBtn">Skicka</button>
               </div>
             </div>
@@ -891,6 +894,7 @@ internal static class Dashboard
             <div class="form-grid">
               <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
               <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
+              <label class="field"><span class="small">OpenRouter-modell</span><input id="settingOpenRouterModel" placeholder="t.ex. anthropic/claude-sonnet-4.5"></label>
               <label class="field"><span class="small">Lokal Ollama-modell</span><input id="settingOllamaModel" placeholder="Använd rekommenderad"></label>
               <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
               <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
@@ -910,8 +914,27 @@ internal static class Dashboard
                 <input id="settingGeminiKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
                 <span class="key-state" id="geminiKeyState"></span>
               </label>
+              <label class="field">
+                <span class="small">OpenRouter API-nyckel</span>
+                <input id="settingOpenRouterKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                <span class="key-state" id="openRouterKeyState"></span>
+              </label>
               <label class="check-field"><input id="clearAnthropicKey" type="checkbox"> Ta bort Claude-nyckel</label>
               <label class="check-field"><input id="clearGeminiKey" type="checkbox"> Ta bort Gemini-nyckel</label>
+              <label class="check-field"><input id="clearOpenRouterKey" type="checkbox"> Ta bort OpenRouter-nyckel</label>
+            </div>
+          </section>
+          <section class="form-section" id="updateSection">
+            <div class="form-title">Uppdatering</div>
+            <div class="form-grid">
+              <div class="field wide">
+                <span class="small" id="updateStatus">Nuvarande version: ...</span>
+                <div class="token-row">
+                  <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
+                  <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
+                  <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -927,8 +950,8 @@ internal static class Dashboard
         const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled'];
         const cancellableStates = ['Pending','Dispatched','Running','Queued'];
         const fmtUsd = value => (value == null) ? '' : (value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`);
-        const providerLabels = { anthropic: 'Claude', gemini: 'Gemini', ollama: 'Local' };
-        const providerIds = ['anthropic', 'gemini', 'ollama'];
+        const providerLabels = { anthropic: 'Claude', gemini: 'Gemini', openrouter: 'OpenRouter', ollama: 'Local' };
+        const providerIds = ['anthropic', 'gemini', 'openrouter', 'ollama'];
         const state = {
           local: null,
           host: null,
@@ -936,6 +959,7 @@ internal static class Dashboard
           topology: { nodes: [], edges: [] },
           tasks: [],
           messages: [],
+          assignmentMessages: [],
           workerTasks: [],
           providerOrder: ['anthropic', 'gemini', 'ollama'],
           enabled: { anthropic: true, gemini: true, ollama: true },
@@ -1745,7 +1769,14 @@ internal static class Dashboard
 
         function renderMessages() {
           const box = $('messages');
-          if (!state.messages.length) {
+          // Assignments (agent mode) bypass the Host's task/chat board
+          // entirely (see /api/assignment) - they're not something the
+          // server knows about or persists, so they're tracked client-side
+          // only and merged in here purely for display. They don't survive
+          // a page reload; that's a known, intentional limit of this first
+          // pass, not an oversight.
+          const allMessages = [...state.messages, ...state.assignmentMessages];
+          if (!allMessages.length) {
             box.innerHTML = `<div class="empty">Inga meddelanden ännu.</div>`;
             return;
           }
@@ -1762,7 +1793,7 @@ internal static class Dashboard
           // scroll position instead of an expanded <details>' open attribute).
           const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
           const previousScrollTop = box.scrollTop;
-          box.innerHTML = state.messages.map(m => {
+          box.innerHTML = allMessages.map(m => {
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
             const live = inFlight && state.streamBuffer && state.streamBuffer.taskId === m.taskId;
             const content = live ? state.streamBuffer.text : m.content;
@@ -1770,6 +1801,7 @@ internal static class Dashboard
             <article class="message ${m.role === 'user' ? 'user' : 'assistant'}">
               <div class="message-meta">
                 <strong>${m.role === 'user' ? 'You' : 'AiLocal'}</strong>
+                ${m.isAssignment ? '<span class="pill">Assignment</span>' : ''}
                 ${m.state ? `<span>${esc(m.state)}</span>` : ''}
                 ${m.provider ? `<span>${esc(m.provider)}/${esc(m.model ?? '')}</span>` : ''}
                 ${inFlight ? `<button class="icon" title="Avbryt" data-cancel-task="${esc(m.taskId)}">✕</button>` : ''}
@@ -2193,16 +2225,20 @@ internal static class Dashboard
           $('settingAutoStart').checked = data.startWithWindows ?? false;
           $('settingAnthropicModel').value = data.anthropicModel ?? '';
           $('settingGeminiModel').value = data.geminiModel ?? '';
+          $('settingOpenRouterModel').value = data.openRouterModel ?? '';
           $('settingOllamaModel').value = data.ollamaModel ?? '';
           $('settingOllamaEndpoint').value = data.ollamaEndpoint ?? 'http://localhost:11434';
           $('settingMaxTokens').value = data.maxTokens ?? 4096;
           $('settingAutoPull').checked = data.autoPullOllamaModel ?? false;
           $('settingAnthropicKey').value = '';
           $('settingGeminiKey').value = '';
+          $('settingOpenRouterKey').value = '';
           $('clearAnthropicKey').checked = false;
           $('clearGeminiKey').checked = false;
+          $('clearOpenRouterKey').checked = false;
           $('anthropicKeyState').textContent = data.anthropicKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
           $('geminiKeyState').textContent = data.geminiKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
+          $('openRouterKeyState').textContent = data.openRouterKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
 
           const priority = data.providerPriority?.length ? data.providerPriority : ['ollama'];
           state.settingsOrder = [...priority, ...providerIds.filter(id => !priority.includes(id))];
@@ -2319,15 +2355,85 @@ internal static class Dashboard
           $('settingsTitle').textContent = targetId ? 'Konfigurera Worker' : 'Nodinställningar';
           const node = state.nodes.find(n => n.id === targetId);
           $('settingsSubtitle').textContent = node ? `${node.name} | ${node.endpoint}` : (state.local?.name ?? '');
+          // Self-update only ever touches the exe of the process answering the
+          // request - there's no remote-update proxy (a Host pushing updates
+          // to a Worker is a much bigger blast radius than the settings it
+          // already proxies), so the section only makes sense for this node.
+          $('updateSection').style.display = targetId ? 'none' : '';
           $('settingsDialog').showModal();
           try {
             await waitForRefreshIdle();
             const url = targetId ? `/api/nodes/${targetId}/settings` : '/api/settings';
             applySettingsData(await fetchJsonWithRetry(url));
             $('saveSettings').disabled = false;
+            if (!targetId) checkUpdateInSettings();
           } catch (error) {
             showSettingsNotice(error.message, true);
           }
+        }
+
+        async function checkUpdateInSettings() {
+          const status = $('updateStatus');
+          const applyBtn = $('applyUpdateBtn');
+          const manualLink = $('updateManualLink');
+          status.textContent = 'Söker efter uppdatering...';
+          applyBtn.style.display = 'none';
+          manualLink.style.display = 'none';
+          try {
+            const info = await fetchJson('/api/update-check');
+            state.updateInfo = info;
+            if (info.error) {
+              status.textContent = `Nuvarande version: ${info.currentVersion}. Kunde inte söka efter uppdatering: ${info.error}`;
+            } else if (info.updateAvailable) {
+              status.textContent = `Ny version tillgänglig: ${info.latestVersion} (nuvarande ${info.currentVersion}).` +
+                (info.notes ? ` ${info.notes}` : '');
+              if (info.canSelfUpdate) {
+                applyBtn.style.display = '';
+              } else if (info.downloadUrl) {
+                manualLink.href = info.downloadUrl;
+                manualLink.style.display = '';
+              }
+            } else {
+              status.textContent = `Du kör senaste versionen (${info.currentVersion}).`;
+            }
+          } catch (error) {
+            status.textContent = `Kunde inte söka efter uppdatering: ${error.message}`;
+          }
+        }
+
+        async function applyUpdate() {
+          if (!confirm('Ladda ner och installera den nya versionen nu? Programmet startar om automatiskt om några sekunder.'))
+            return;
+          const applyBtn = $('applyUpdateBtn');
+          const checkBtn = $('checkUpdateBtn');
+          const status = $('updateStatus');
+          applyBtn.disabled = true;
+          checkBtn.disabled = true;
+          status.textContent = 'Laddar ner och installerar - det här kan ta en stund beroende på anslutningen...';
+          try {
+            await fetchJson('/api/update-apply', { method: 'POST' });
+            status.textContent = 'Nedladdningen är klar. Startar om...';
+            waitForRestart();
+          } catch (error) {
+            status.textContent = `Uppdateringen misslyckades: ${error.message}`;
+            applyBtn.disabled = false;
+            checkBtn.disabled = false;
+          }
+        }
+
+        async function waitForRestart() {
+          // The process that just answered /api/update-apply is about to
+          // exit and come back up as the new version on the same port -
+          // poll until something answers again, then reload to pick it up.
+          for (let attempt = 0; attempt < 60; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            try {
+              await fetchJson('/api/version');
+              location.reload();
+              return;
+            } catch { /* still restarting */ }
+          }
+          $('updateStatus').textContent = 'Startade om men svarar inte än - ladda om sidan manuellt om det dröjer längre.';
         }
 
         async function waitForRefreshIdle() {
@@ -2358,14 +2464,17 @@ internal static class Dashboard
             providerPriority: activeSettingsProviderOrder(),
             anthropicModel: $('settingAnthropicModel').value,
             geminiModel: $('settingGeminiModel').value,
+            openRouterModel: $('settingOpenRouterModel').value,
             ollamaModel: $('settingOllamaModel').value,
             ollamaEndpoint: $('settingOllamaEndpoint').value,
             maxTokens: Number($('settingMaxTokens').value),
             autoPullOllamaModel: $('settingAutoPull').checked,
             anthropicApiKey: $('settingAnthropicKey').value || null,
             geminiApiKey: $('settingGeminiKey').value || null,
+            openRouterApiKey: $('settingOpenRouterKey').value || null,
             clearAnthropicApiKey: $('clearAnthropicKey').checked,
-            clearGeminiApiKey: $('clearGeminiKey').checked
+            clearGeminiApiKey: $('clearGeminiKey').checked,
+            clearOpenRouterApiKey: $('clearOpenRouterKey').checked
           };
           try {
             const url = state.settingsTarget
@@ -2413,6 +2522,10 @@ internal static class Dashboard
         async function sendMessage() {
           const prompt = $('prompt').value.trim();
           if (!prompt) return;
+          if ($('assignmentMode').checked) {
+            await runAssignment(prompt);
+            return;
+          }
           const providerOrder = activeProviderOrder();
           const parallelism = Number($('parallelism').value) || 1;
           $('sendBtn').disabled = true;
@@ -2426,6 +2539,108 @@ internal static class Dashboard
             $('prompt').value = '';
             await refresh();
           } catch (error) {
+            showComposerNotice(error.message, true);
+          } finally {
+            $('sendBtn').disabled = false;
+          }
+        }
+
+        // Maps an AgentStep's Kind to a short icon prefix for the transcript.
+        // Returns PLAIN text - renderMessages() already runs esc() once over
+        // the whole message body, so escaping here too would double-encode
+        // entities (e.g. turn a literal "&amp;" from a tool's file contents
+        // into "&amp;amp;").
+        function stepLine(step) {
+          const icons = {
+            thinking: '💭',
+            tool_call: '🔧',
+            tool_result: '✓',
+            tool_error: '⚠',
+            done: '✅',
+            error: '❌',
+            cancelled: '⏹'
+          };
+          const icon = icons[step.Kind] ?? '•';
+          return `${icon} ${step.Detail}`;
+        }
+
+        // Assignments are agent-mode runs: a Worker iterates on files/commands
+        // until it decides the goal is done, rather than a single reply. This
+        // goes straight to POST /api/assignment (bypassing TaskBoard/ChatBoard
+        // entirely - see HostRole), and unlike normal chat the progress here
+        // is client-side only: it doesn't survive a page reload. EventSource
+        // can't be used to read the response because it can't issue a POST
+        // with a body, so this streams the SSE response by hand instead.
+        async function runAssignment(text) {
+          $('sendBtn').disabled = true;
+          $('composerNotice').className = 'notice';
+          $('prompt').value = '';
+
+          const userMsg = { role: 'user', content: text, isAssignment: true };
+          const assistantMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true };
+          state.assignmentMessages.push(userMsg, assistantMsg);
+          renderMessages();
+
+          const lines = [];
+          const appendLine = line => {
+            lines.push(line);
+            assistantMsg.content = lines.join('\n');
+            renderMessages();
+          };
+
+          try {
+            const headers = { 'content-type': 'application/json' };
+            if (state.authToken) headers[AUTH_HEADER] = state.authToken;
+            const response = await fetch('/api/assignment', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ assignment: text })
+            });
+
+            if (!response.ok || !response.body) {
+              let detail = `HTTP ${response.status}`;
+              try {
+                const errBody = await response.json();
+                detail = errBody?.detail || errBody?.error || errBody?.title || detail;
+              } catch { /* body wasn't JSON - keep the status-code message */ }
+              throw new Error(detail);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              let sepIndex;
+              while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+                const frame = buffer.slice(0, sepIndex);
+                buffer = buffer.slice(sepIndex + 2);
+                const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
+                if (!dataLine) continue;
+                const payload = JSON.parse(dataLine.slice(5).trim());
+                if (payload.step) {
+                  appendLine(stepLine(payload.step));
+                } else if (payload.final) {
+                  assistantMsg.state = payload.final.Success ? 'Completed' : 'Failed';
+                  // AgentLoop always emits a step (done/error/cancelled) with
+                  // this exact same text immediately before returning, so
+                  // it's already the last line above - appending it again
+                  // here would just show the same answer twice. Only fall
+                  // back to appending it if, for some reason, no step ever
+                  // arrived (e.g. the SSE stream cut mid-run).
+                  if (!lines.length) {
+                    appendLine(payload.final.FinalAnswer || (payload.final.Success ? '(inget svar)' : '(misslyckades)'));
+                  } else {
+                    renderMessages();
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            assistantMsg.state = 'Failed';
+            appendLine(`❌ ${error.message}`);
             showComposerNotice(error.message, true);
           } finally {
             $('sendBtn').disabled = false;
@@ -2498,6 +2713,8 @@ internal static class Dashboard
         $('scheduleCreate').onclick = createSchedule;
         $('closeSettings').onclick = closeSettingsDialog;
         $('cancelSettings').onclick = closeSettingsDialog;
+        $('checkUpdateBtn').onclick = checkUpdateInSettings;
+        $('applyUpdateBtn').onclick = applyUpdate;
         $('settingsDialog').addEventListener('click', event => {
           if (event.target === $('settingsDialog')) closeSettingsDialog();
         });

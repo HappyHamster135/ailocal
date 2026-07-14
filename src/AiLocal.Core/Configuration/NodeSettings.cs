@@ -51,12 +51,18 @@ public sealed class WorkerProfileSettings
 public sealed class ProviderSettings
 {
     /// <summary>Order in which providers are tried before falling back.</summary>
-    public List<string> Priority { get; set; } = new() { "anthropic", "gemini", "ollama" };
+    public List<string> Priority { get; set; } = new() { "anthropic", "gemini", "openrouter", "ollama" };
 
     /// <summary>Default remote model when a task gives no hint.</summary>
     public string DefaultModel { get; set; } = "claude-opus-4-8";
 
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
+
+    /// <summary>OpenRouter's catalog (and model ids) changes far more often
+    /// than the other providers', so this has no confident hardcoded
+    /// default beyond a broadly-available id - set explicitly for anything
+    /// specific.</summary>
+    public string OpenRouterModel { get; set; } = "anthropic/claude-sonnet-4.5";
 
     public int MaxTokens { get; set; } = 4096;
 
@@ -113,9 +119,6 @@ public sealed class HostSettings
 
     /// <summary>How many prior chat turns to include as context on a new chat message.</summary>
     public int ChatHistoryWindow { get; set; } = 12;
-
-    /// <summary>Optional URL to a JSON update manifest ({"version": "...", "url": "..."}). Empty = disabled.</summary>
-    public string? UpdateManifestUrl { get; set; }
 }
 
 public sealed class TlsSettings
