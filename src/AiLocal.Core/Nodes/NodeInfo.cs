@@ -1,3 +1,4 @@
+using AiLocal.Core.Agent;
 using AiLocal.Core.Hardware;
 using AiLocal.Core.Roles;
 
@@ -21,6 +22,12 @@ public sealed class NodeInfo
     public int ActiveTasks { get; set; }
     public List<string> Skills { get; set; } = ["general"];
     public int MaxConcurrentTasks { get; set; } = 1;
+
+    /// <summary>Whether (and how much) this Worker will accept an
+    /// "assignment" (agent-mode) task - set from its own AgentAccess
+    /// setting, off by default. The Host uses this only to decide who's
+    /// eligible for that kind of dispatch; it can't change it remotely.</summary>
+    public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
     public List<string> ProviderPriority { get; set; } = [];
     public string? LocalModel { get; set; }
     public string? RecommendedModel { get; set; }

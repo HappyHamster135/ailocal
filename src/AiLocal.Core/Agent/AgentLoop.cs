@@ -1,0 +1,122 @@
+using AiLocal.Core.Contracts;
+using AiLocal.Core.Providers;
+
+namespace AiLocal.Core.Agent;
+
+/// <summary>One observable step of an agent run, for progress reporting -
+/// "thinking" is any text the model produced alongside or instead of a tool
+/// call, "tool_call"/"tool_result"/"tool_error" bracket one tool execution,
+/// "done" is the final answer, "error"/"cancelled" are terminal failures.</summary>
+public sealed record AgentStep(string Kind, string Detail);
+
+public sealed record AgentRunResult(bool Success, string FinalAnswer, IReadOnlyList<AgentStep> Steps, int Iterations);
+
+/// <summary>
+/// Runs an assignment to completion: send the conversation (with tools) to
+/// the provider, and either it answers directly (done) or it calls one or
+/// more tools, whose results get appended as the next turn before asking
+/// again - repeating until the model stops calling tools, something fails,
+/// the caller cancels, or a safety iteration cap is hit (a runaway agent
+/// should not be able to loop, and spend tokens, forever).
+/// </summary>
+public sealed class AgentLoop
+{
+    private const int MaxIterations = 25;
+
+    /// <summary>Just "complete this chat request" - takes a plain delegate
+    /// rather than IChatProvider so callers can pass either a single
+    /// provider's CompleteAsync directly, or FallbackChatProvider's (which
+    /// has the identical signature but doesn't formally implement
+    /// IChatProvider, since chaining providers doesn't have a single
+    /// Name/IsLocal of its own) to get automatic fallback across every
+    /// configured provider for free, with zero special-casing here.</summary>
+    private readonly Func<ChatRequest, CancellationToken, Task<ProviderResponse>> _complete;
+    private readonly AgentToolExecutor _tools;
+
+    public AgentLoop(Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, AgentToolExecutor tools)
+    {
+        _complete = complete;
+        _tools = tools;
+    }
+
+    public async Task<AgentRunResult> RunAsync(
+        string assignment,
+        AgentAccessLevel accessLevel,
+        string? modelHint = null,
+        Func<AgentStep, Task>? onStep = null,
+        CancellationToken ct = default)
+    {
+        var steps = new List<AgentStep>();
+        async Task Emit(AgentStep step)
+        {
+            steps.Add(step);
+            if (onStep is not null) await onStep(step);
+        }
+
+        var toolDefs = AgentToolExecutor.ToolsFor(accessLevel);
+        if (toolDefs.Count == 0)
+        {
+            const string message = "Agent mode is not enabled on this Worker (access level is Off) - nothing to run this assignment with.";
+            await Emit(new AgentStep("error", message));
+            return new AgentRunResult(false, message, steps, 0);
+        }
+
+        var messages = new List<ChatMessage> { new("user", assignment) };
+
+        for (var iteration = 1; iteration <= MaxIterations; iteration++)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                await Emit(new AgentStep("cancelled", "Cancelled by operator."));
+                return new AgentRunResult(false, "Cancelled by operator.", steps, iteration);
+            }
+
+            var response = await _complete(new ChatRequest
+            {
+                Messages = messages,
+                ModelHint = modelHint,
+                Tools = toolDefs.ToList()
+            }, ct);
+
+            if (!response.IsSuccess)
+            {
+                var error = response.Error ?? "unknown provider error";
+                await Emit(new AgentStep("error", error));
+                return new AgentRunResult(false, error, steps, iteration);
+            }
+
+            var chat = response.Response!;
+            if (!string.IsNullOrWhiteSpace(chat.Content))
+                await Emit(new AgentStep("thinking", chat.Content));
+
+            if (chat.ToolCalls is not { Count: > 0 } calls)
+            {
+                // No tool calls this turn - the model considers the
+                // assignment complete (or is stuck without knowing it needs
+                // a tool it wasn't given, which reads the same from here).
+                await Emit(new AgentStep("done", chat.Content));
+                return new AgentRunResult(true, chat.Content, steps, iteration);
+            }
+
+            messages.Add(new ChatMessage("assistant", chat.Content, ToolCalls: calls));
+
+            foreach (var call in calls)
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    await Emit(new AgentStep("cancelled", "Cancelled by operator."));
+                    return new AgentRunResult(false, "Cancelled by operator.", steps, iteration);
+                }
+
+                await Emit(new AgentStep("tool_call", $"{call.Name}({call.ArgumentsJson})"));
+                var result = await _tools.ExecuteAsync(call, ct);
+                await Emit(new AgentStep(result.IsError ? "tool_error" : "tool_result", result.Output));
+                messages.Add(new ChatMessage("tool", result.Output, ToolCallId: result.ToolCallId, ToolName: result.ToolName));
+            }
+        }
+
+        var timeoutMessage = $"Assignment did not complete within {MaxIterations} iterations - stopped to avoid a runaway loop.";
+        await Emit(new AgentStep("error", timeoutMessage));
+        return new AgentRunResult(false, timeoutMessage, steps, MaxIterations);
+    }
+}

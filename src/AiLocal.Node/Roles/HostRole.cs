@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AiLocal.Core.Agent;
 using AiLocal.Core.Cluster;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Contracts;
@@ -94,6 +95,7 @@ public sealed class WorkerRegistry
             existing.Hardware = node.Hardware;
             existing.Skills = node.Skills;
             existing.MaxConcurrentTasks = node.MaxConcurrentTasks;
+            existing.AgentAccess = node.AgentAccess;
             existing.ProviderPriority = node.ProviderPriority;
             existing.LocalModel = node.LocalModel;
             existing.RecommendedModel = node.RecommendedModel;
@@ -682,6 +684,53 @@ public static class HostRole
         app.MapPost("/tasks", SubmitTask);
         app.MapPost("/api/tasks", SubmitTask);
 
+        // An assignment is fundamentally different from a goal: one Worker
+        // works it autonomously (reading/writing files, running commands per
+        // its own configured access level) rather than the Host splitting it
+        // into subtasks fanned out across several Workers - so this bypasses
+        // the task planner/dispatch queue entirely and proxies straight
+        // through to whichever connected Worker has agent mode enabled.
+        app.MapPost("/api/assignment", async (
+            AssignmentRequest req, HttpContext ctx, WorkerRegistry registry,
+            IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            var candidate = registry.AvailableWorkers().FirstOrDefault(w => w.AgentAccess != AgentAccessLevel.Off);
+            if (candidate is null)
+                return Results.Problem(
+                    detail: "No connected Worker has agent mode enabled. Turn it on in that Worker's own Installningar -> Agentlage first.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            var client = httpFactory.CreateClient("cluster");
+            using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, $"{candidate.PreferredEndpoint}/execute/assignment")
+            {
+                Content = JsonContent.Create(req)
+            };
+
+            HttpResponseMessage upstreamResponse;
+            try
+            {
+                upstreamResponse = await client.SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(detail: $"Could not reach {candidate.Name}: {ex.Message}", statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            using var _ = upstreamResponse;
+            if (!upstreamResponse.IsSuccessStatusCode)
+            {
+                var body = await upstreamResponse.Content.ReadAsStringAsync(ct);
+                var reason = ExtractErrorReason(body) ?? $"HTTP {(int)upstreamResponse.StatusCode}";
+                return Results.Problem(detail: $"{candidate.Name} declined: {reason}", statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.ContentType = "text/event-stream";
+            await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(ct);
+            await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
+            return Results.Empty;
+        });
+
         ScheduleApi.MapEndpoints(app);
     }
 
@@ -847,6 +896,28 @@ public static class HostRole
         {
             return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
         }
+    }
+
+    /// <summary>Pulls a human-readable reason out of a failed response body -
+    /// either a ProblemDetails "detail" field or a plain {"error": "..."}
+    /// shape (both are used across this app's endpoints) - mirrors
+    /// WorkerRole's own copy of the same small helper.</summary>
+    private static string? ExtractErrorReason(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("detail", out var detail) && detail.ValueKind == JsonValueKind.String)
+                return detail.GetString();
+            if (document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String)
+                return error.GetString();
+        }
+        catch { /* not JSON, or an unexpected shape - fall back to the status code */ }
+
+        return null;
     }
 
     private static async Task<IResult> PullWorkerRuntime(

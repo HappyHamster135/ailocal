@@ -48,19 +48,24 @@ public sealed class OllamaProvider : IChatProvider
     {
         var model = request.ModelHint ?? _settings.OllamaModel ?? _recommendation.OllamaTag;
 
-        var messages = new List<object>();
-        if (!string.IsNullOrWhiteSpace(request.System))
-            messages.Add(new { role = "system", content = request.System });
-        foreach (var m in request.Messages)
-            messages.Add(new { role = m.Role, content = m.Content });
-
-        var payload = new
+        var payload = new Dictionary<string, object?>
         {
-            model,
-            stream = false,
-            messages,
-            options = new { num_predict = request.MaxTokens ?? _settings.MaxTokens }
+            ["model"] = model,
+            ["stream"] = false,
+            ["messages"] = BuildMessages(request),
+            ["options"] = new { num_predict = request.MaxTokens ?? _settings.MaxTokens }
         };
+        if (request.Tools is { Count: > 0 } tools)
+            payload["tools"] = tools.Select(t => new
+            {
+                type = "function",
+                function = new
+                {
+                    name = t.Name,
+                    description = t.Description,
+                    parameters = JsonSerializer.Deserialize<JsonElement>(t.ParametersJsonSchema)
+                }
+            }).ToArray();
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/api/chat")
         {
@@ -94,6 +99,29 @@ public sealed class OllamaProvider : IChatProvider
             var content = root.TryGetProperty("message", out var m)
                 && m.TryGetProperty("content", out var c) ? c.GetString() ?? "" : "";
 
+            List<ToolCall>? toolCalls = null;
+            if (root.TryGetProperty("message", out var msg) &&
+                msg.TryGetProperty("tool_calls", out var calls) && calls.ValueKind == JsonValueKind.Array)
+            {
+                var callIndex = 0;
+                foreach (var call in calls.EnumerateArray())
+                {
+                    if (!call.TryGetProperty("function", out var fn) || !fn.TryGetProperty("name", out var nameEl))
+                        continue;
+                    // Not every model/Ollama version issues a call id - not
+                    // strictly needed on the way back either, since a "tool"
+                    // role message here is matched to its call positionally
+                    // (see BuildMessages), not by id - but ToolCall itself
+                    // needs a non-null value.
+                    var id = call.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                        ? idEl.GetString()!
+                        : $"ollama_call_{callIndex}";
+                    var argsJson = fn.TryGetProperty("arguments", out var argsEl) ? argsEl.GetRawText() : "{}";
+                    (toolCalls ??= []).Add(new ToolCall(id, nameEl.GetString()!, argsJson));
+                    callIndex++;
+                }
+            }
+
             int inTok = root.TryGetProperty("prompt_eval_count", out var it) ? it.GetInt32() : 0;
             int outTok = root.TryGetProperty("eval_count", out var ot) ? ot.GetInt32() : 0;
 
@@ -103,13 +131,62 @@ public sealed class OllamaProvider : IChatProvider
                 Model = model,
                 Provider = "ollama",
                 Usage = new TokenUsage(inTok, outTok),
-                IsLocal = true
+                IsLocal = true,
+                ToolCalls = toolCalls
             });
         }
         catch (Exception ex)
         {
             return ProviderResponse.Fail(ProviderOutcome.FatalError, $"parse error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Ollama's /api/chat is OpenAI-compatible: an assistant turn that called
+    /// tools carries a tool_calls array alongside its (often empty) content,
+    /// and each result comes back as its own role:"tool" message - no
+    /// batching needed the way Anthropic/Gemini's block-array formats
+    /// require, and matching is positional (by call order) rather than by id
+    /// for models/versions that don't echo one back.
+    /// </summary>
+    private static List<object> BuildMessages(ChatRequest request)
+    {
+        var messages = new List<object>();
+        if (!string.IsNullOrWhiteSpace(request.System))
+            messages.Add(new { role = "system", content = request.System });
+
+        foreach (var m in request.Messages)
+        {
+            if (m.ToolCalls is { Count: > 0 } calls)
+            {
+                messages.Add(new
+                {
+                    role = m.Role,
+                    content = m.Content,
+                    tool_calls = calls.Select(call => new
+                    {
+                        id = call.Id,
+                        type = "function",
+                        function = new
+                        {
+                            name = call.Name,
+                            arguments = JsonSerializer.Deserialize<JsonElement>(
+                                string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson)
+                        }
+                    }).ToArray()
+                });
+            }
+            else if (string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase))
+            {
+                messages.Add(new { role = "tool", content = m.Content, tool_call_id = m.ToolCallId });
+            }
+            else
+            {
+                messages.Add(new { role = m.Role, content = m.Content });
+            }
+        }
+
+        return messages;
     }
 
     public async IAsyncEnumerable<StreamChunk> StreamAsync(

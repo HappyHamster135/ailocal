@@ -42,15 +42,24 @@ public sealed class GeminiProvider : IChatProvider
 
         var payload = new Dictionary<string, object?>
         {
-            ["contents"] = request.Messages.Select(m => new
-            {
-                role = m.Role == "assistant" ? "model" : "user",
-                parts = new[] { new { text = m.Content } }
-            }).ToArray(),
+            ["contents"] = BuildContents(request.Messages),
             ["generationConfig"] = new { maxOutputTokens = request.MaxTokens ?? _settings.MaxTokens }
         };
         if (!string.IsNullOrWhiteSpace(request.System))
             payload["systemInstruction"] = new { parts = new[] { new { text = request.System } } };
+        if (request.Tools is { Count: > 0 } tools)
+            payload["tools"] = new[]
+            {
+                new
+                {
+                    functionDeclarations = tools.Select(t => new
+                    {
+                        name = t.Name,
+                        description = t.Description,
+                        parameters = JsonSerializer.Deserialize<JsonElement>(t.ParametersJsonSchema)
+                    }).ToArray()
+                }
+            };
 
         var url = $"{BaseUrl}/{model}:generateContent?key={apiKey}";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
@@ -76,6 +85,73 @@ public sealed class GeminiProvider : IChatProvider
         return ProviderResponse.Fail(Classify(response.StatusCode, body), Summarize(body));
     }
 
+    /// <summary>
+    /// Gemini has no dedicated "tool" role - a function's result travels back
+    /// as a "user" turn containing a functionResponse part, matched to the
+    /// preceding functionCall by NAME (Gemini has no call id the way
+    /// Anthropic/OpenAI-style APIs do - see ParseSuccess's synthetic ids,
+    /// which exist only to satisfy this app's own ToolCall shape and are
+    /// never sent back here). Consecutive ChatMessage(Role: "tool", ...)
+    /// entries from one round are batched into a single user turn, one
+    /// functionResponse part each - same reasoning as AnthropicProvider's
+    /// BuildMessages.
+    /// </summary>
+    private static object[] BuildContents(List<ChatMessage> messages)
+    {
+        var result = new List<object>();
+        var i = 0;
+        while (i < messages.Count)
+        {
+            var m = messages[i];
+            if (string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase))
+            {
+                var responses = new List<object>();
+                while (i < messages.Count && string.Equals(messages[i].Role, "tool", StringComparison.OrdinalIgnoreCase))
+                {
+                    responses.Add(new
+                    {
+                        functionResponse = new
+                        {
+                            name = messages[i].ToolName ?? "unknown_tool",
+                            response = new { result = messages[i].Content }
+                        }
+                    });
+                    i++;
+                }
+                result.Add(new { role = "user", parts = responses.ToArray() });
+                continue;
+            }
+
+            if (m.ToolCalls is { Count: > 0 } calls)
+            {
+                var parts = new List<object>();
+                if (!string.IsNullOrEmpty(m.Content))
+                    parts.Add(new { text = m.Content });
+                foreach (var call in calls)
+                    parts.Add(new
+                    {
+                        functionCall = new
+                        {
+                            name = call.Name,
+                            args = JsonSerializer.Deserialize<JsonElement>(
+                                string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson)
+                        }
+                    });
+                result.Add(new { role = "model", parts = parts.ToArray() });
+                i++;
+                continue;
+            }
+
+            result.Add(new
+            {
+                role = m.Role == "assistant" ? "model" : "user",
+                parts = new[] { new { text = m.Content } }
+            });
+            i++;
+        }
+        return result.ToArray();
+    }
+
     private static ProviderResponse ParseSuccess(string body, string requestedModel)
     {
         try
@@ -84,6 +160,7 @@ public sealed class GeminiProvider : IChatProvider
             var root = doc.RootElement;
 
             var text = new StringBuilder();
+            List<ToolCall>? toolCalls = null;
             if (root.TryGetProperty("candidates", out var candidates)
                 && candidates.ValueKind == JsonValueKind.Array
                 && candidates.GetArrayLength() > 0)
@@ -93,8 +170,22 @@ public sealed class GeminiProvider : IChatProvider
                     && content.TryGetProperty("parts", out var parts)
                     && parts.ValueKind == JsonValueKind.Array)
                 {
+                    var callIndex = 0;
                     foreach (var part in parts.EnumerateArray())
-                        if (part.TryGetProperty("text", out var t)) text.Append(t.GetString());
+                    {
+                        if (part.TryGetProperty("text", out var t))
+                            text.Append(t.GetString());
+                        else if (part.TryGetProperty("functionCall", out var fc) &&
+                            fc.TryGetProperty("name", out var nameEl))
+                        {
+                            var argsJson = fc.TryGetProperty("args", out var argsEl) ? argsEl.GetRawText() : "{}";
+                            // Gemini doesn't issue a call id the way Anthropic/OpenAI-style
+                            // APIs do - functionResponse is matched back to a call by name
+                            // alone, so a synthetic id is only needed to satisfy this app's
+                            // provider-agnostic ToolCall shape; it's never sent back to Gemini.
+                            (toolCalls ??= []).Add(new ToolCall($"gemini_call_{callIndex++}", nameEl.GetString()!, argsJson));
+                        }
+                    }
                 }
             }
 
@@ -111,7 +202,8 @@ public sealed class GeminiProvider : IChatProvider
                 Model = requestedModel,
                 Provider = "gemini",
                 Usage = new TokenUsage(inTok, outTok),
-                IsLocal = false
+                IsLocal = false,
+                ToolCalls = toolCalls
             });
         }
         catch (Exception ex)

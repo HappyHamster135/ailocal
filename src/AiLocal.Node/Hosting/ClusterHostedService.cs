@@ -161,6 +161,7 @@ public sealed class ClusterHostedService : BackgroundService
                         Hardware = _hardware,
                         Skills = [.. _settings.Worker.Skills],
                         MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
+                        AgentAccess = _settings.Worker.AgentAccess,
                         ProviderPriority = [.. _settings.Providers.Priority],
                         LocalModel = _settings.Providers.OllamaModel ?? _recommendation.OllamaTag,
                         RecommendedModel = _recommendation.OllamaTag,

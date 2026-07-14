@@ -1,11 +1,17 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using AiLocal.Core.Agent;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Contracts;
 using AiLocal.Core.Providers;
 using AiLocal.Node.Hosting;
 
 namespace AiLocal.Node.Roles;
+
+/// <summary>An "assignment" for agent mode - a goal the Worker works and
+/// debugs on its own (read/write files, run commands per its configured
+/// access level) rather than a single chat completion.</summary>
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null);
 
 public static class WorkerRole
 {
@@ -59,6 +65,44 @@ public static class WorkerRole
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(frame)}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             }
+        });
+
+        // "Assignment" execution: agent mode, not a single chat completion -
+        // the Worker reads/writes files and (at Full access) runs commands,
+        // iterating until it decides the assignment is done. Gated on this
+        // Worker's OWN AgentAccess setting, which only this Worker's operator
+        // can raise (see PersistentSettingsStore.Update) - a Host has no path
+        // to turn this on remotely, it can only ever be told no.
+        app.MapPost("/execute/assignment", async (
+            AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
+            NodeSettings settings, CancellationToken ct) =>
+        {
+            var accessLevel = settings.Worker.AgentAccess;
+            if (accessLevel == AgentAccessLevel.Off)
+                return Results.Problem(
+                    detail: "Agent mode is not enabled on this Worker (Installningar -> Agentlage).",
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            if (string.IsNullOrWhiteSpace(req.Assignment))
+                return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
+
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.ContentType = "text/event-stream";
+
+            var workspaceRoot = Path.Combine(SettingsPaths.DataDirectory, "agent-workspace");
+            var executor = new AgentToolExecutor(accessLevel, workspaceRoot);
+            var loop = new AgentLoop(provider.CompleteAsync, executor);
+
+            var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>
+            {
+                await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }, ct);
+
+            await ctx.Response.WriteAsync(
+                $"data: {JsonSerializer.Serialize(new { final = result })}\n\n", ct);
+            await ctx.Response.Body.FlushAsync(ct);
+            return Results.Empty;
         });
 
         app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
