@@ -97,7 +97,18 @@ public sealed class ClusterHostedService : BackgroundService
 
             case NodeRole.Overseer:
                 if (_settings.Discovery.Enabled)
-                    await RunDiscoveryAsync(() => discovery.ListenAsync(OnBeacon, ct), "listen");
+                {
+                    // Listen for Host/Worker beacons so they show up in the
+                    // registry (and so this Overseer can proxy to them)...
+                    _ = RunDiscoveryAsync(() => discovery.ListenAsync(OnBeacon, ct), "listen");
+                    // ...and announce ourselves, so Hosts that are merely
+                    // listening (not broadly announcing) still learn about
+                    // this Overseer and announce their token back to it via
+                    // /cluster/announce. Without this, an Overseer running on
+                    // a machine with no local Host never discovers the other
+                    // Hosts on the LAN.
+                    await RunDiscoveryAsync(() => discovery.AnnounceAsync(beacon, TimeSpan.FromSeconds(5), ct), "announce");
+                }
                 break;
         }
     }

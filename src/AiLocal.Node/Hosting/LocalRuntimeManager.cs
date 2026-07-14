@@ -237,27 +237,46 @@ public sealed class LocalRuntimeManager
 
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "ollama",
-                Arguments = "serve",
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
+            // On Windows the Ollama server normally runs as its own background
+            // service; launching `ollama serve` as a child of this node
+            // (UseShellExecute=false, CreateNoWindow) dies with the parent or
+            // gets sandboxed, so the endpoint never comes up. Spawn it
+            // detached (UseShellExecute=true) so it survives and actually
+            // listens on localhost:11434.
+            var psi = OperatingSystem.IsWindows()
+                ? new ProcessStartInfo
+                {
+                    FileName = "ollama",
+                    Arguments = "serve",
+                    UseShellExecute = true,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                }
+                : new ProcessStartInfo
+                {
+                    FileName = "ollama",
+                    Arguments = "serve",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            using var process = Process.Start(psi);
+            if (process is null)
+                return new LocalRuntimeSetupStep("Start Ollama", false, "could not start ollama serve");
         }
         catch (Exception ex)
         {
             return new LocalRuntimeSetupStep("Start Ollama", false, ex.Message);
         }
 
-        for (var i = 0; i < 20 && !ct.IsCancellationRequested; i++)
+        for (var i = 0; i < 40 && !ct.IsCancellationRequested; i++)
         {
             if (await IsEndpointReachableAsync(ct))
                 return new LocalRuntimeSetupStep("Start Ollama", true, "Service started");
             await Task.Delay(500, ct);
         }
 
-        return new LocalRuntimeSetupStep("Start Ollama", false, "Service did not become reachable.");
+        return new LocalRuntimeSetupStep("Start Ollama", false,
+            "Service did not become reachable. If Ollama is installed as a desktop app, start it manually from the Start menu, then retry.");
     }
 
     private async Task<bool> IsEndpointReachableAsync(CancellationToken ct)
