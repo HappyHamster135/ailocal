@@ -958,6 +958,7 @@ internal static class Dashboard
             <div class="form-subtitle">Providerordning (fallback-kedja)</div>
             <div class="settings-provider-list" id="settingsProviders"></div>
           </section>
+        </div>
         <div class="dialog-foot">
           <button id="cancelSettings">Avbryt</button>
           <button class="primary" id="saveSettings">Spara</button>
