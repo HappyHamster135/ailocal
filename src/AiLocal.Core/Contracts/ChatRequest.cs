@@ -13,4 +13,8 @@ public sealed class ChatRequest
     public List<string>? ProviderOrder { get; set; }
 
     public int? MaxTokens { get; set; }
+
+    /// <summary>Tools the model may call this turn. Null/empty means a plain
+    /// completion, identical to before this existed.</summary>
+    public List<ToolDefinition>? Tools { get; set; }
 }

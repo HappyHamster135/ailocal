@@ -1,3 +1,4 @@
+using AiLocal.Core.Agent;
 using AiLocal.Core.Roles;
 
 namespace AiLocal.Core.Configuration;
@@ -40,6 +41,11 @@ public sealed class WorkerProfileSettings
 
     /// <summary>Maximum tasks the Host may assign to this Worker at once.</summary>
     public int MaxConcurrentTasks { get; set; } = 1;
+
+    /// <summary>How much of this machine an "assignment" (agent-mode) task may
+    /// touch. Off by default - only this Worker's own operator can raise it,
+    /// never the Host.</summary>
+    public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
 }
 
 public sealed class ProviderSettings

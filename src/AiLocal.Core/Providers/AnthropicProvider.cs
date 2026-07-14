@@ -52,12 +52,17 @@ public sealed class AnthropicProvider : IChatProvider
         {
             ["model"] = model,
             ["max_tokens"] = request.MaxTokens ?? _settings.MaxTokens,
-            ["messages"] = request.Messages
-                .Select(m => new { role = m.Role, content = m.Content })
-                .ToArray()
+            ["messages"] = BuildMessages(request.Messages)
         };
         if (!string.IsNullOrWhiteSpace(request.System))
             payload["system"] = request.System;
+        if (request.Tools is { Count: > 0 } tools)
+            payload["tools"] = tools.Select(t => new
+            {
+                name = t.Name,
+                description = t.Description,
+                input_schema = JsonSerializer.Deserialize<JsonElement>(t.ParametersJsonSchema)
+            }).ToArray();
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, Endpoint);
         httpRequest.Headers.TryAddWithoutValidation("x-api-key", apiKey);
@@ -222,13 +227,23 @@ public sealed class AnthropicProvider : IChatProvider
                 return ProviderResponse.Fail(ProviderOutcome.FatalError, "model declined the request (refusal)");
 
             var text = new StringBuilder();
+            List<ToolCall>? toolCalls = null;
             if (root.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
             {
                 foreach (var block in content.EnumerateArray())
                 {
-                    if (block.TryGetProperty("type", out var type) && type.GetString() == "text"
-                        && block.TryGetProperty("text", out var t))
-                        text.Append(t.GetString());
+                    var type = block.TryGetProperty("type", out var t) ? t.GetString() : null;
+                    if (type == "text" && block.TryGetProperty("text", out var textEl))
+                        text.Append(textEl.GetString());
+                    else if (type == "tool_use" &&
+                        block.TryGetProperty("id", out var idEl) &&
+                        block.TryGetProperty("name", out var nameEl))
+                    {
+                        var argsJson = block.TryGetProperty("input", out var inputEl)
+                            ? inputEl.GetRawText()
+                            : "{}";
+                        (toolCalls ??= []).Add(new ToolCall(idEl.GetString()!, nameEl.GetString()!, argsJson));
+                    }
                 }
             }
 
@@ -247,13 +262,73 @@ public sealed class AnthropicProvider : IChatProvider
                 Model = model,
                 Provider = "anthropic",
                 Usage = new TokenUsage(inTok, outTok),
-                IsLocal = false
+                IsLocal = false,
+                ToolCalls = toolCalls
             });
         }
         catch (Exception ex)
         {
             return ProviderResponse.Fail(ProviderOutcome.FatalError, $"parse error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Anthropic has no separate "tool" role - a tool's result travels back as
+    /// a user-role message containing a tool_result content block. Consecutive
+    /// ChatMessage(Role: "tool", ...) entries (one per call the previous
+    /// assistant turn made) are batched into a single user message with one
+    /// tool_result block each, since that's one logical turn, not several.
+    /// A plain user/assistant message with no tool calls keeps today's simple
+    /// string-content shape - only a message that actually touches tools pays
+    /// for the richer content-block array form.
+    /// </summary>
+    private static object[] BuildMessages(List<ChatMessage> messages)
+    {
+        var result = new List<object>();
+        var i = 0;
+        while (i < messages.Count)
+        {
+            var m = messages[i];
+            if (string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase))
+            {
+                var toolResults = new List<object>();
+                while (i < messages.Count && string.Equals(messages[i].Role, "tool", StringComparison.OrdinalIgnoreCase))
+                {
+                    toolResults.Add(new
+                    {
+                        type = "tool_result",
+                        tool_use_id = messages[i].ToolCallId,
+                        content = messages[i].Content
+                    });
+                    i++;
+                }
+                result.Add(new { role = "user", content = toolResults.ToArray() });
+                continue;
+            }
+
+            if (m.ToolCalls is { Count: > 0 } calls)
+            {
+                var blocks = new List<object>();
+                if (!string.IsNullOrEmpty(m.Content))
+                    blocks.Add(new { type = "text", text = m.Content });
+                foreach (var call in calls)
+                    blocks.Add(new
+                    {
+                        type = "tool_use",
+                        id = call.Id,
+                        name = call.Name,
+                        input = JsonSerializer.Deserialize<JsonElement>(
+                            string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson)
+                    });
+                result.Add(new { role = m.Role, content = blocks.ToArray() });
+                i++;
+                continue;
+            }
+
+            result.Add(new { role = m.Role, content = m.Content });
+            i++;
+        }
+        return result.ToArray();
     }
 
     private static ProviderOutcome Classify(HttpStatusCode code, string body) => (int)code switch

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using AiLocal.Core.Agent;
 using AiLocal.Core.Configuration;
 using AiLocal.Core.Roles;
 using Microsoft.AspNetCore.DataProtection;
@@ -12,6 +13,7 @@ public sealed record SettingsUpdate(
     bool? DiscoveryEnabled = null,
     List<string>? Skills = null,
     int? MaxConcurrentTasks = null,
+    AgentAccessLevel? AgentAccess = null,
     string? ClusterToken = null,
     bool ClearClusterToken = false,
     bool RegenerateClusterToken = false,
@@ -39,6 +41,7 @@ internal sealed class StoredNodeSettings
     public bool DiscoveryEnabled { get; set; } = true;
     public List<string> Skills { get; set; } = ["general"];
     public int MaxConcurrentTasks { get; set; } = 1;
+    public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
     public bool StartWithWindows { get; set; }
@@ -113,6 +116,7 @@ public sealed class PersistentSettingsStore
         settings.Discovery.Enabled = stored.DiscoveryEnabled;
         settings.Worker.Skills = NormalizeSkills(stored.Skills);
         settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
+        settings.Worker.AgentAccess = stored.AgentAccess;
         settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
         settings.Providers.DefaultModel = stored.AnthropicModel;
         settings.Providers.GeminiModel = stored.GeminiModel;
@@ -142,6 +146,7 @@ public sealed class PersistentSettingsStore
                 discoveryEnabled = _settings.Discovery.Enabled,
                 skills = _settings.Worker.Skills,
                 maxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
+                agentAccess = _settings.Worker.AgentAccess.ToString(),
                 clusterTokenConfigured = HasClusterToken(),
                 clusterToken = includeSecrets ? GetClusterToken() : null,
                 operatorTokenConfigured = HasOperatorToken(),
@@ -202,6 +207,13 @@ public sealed class PersistentSettingsStore
                     throw new ArgumentException("Max concurrent tasks must be between 1 and 32.");
                 _settings.Worker.MaxConcurrentTasks = update.MaxConcurrentTasks.Value;
             }
+
+            // Off by default and only ever set by this Worker's own operator
+            // (see ClusterSecurity/RequiresAdminTier - settings writes are
+            // already admin-only) - a Host has no way to turn this on for a
+            // Worker it doesn't control.
+            if (update.AgentAccess.HasValue)
+                _settings.Worker.AgentAccess = update.AgentAccess.Value;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());
@@ -363,6 +375,7 @@ public sealed class PersistentSettingsStore
         _stored.DiscoveryEnabled = _settings.Discovery.Enabled;
         _stored.Skills = [.. _settings.Worker.Skills];
         _stored.MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks;
+        _stored.AgentAccess = _settings.Worker.AgentAccess;
         // StartWithWindows and the cluster token are edited only through Update() -
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).

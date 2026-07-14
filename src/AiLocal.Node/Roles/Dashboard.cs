@@ -830,6 +830,17 @@ internal static class Dashboard
                 <span class="small">Max samtidiga jobb</span>
                 <input id="settingMaxConcurrentTasks" type="number" min="1" max="32">
               </label>
+              <label class="field wide">
+                <span class="small">Agentläge (fil- och kommandoåtkomst för "assignment"-uppgifter)</span>
+                <select id="settingAgentAccess">
+                  <option value="Off">Av (standard) - den här Workern kör bara vanliga chatt-/målsvar, ingen fil- eller kommandoåtkomst</option>
+                  <option value="Sandboxed">Begränsad arbetsyta - läser/skriver filer i en egen mapp på den här datorn, inga terminalkommandon</option>
+                  <option value="Full">Full åtkomst - som Claude Code: läser/skriver filer och kör kommandon var som helst på den här datorn</option>
+                </select>
+                <span class="small" style="display:block;margin-top:4px">
+                  Avgör bara vad den här datorn tillåter - måste sättas här, en Host kan inte slå på det åt dig.
+                </span>
+              </label>
             </div>
           </section>
           <section class="form-section">
@@ -2164,6 +2175,7 @@ internal static class Dashboard
           $('settingDiscovery').checked = data.discoveryEnabled ?? true;
           $('settingSkills').value = (data.skills ?? ['general']).join(', ');
           $('settingMaxConcurrentTasks').value = data.maxConcurrentTasks ?? 1;
+          $('settingAgentAccess').value = data.agentAccess ?? 'Off';
           $('settingClusterToken').value = '';
           $('clearClusterToken').checked = false;
           $('clusterTokenState').textContent = data.clusterTokenConfigured
@@ -2338,6 +2350,7 @@ internal static class Dashboard
             startWithWindows: $('settingAutoStart').checked,
             skills: $('settingSkills').value.split(',').map(value => value.trim()).filter(Boolean),
             maxConcurrentTasks: Number($('settingMaxConcurrentTasks').value),
+            agentAccess: $('settingAgentAccess').value,
             clusterToken: $('settingClusterToken').value || null,
             clearClusterToken: $('clearClusterToken').checked,
             operatorToken: $('settingOperatorToken').value || null,
