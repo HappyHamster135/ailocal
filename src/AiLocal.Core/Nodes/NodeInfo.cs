@@ -1,4 +1,5 @@
 using AiLocal.Core.Agent;
+using AiLocal.Core.Configuration;
 using AiLocal.Core.Hardware;
 using AiLocal.Core.Roles;
 
@@ -32,6 +33,17 @@ public sealed class NodeInfo
     public string? LocalModel { get; set; }
     public string? RecommendedModel { get; set; }
     public string? Version { get; set; }
+
+    /// <summary>Per-complexity model tiers this Worker wants the Host to
+    /// use when dispatching an assignment with no explicit model hint.
+    /// Carried in the heartbeat so the Host does the selection locally
+    /// (no extra round-trip per task).</summary>
+    public ModelTiers ModelTiers { get; set; } = new();
+
+    /// <summary>Folder this Worker's agent runs inside (Sandboxed: the
+    /// access root; Full: run_command's default dir). Null => its own
+    /// data dir / agent-workspace.</summary>
+    public string? WorkspacePath { get; set; }
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Optional HTTPS endpoint for this node's cluster traffic (opportunistic transport encryption).</summary>

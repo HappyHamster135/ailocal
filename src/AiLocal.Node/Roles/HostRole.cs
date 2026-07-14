@@ -100,6 +100,8 @@ public sealed class WorkerRegistry
             existing.LocalModel = node.LocalModel;
             existing.RecommendedModel = node.RecommendedModel;
             existing.Version = node.Version;
+            existing.ModelTiers = node.ModelTiers;
+            existing.WorkspacePath = node.WorkspacePath;
             existing.LastSeen = node.LastSeen;
             // ActiveTasks is Host-tracked (via WorkerSlotBroker) and never part
             // of a Worker's own heartbeat payload - left untouched here. Status
@@ -1277,7 +1279,15 @@ public static class HostRole
         AgentTask task, NodeInfo worker, string? modelHint, List<string>? providerOrder,
         IHttpClientFactory httpFactory, TaskStreamHub streamHub, CancellationToken ct)
     {
-        var chat = new ChatRequest { System = task.System, ModelHint = modelHint, ProviderOrder = providerOrder };
+        // No explicit model hint from the operator (or the assignment
+        // request): pick one from this Worker's per-complexity tiers so a
+        // trivial task doesn't burn the most expensive model. The planner
+        // already scored the task 1-5, so we lean on that instead of
+        // always defaulting to claude-opus.
+        var model = modelHint
+            ?? worker.ModelTiers.ForComplexity(task.Complexity ?? 3)
+            ?? "claude-opus-4-8";
+        var chat = new ChatRequest { System = task.System, ModelHint = model, ProviderOrder = providerOrder };
         if (task.ContextMessages is { Count: > 0 } context)
             chat.Messages.AddRange(context);
         chat.Messages.Add(new ChatMessage("user", task.Prompt));

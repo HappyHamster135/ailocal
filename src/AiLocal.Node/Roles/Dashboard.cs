@@ -417,6 +417,9 @@ internal static class Dashboard
         }
         .inline-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .inline-fields input { width: 124px; min-height: 34px; padding: 0 9px; }
+        .model-tier-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+        .model-tier-grid .tier-field { display: flex; flex-direction: column; gap: 2px; }
+        .model-tier-grid .tier-field input { width: 100%; min-height: 34px; padding: 0 9px; }
         .provider-list { display: grid; gap: 8px; }
         .provider-row {
           display: grid;
@@ -682,8 +685,15 @@ internal static class Dashboard
                   <label class="small" for="parallelism">Parallellitet</label>
                   <input id="parallelism" type="number" min="1" max="32" value="4">
                 </div>
-                <label class="check-field" title="Skickar till en Worker med agentläge påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istället för ett vanligt engångssvar.">
-                  <input id="assignmentMode" type="checkbox"> Assignment (agentläge)
+                <label class="small" for="modelSelect">Modell</label>
+                <select id="modelSelect" title="Vilken modell Hosten anvander - 'Auto' valjer efter uppgiftens komplexitet sa du inte alltid betalar for den dyraste.">
+                  <option value="">Auto (efter komplexitet)</option>
+                  <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
+                  <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
+                  <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
+                </select>
+                <label class="check-field" title="Skickar till en Worker med agentlage påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istallet för ett vanligt engangssvar.">
+                  <input id="assignmentMode" type="checkbox"> Assignment (agentlage)
                 </label>
                 <button class="primary" id="sendBtn">Skicka</button>
               </div>
@@ -844,6 +854,24 @@ internal static class Dashboard
                   Avgör bara vad den här datorn tillåter - måste sättas här, en Host kan inte slå på det åt dig.
                 </span>
               </label>
+              <label class="field wide">
+                <span class="small">Arbetsmapp (var agenten jobbar)</span>
+                <input id="settingWorkspacePath" placeholder="Lämna tom = AgentLocal/agent-workspace">
+                <span class="small" style="display:block;margin-top:4px">
+                  Sandbox: agenten kan bara läsa/skriva här. Full: även kommandons startmapp. Endast den här datorns ägare sätter detta.
+                </span>
+              </label>
+              <div class="field wide" style="margin-top:4px">
+                <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
+                <div class="model-tier-grid">
+                  <label class="tier-field"><span class="small">Enkel (1-2)</span>
+                    <input id="settingTierSimple" placeholder="claude-haiku-4-5"></label>
+                  <label class="tier-field"><span class="small">Medel (3-4)</span>
+                    <input id="settingTierMedium" placeholder="claude-sonnet-5"></label>
+                  <label class="tier-field"><span class="small">Komplex (5)</span>
+                    <input id="settingTierComplex" placeholder="claude-opus-4-8"></label>
+                </div>
+              </div>
             </div>
           </section>
           <section class="form-section">
@@ -2208,6 +2236,10 @@ internal static class Dashboard
           $('settingSkills').value = (data.skills ?? ['general']).join(', ');
           $('settingMaxConcurrentTasks').value = data.maxConcurrentTasks ?? 1;
           $('settingAgentAccess').value = data.agentAccess ?? 'Off';
+          $('settingWorkspacePath').value = data.workspacePath ?? '';
+          $('settingTierSimple').value = data.modelTiers?.simple ?? '';
+          $('settingTierMedium').value = data.modelTiers?.medium ?? '';
+          $('settingTierComplex').value = data.modelTiers?.complex ?? '';
           $('settingClusterToken').value = '';
           $('clearClusterToken').checked = false;
           $('clusterTokenState').textContent = data.clusterTokenConfigured
@@ -2457,6 +2489,12 @@ internal static class Dashboard
             skills: $('settingSkills').value.split(',').map(value => value.trim()).filter(Boolean),
             maxConcurrentTasks: Number($('settingMaxConcurrentTasks').value),
             agentAccess: $('settingAgentAccess').value,
+            workspacePath: $('settingWorkspacePath').value.trim() || null,
+            modelTiers: {
+              simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
+              medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',
+              complex: $('settingTierComplex').value.trim() || 'claude-opus-4-8'
+            },
             clusterToken: $('settingClusterToken').value || null,
             clearClusterToken: $('clearClusterToken').checked,
             operatorToken: $('settingOperatorToken').value || null,
@@ -2528,13 +2566,14 @@ internal static class Dashboard
           }
           const providerOrder = activeProviderOrder();
           const parallelism = Number($('parallelism').value) || 1;
+          const model = $('modelSelect').value || null;
           $('sendBtn').disabled = true;
           $('composerNotice').className = 'notice';
           try {
             await fetchJson('/api/chat', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ prompt, parallelism, providerOrder })
+              body: JSON.stringify({ prompt, parallelism, providerOrder, modelHint: model })
             });
             $('prompt').value = '';
             await refresh();
@@ -2594,7 +2633,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: text })
+              body: JSON.stringify({ assignment: text, modelHint: $('modelSelect').value || null })
             });
 
             if (!response.ok || !response.body) {

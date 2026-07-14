@@ -165,7 +165,9 @@ public sealed class ClusterHostedService : BackgroundService
                         ProviderPriority = [.. _settings.Providers.Priority],
                         LocalModel = _settings.Providers.OllamaModel ?? _recommendation.OllamaTag,
                         RecommendedModel = _recommendation.OllamaTag,
-                        Version = typeof(ClusterHostedService).Assembly.GetName().Version?.ToString(3)
+                        Version = typeof(ClusterHostedService).Assembly.GetName().Version?.ToString(3),
+                        ModelTiers = _settings.Worker.ModelTiers,
+                        WorkspacePath = _settings.Worker.WorkspacePath
                     };
                     var client = _httpFactory.CreateClient("cluster");
                     using var response = await client.PostAsJsonAsync($"{host}/cluster/register", info, ct);

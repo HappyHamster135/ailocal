@@ -29,6 +29,8 @@ public sealed record SettingsUpdate(
     string? OpenRouterModel = null,
     int? MaxTokens = null,
     bool? AutoPullOllamaModel = null,
+    string? WorkspacePath = null,
+    ModelTiers? ModelTiers = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
@@ -45,6 +47,8 @@ internal sealed class StoredNodeSettings
     public List<string> Skills { get; set; } = ["general"];
     public int MaxConcurrentTasks { get; set; } = 1;
     public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
+    public string? WorkspacePath { get; set; }
+    public ModelTiers ModelTiers { get; set; } = new();
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
     public bool StartWithWindows { get; set; }
@@ -122,6 +126,8 @@ public sealed class PersistentSettingsStore
         settings.Worker.Skills = NormalizeSkills(stored.Skills);
         settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
         settings.Worker.AgentAccess = stored.AgentAccess;
+        settings.Worker.WorkspacePath = stored.WorkspacePath;
+        settings.Worker.ModelTiers = stored.ModelTiers;
         settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
         settings.Providers.DefaultModel = stored.AnthropicModel;
         settings.Providers.GeminiModel = stored.GeminiModel;
@@ -153,6 +159,13 @@ public sealed class PersistentSettingsStore
                 skills = _settings.Worker.Skills,
                 maxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
                 agentAccess = _settings.Worker.AgentAccess.ToString(),
+                workspacePath = _settings.Worker.WorkspacePath,
+                modelTiers = new
+                {
+                    simple = _settings.Worker.ModelTiers.Simple,
+                    medium = _settings.Worker.ModelTiers.Medium,
+                    complex = _settings.Worker.ModelTiers.Complex
+                },
                 clusterTokenConfigured = HasClusterToken(),
                 clusterToken = includeSecrets ? GetClusterToken() : null,
                 operatorTokenConfigured = HasOperatorToken(),
@@ -222,6 +235,16 @@ public sealed class PersistentSettingsStore
             // Worker it doesn't control.
             if (update.AgentAccess.HasValue)
                 _settings.Worker.AgentAccess = update.AgentAccess.Value;
+
+            // Only this Worker's own operator can point its agent at a folder
+            // (see AgentAccess: Host can't raise that either). The Host
+            // later reads this back via the heartbeat and uses it as the
+            // sandbox root / run_command working dir - it can't override it.
+            if (update.WorkspacePath is not null)
+                _settings.Worker.WorkspacePath = NullIfWhiteSpace(update.WorkspacePath);
+
+            if (update.ModelTiers is not null)
+                _settings.Worker.ModelTiers = update.ModelTiers;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());
@@ -395,7 +418,8 @@ public sealed class PersistentSettingsStore
         _stored.Skills = [.. _settings.Worker.Skills];
         _stored.MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks;
         _stored.AgentAccess = _settings.Worker.AgentAccess;
-        // StartWithWindows and the cluster token are edited only through Update() -
+        _stored.WorkspacePath = _settings.Worker.WorkspacePath;
+        _stored.ModelTiers = _settings.Worker.ModelTiers;
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).
         _stored.ProviderPriority = [.. _settings.Providers.Priority];

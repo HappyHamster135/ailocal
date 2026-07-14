@@ -46,6 +46,38 @@ public sealed class WorkerProfileSettings
     /// touch. Off by default - only this Worker's own operator can raise it,
     /// never the Host.</summary>
     public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
+
+    /// <summary>Folder the agent works inside when agent mode is on (Sandboxed:
+    /// the access root; Full: the default working directory for run_command).
+    /// Null => the Worker's own data dir / agent-workspace. Only this
+    /// Worker's own operator can set it - a Host cannot point a Worker's
+    /// agent at an arbitrary folder on that machine.</summary>
+    public string? WorkspacePath { get; set; }
+
+    /// <summary>Per-complexity model selection the Host uses when it dispatches
+    /// an assignment with no explicit model hint, so a trivial task doesn't
+    /// burn the most expensive model. Editable per Worker.</summary>
+    public ModelTiers ModelTiers { get; set; } = new();
+}
+
+/// <summary>Which model the Host picks for an agent-mode task, keyed off the
+/// task's computed complexity (1-5). The operator can override any tier -
+/// values are model *ids* (Anthropic ids by default, or any OpenRouter
+/// id if that provider is first in the worker's chain).</summary>
+public sealed class ModelTiers
+{
+    /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).</summary>
+    public string Simple { get; set; } = "claude-haiku-4-5";
+
+    /// <summary>complexity 3-4 (most real work: coding, drafting, analysis).</summary>
+    public string Medium { get; set; } = "claude-sonnet-5";
+
+    /// <summary>complexity 5 (hard: architecture, deep research, debugging).</summary>
+    public string Complex { get; set; } = "claude-opus-4-8";
+
+    /// <summary>The model for a 1-5 complexity score.</summary>
+    public string ForComplexity(int complexity) =>
+        complexity <= 2 ? Simple : complexity <= 4 ? Medium : Complex;
 }
 
 public sealed class ProviderSettings

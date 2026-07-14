@@ -87,9 +87,14 @@ public static class WorkerRole
                 return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
 
             ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.ContentType = "text/event-stream";
-
-            var workspaceRoot = Path.Combine(SettingsPaths.DataDirectory, "agent-workspace");
+            // The operator chooses the folder (Settings -> Agentlage) - a Worker
+            // picks where ITS agent runs, never the Host. Null => the
+            // default agent-workspace under this Worker's own data dir.
+            var workspaceRoot = string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
+                ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
+                : settings.Worker.WorkspacePath;
             var executor = new AgentToolExecutor(accessLevel, workspaceRoot);
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
