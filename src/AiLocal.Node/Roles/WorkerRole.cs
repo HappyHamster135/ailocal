@@ -10,8 +10,13 @@ namespace AiLocal.Node.Roles;
 
 /// <summary>An "assignment" for agent mode - a goal the Worker works and
 /// debugs on its own (read/write files, run commands per its configured
-/// access level) rather than a single chat completion.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null);
+/// access level) rather than a single chat completion. WorkerId is Host-only
+/// (see HostRole's /api/assignment) - it pins dispatch to one specific Worker
+/// instead of auto-picking the least-busy one, for a sequence of subtasks
+/// from the same plan that need to land on the same machine to share a
+/// workspace. The Worker itself ignores it; a Worker only ever executes on
+/// itself.</summary>
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null);
 
 public static class WorkerRole
 {

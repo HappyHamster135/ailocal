@@ -25,6 +25,8 @@ public sealed record PlannedWorkItem(
     int Complexity = 3,
     string Skill = "general");
 
+public sealed record GoalPlanRequest(string Goal, int? MaxParts = null);
+
 public sealed record ConversationView(
     string Id,
     string Role,
@@ -683,7 +685,16 @@ public static class HostRole
             AssignmentRequest req, HttpContext ctx, WorkerRegistry registry,
             IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
-            var candidate = registry.AvailableWorkers().FirstOrDefault(w => w.AgentAccess != AgentAccessLevel.Off);
+            // A plan's sequential subtasks pin to one specific Worker (see
+            // GoalPlanner) so later steps can see earlier ones' file changes -
+            // auto-picking least-busy fresh each call could land different
+            // subtasks on different machines with no shared filesystem between
+            // them. Falls back to auto-pick when no WorkerId is given (a plain,
+            // one-off assignment) or when the pinned Worker is no longer valid.
+            var candidate = !string.IsNullOrWhiteSpace(req.WorkerId)
+                ? registry.AvailableWorkers().FirstOrDefault(w => w.Id == req.WorkerId && w.AgentAccess != AgentAccessLevel.Off)
+                : null;
+            candidate ??= registry.AvailableWorkers().FirstOrDefault(w => w.AgentAccess != AgentAccessLevel.Off);
             if (candidate is null)
                 return Results.Problem(
                     detail: "No connected Worker has agent mode enabled. Turn it on in that Worker's own Installningar -> Agentlage first.",
@@ -715,9 +726,76 @@ public static class HostRole
 
             ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.ContentType = "text/event-stream";
+            // Lets the caller learn which Worker actually ran this (relevant
+            // when it auto-picked rather than being pinned), so a client
+            // orchestrating a multi-step plan can pin the REST of a sequential
+            // group to this same Worker.
+            await ctx.Response.WriteAsync(
+                $"data: {JsonSerializer.Serialize(new { worker = new { id = candidate.Id, name = candidate.Name } })}\n\n", ct);
+            await ctx.Response.Body.FlushAsync(ct);
             await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(ct);
             await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
             return Results.Empty;
+        });
+
+        // Turns a free-text goal into a reviewable list of agent subtasks
+        // (see GoalPlanner) - a separate step from actually running them
+        // (POST /api/assignment, one call per subtask) so the operator sees
+        // the plan before anything executes. Planning is a plain chat
+        // completion, not file/command access, so any connected Worker can do
+        // it - not just agent-enabled ones, which widens the pool and means
+        // planning still works even on a cluster with no agent-mode Workers
+        // yet (you'd just have nothing able to run the resulting plan).
+        app.MapPost("/api/goal-plan", async (
+            GoalPlanRequest req, WorkerRegistry registry, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Goal))
+                return Results.Problem(detail: "goal text is required", statusCode: StatusCodes.Status400BadRequest);
+
+            var candidate = registry.AvailableWorkers().FirstOrDefault();
+            if (candidate is null)
+                return Results.Problem(detail: "No connected Worker is available to plan this goal.", statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            var client = httpFactory.CreateClient("cluster");
+            var planner = new GoalPlanner(async (chatRequest, token) =>
+            {
+                using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, $"{candidate.PreferredEndpoint}/execute")
+                {
+                    Content = JsonContent.Create(chatRequest)
+                };
+                using var upstreamResponse = await client.SendAsync(upstreamRequest, token);
+                if (!upstreamResponse.IsSuccessStatusCode)
+                {
+                    var body = await upstreamResponse.Content.ReadAsStringAsync(token);
+                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)upstreamResponse.StatusCode}";
+                    return ProviderResponse.Fail(ProviderOutcome.TransientError, reason);
+                }
+
+                var chat = await upstreamResponse.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken: token);
+                return chat is null
+                    ? ProviderResponse.Fail(ProviderOutcome.FatalError, "empty response")
+                    : ProviderResponse.Ok(chat);
+            });
+
+            var maxParts = Math.Clamp(req.MaxParts ?? 6, 1, 8);
+            IReadOnlyList<PlannedSubtask>? plan;
+            try
+            {
+                plan = await planner.PlanAsync(req.Goal, maxParts, ct);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(detail: $"Could not reach {candidate.Name}: {ex.Message}", statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            if (plan is null)
+                return Results.Problem(detail: $"{candidate.Name} could not produce a usable plan. Try rephrasing the goal, or write it as a single assignment instead.", statusCode: StatusCodes.Status502BadGateway);
+
+            return Results.Ok(new
+            {
+                worker = new { candidate.Id, candidate.Name },
+                subtasks = plan.Select(p => new { p.Title, p.Description, p.Independent })
+            });
         });
 
         ScheduleApi.MapEndpoints(app);

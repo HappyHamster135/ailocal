@@ -981,6 +981,7 @@ internal static class Dashboard
           tasks: [],
           messages: [],
           assignmentMessages: [],
+          nextPlanId: 1,
           workerTasks: [],
           providerOrder: ['anthropic', 'gemini', 'ollama'],
           enabled: { anthropic: true, gemini: true, ollama: true },
@@ -1815,6 +1816,7 @@ internal static class Dashboard
           const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
           const previousScrollTop = box.scrollTop;
           box.innerHTML = allMessages.map(m => {
+            if (m.isPlan) return renderPlanBubble(m);
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
             const live = inFlight && state.streamBuffer && state.streamBuffer.taskId === m.taskId;
             const content = live ? state.streamBuffer.text : m.content;
@@ -1823,6 +1825,8 @@ internal static class Dashboard
               <div class="message-meta">
                 <strong>${m.role === 'user' ? 'You' : 'AiLocal'}</strong>
                 ${m.isAssignment ? '<span class="pill">Assignment</span>' : ''}
+                ${m.subtaskTitle ? `<span class="pill">${esc(m.subtaskTitle)}</span>` : ''}
+                ${m.workerName ? `<span class="small">${esc(m.workerName)}</span>` : ''}
                 ${m.state ? `<span>${esc(m.state)}</span>` : ''}
                 ${m.provider ? `<span>${esc(m.provider)}/${esc(m.model ?? '')}</span>` : ''}
                 ${inFlight ? `<button class="icon" title="Avbryt" data-cancel-task="${esc(m.taskId)}">✕</button>` : ''}
@@ -1835,8 +1839,82 @@ internal static class Dashboard
           document.querySelectorAll('#messages [data-cancel-task]').forEach(button => {
             button.onclick = () => cancelTask(button.dataset.cancelTask);
           });
+          wirePlanBubbles();
 
           manageStreaming();
+        }
+
+        const planStateLabels = {
+          planning: 'Planerar...',
+          reviewing: 'Granska planen',
+          running: 'Kör',
+          done: 'Klart',
+          stopped: 'Stoppad (ett steg misslyckades)',
+          cancelled: 'Avbruten',
+          failed: 'Planering misslyckades'
+        };
+        const subtaskStatusLabels = { pending: '', running: 'Kör...', done: '✓', failed: '✗ Misslyckades', skipped: 'Hoppades över' };
+
+        function renderPlanBubble(m) {
+          const statusLabel = planStateLabels[m.planState] ?? m.planState;
+          if (m.planState === 'planning' || m.planState === 'failed') {
+            return `
+            <article class="message assistant">
+              <div class="message-meta"><strong>AiLocal</strong><span class="pill">${esc(statusLabel)}</span></div>
+              <div>${m.planState === 'failed' ? `❌ ${esc(m.error)}` : 'Bryter ner målet i deluppgifter...'}</div>
+            </article>`;
+          }
+
+          const rows = m.subtasks.map((s, i) => `
+            <div style="margin:8px 0">
+              <label class="check-field" style="align-items:flex-start">
+                <input type="checkbox" ${s.included ? 'checked' : ''}
+                  ${m.planState !== 'reviewing' ? 'disabled' : ''}
+                  data-plan-toggle="${m.id}:${i}">
+                <span>
+                  <strong>${esc(s.title)}</strong>
+                  ${s.independent ? '<span class="pill" title="Kan köras parallellt på en annan dator">Parallell</span>' : ''}
+                  ${subtaskStatusLabels[s.status] ? `<span class="pill">${esc(subtaskStatusLabels[s.status])}</span>` : ''}
+                  <div class="small">${esc(s.description)}</div>
+                </span>
+              </label>
+            </div>`).join('');
+
+          return `
+          <article class="message assistant">
+            <div class="message-meta"><strong>AiLocal</strong><span class="pill">${esc(statusLabel)}</span></div>
+            <div>${rows}</div>
+            ${m.planState === 'reviewing' ? `
+              <div class="detail-actions">
+                <button class="primary" data-plan-run="${m.id}">Kör planen</button>
+                <button data-plan-cancel="${m.id}">Avbryt</button>
+              </div>` : ''}
+          </article>`;
+        }
+
+        function wirePlanBubbles() {
+          const plans = [...state.messages, ...state.assignmentMessages].filter(m => m.isPlan);
+          const findPlan = id => plans.find(p => String(p.id) === id);
+
+          document.querySelectorAll('#messages [data-plan-toggle]').forEach(input => {
+            const [planId, index] = input.dataset.planToggle.split(':');
+            input.onchange = () => {
+              const plan = findPlan(planId);
+              if (plan) plan.subtasks[Number(index)].included = input.checked;
+            };
+          });
+          document.querySelectorAll('#messages [data-plan-run]').forEach(button => {
+            button.onclick = () => {
+              const plan = findPlan(button.dataset.planRun);
+              if (plan) runPlan(plan);
+            };
+          });
+          document.querySelectorAll('#messages [data-plan-cancel]').forEach(button => {
+            button.onclick = () => {
+              const plan = findPlan(button.dataset.planCancel);
+              if (plan) cancelPlan(plan);
+            };
+          });
         }
 
         /// Opens a live SSE stream for the newest in-flight chat reply so tokens
@@ -2554,7 +2632,7 @@ internal static class Dashboard
           const prompt = $('prompt').value.trim();
           if (!prompt) return;
           if ($('assignmentMode').checked) {
-            await runAssignment(prompt);
+            await planAndRunGoal(prompt);
             return;
           }
           const providerOrder = activeProviderOrder();
@@ -2596,29 +2674,112 @@ internal static class Dashboard
           return `${icon} ${step.Detail}`;
         }
 
-        // Assignments are agent-mode runs: a Worker iterates on files/commands
-        // until it decides the goal is done, rather than a single reply. This
-        // goes straight to POST /api/assignment (bypassing TaskBoard/ChatBoard
-        // entirely - see HostRole), and unlike normal chat the progress here
-        // is client-side only: it doesn't survive a page reload. EventSource
-        // can't be used to read the response because it can't issue a POST
-        // with a body, so this streams the SSE response by hand instead.
-        async function runAssignment(text) {
+        // Assignment mode plans before it runs: the goal gets broken into a
+        // reviewable list of subtasks (POST /api/goal-plan) instead of being
+        // handed straight to one Worker as one big vague instruction. The
+        // operator sees the plan and can drop steps before anything executes,
+        // but there's no per-step approval after that "Kör planen" click - it
+        // runs to completion (or the first failure) on its own.
+        async function planAndRunGoal(goalText) {
           $('sendBtn').disabled = true;
           $('composerNotice').className = 'notice';
           $('prompt').value = '';
 
-          const userMsg = { role: 'user', content: text, isAssignment: true };
-          const assistantMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true };
-          state.assignmentMessages.push(userMsg, assistantMsg);
+          const planMsg = { id: state.nextPlanId++, role: 'assistant', isPlan: true, planState: 'planning', subtasks: [] };
+          state.assignmentMessages.push({ role: 'user', content: goalText, isAssignment: true }, planMsg);
+          renderMessages();
+
+          try {
+            const result = await fetchJson('/api/goal-plan', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ goal: goalText })
+            });
+            planMsg.planState = 'reviewing';
+            planMsg.subtasks = result.subtasks.map(s => ({ ...s, included: true, status: 'pending' }));
+          } catch (error) {
+            planMsg.planState = 'failed';
+            planMsg.error = error.message;
+          } finally {
+            renderMessages();
+            $('sendBtn').disabled = false;
+          }
+        }
+
+        async function cancelPlan(planMsg) {
+          planMsg.planState = 'cancelled';
+          renderMessages();
+        }
+
+        async function runPlan(planMsg) {
+          planMsg.planState = 'running';
+          renderMessages();
+
+          const included = planMsg.subtasks.filter(s => s.included);
+          // independent=false (the default) shares a workspace with earlier
+          // steps, so it must run after them on the SAME Worker - independent
+          // ones don't need to see anyone else's files, so they're safe to
+          // fire off concurrently on whichever Worker is free. See GoalPlanner.
+          const sequential = included.filter(s => !s.independent);
+          const independent = included.filter(s => s.independent);
+
+          let pinnedWorkerId = null;
+          let stoppedEarly = false;
+          const completedSummaries = [];
+
+          for (const subtask of sequential) {
+            if (stoppedEarly) { subtask.status = 'skipped'; continue; }
+            subtask.status = 'running';
+            renderMessages();
+
+            const contextPrefix = completedSummaries.length
+              ? `Context - already completed by an earlier step on this same computer:\n${completedSummaries.join('\n')}\n\nYour task now:\n`
+              : '';
+            const outcome = await runPlanSubtask(subtask, contextPrefix + subtask.description, pinnedWorkerId);
+            pinnedWorkerId = outcome.workerId ?? pinnedWorkerId;
+            subtask.status = outcome.success ? 'done' : 'failed';
+            if (outcome.success) {
+              completedSummaries.push(`- ${subtask.title}: ${trunc(outcome.summary, 200)}`);
+            } else {
+              stoppedEarly = true;
+            }
+            renderMessages();
+          }
+
+          if (independent.length) {
+            independent.forEach(s => { s.status = 'running'; });
+            renderMessages();
+            await Promise.all(independent.map(async subtask => {
+              const outcome = await runPlanSubtask(subtask, subtask.description, null);
+              subtask.status = outcome.success ? 'done' : 'failed';
+              renderMessages();
+            }));
+          }
+
+          planMsg.planState = stoppedEarly ? 'stopped' : 'done';
+          renderMessages();
+        }
+
+        // One subtask's execution: same SSE-by-hand approach as before
+        // (EventSource can't POST a body), plus reading the new leading
+        // "worker" frame /api/assignment now sends first, so a sequential
+        // group's later steps can pin to the same Worker the first one landed
+        // on (see HostRole's /api/assignment WorkerId handling).
+        async function runPlanSubtask(subtask, assignmentText, workerId) {
+          const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title };
+          state.assignmentMessages.push(stepMsg);
           renderMessages();
 
           const lines = [];
           const appendLine = line => {
             lines.push(line);
-            assistantMsg.content = lines.join('\n');
+            stepMsg.content = lines.join('\n');
             renderMessages();
           };
+
+          let workerIdUsed = workerId;
+          let success = false;
+          let summary = '';
 
           try {
             const headers = { 'content-type': 'application/json' };
@@ -2626,7 +2787,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: text, modelHint: $('modelSelect').value || null })
+              body: JSON.stringify({ assignment: assignmentText, workerId })
             });
 
             if (!response.ok || !response.body) {
@@ -2652,18 +2813,20 @@ internal static class Dashboard
                 const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
                 if (!dataLine) continue;
                 const payload = JSON.parse(dataLine.slice(5).trim());
-                if (payload.step) {
+                if (payload.worker) {
+                  workerIdUsed = payload.worker.id;
+                  stepMsg.workerName = payload.worker.name;
+                  renderMessages();
+                } else if (payload.step) {
                   appendLine(stepLine(payload.step));
                 } else if (payload.final) {
-                  assistantMsg.state = payload.final.Success ? 'Completed' : 'Failed';
-                  // AgentLoop always emits a step (done/error/cancelled) with
-                  // this exact same text immediately before returning, so
-                  // it's already the last line above - appending it again
-                  // here would just show the same answer twice. Only fall
-                  // back to appending it if, for some reason, no step ever
-                  // arrived (e.g. the SSE stream cut mid-run).
+                  success = !!payload.final.Success;
+                  summary = payload.final.FinalAnswer || '';
+                  stepMsg.state = success ? 'Completed' : 'Failed';
+                  // See the equivalent note this replaced: AgentLoop always
+                  // emits a step with this same text right before returning.
                   if (!lines.length) {
-                    appendLine(payload.final.FinalAnswer || (payload.final.Success ? '(inget svar)' : '(misslyckades)'));
+                    appendLine(summary || (success ? '(inget svar)' : '(misslyckades)'));
                   } else {
                     renderMessages();
                   }
@@ -2671,12 +2834,12 @@ internal static class Dashboard
               }
             }
           } catch (error) {
-            assistantMsg.state = 'Failed';
+            stepMsg.state = 'Failed';
             appendLine(`❌ ${error.message}`);
-            showComposerNotice(error.message, true);
-          } finally {
-            $('sendBtn').disabled = false;
+            summary = error.message;
           }
+
+          return { success, summary, workerId: workerIdUsed };
         }
 
         async function quickstart() {
