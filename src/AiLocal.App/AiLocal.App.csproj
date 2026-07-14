@@ -6,6 +6,14 @@
     <AssemblyName>ailocal-app</AssemblyName>
     <RootNamespace>AiLocal.App</RootNamespace>
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+    <!-- Release assets are shipped as a single standalone .exe with no
+         companion files. Without IncludeNativeLibrariesForSelfExtract, a
+         PublishSingleFile build leaves native libs (WebView2Loader.dll,
+         aspnetcorev2_inprocess.dll) loose next to the exe - so the uploaded
+         exe, run on its own, crashes with "Dll was not found." Bundling them
+         into the exe (self-extracted at startup) is what makes the release
+         asset actually runnable standalone. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AiLocal.Node\AiLocal.Node.csproj" />

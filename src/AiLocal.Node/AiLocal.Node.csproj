@@ -2,6 +2,9 @@
   <PropertyGroup>
     <AssemblyName>ailocal</AssemblyName>
     <RootNamespace>AiLocal.Node</RootNamespace>
+    <!-- See AiLocal.App.csproj: bundle native libs into the single-file exe so
+         the standalone release asset runs without loose companion DLLs. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AiLocal.Core\AiLocal.Core.csproj" />
