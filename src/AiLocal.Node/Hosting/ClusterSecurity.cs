@@ -114,7 +114,13 @@ public static class ClusterSecurity
         // approving pending requests) stays behind the normal token/loopback
         // gate - only these two exact handshake endpoints are public.
         path == "/pairing/request" ||
-        path == "/pairing/approved";
+        path == "/pairing/approved" ||
+        // A Host announces itself to an Overseer carrying its OWN token, which
+        // the Overseer stores and later uses to proxy back. The Overseer's own
+        // token isn't known to the Host yet (that's the whole problem this
+        // solves), so the announce endpoint must be reachable without it -
+        // same LAN-trust opt-in model as the pairing handshake.
+        path == "/cluster/announce";
 
     private static bool IsNodeOnly(PathString path) =>
         path.StartsWithSegments("/cluster") ||

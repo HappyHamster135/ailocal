@@ -24,6 +24,7 @@ public sealed class ClusterHostedService : BackgroundService
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<ClusterHostedService> _log;
     private readonly string _nodeId;
+    private readonly PersistentSettingsStore _settingsStore;
 
     public ClusterHostedService(
         NodeSettings settings,
@@ -41,6 +42,7 @@ public sealed class ClusterHostedService : BackgroundService
         _hardware = hardware;
         _recommendation = recommendation;
         _nodeId = settingsStore.NodeId;
+        _settingsStore = settingsStore;
         _hostLocator = hostLocator;
         _hostRegistry = hostRegistry;
         _pairing = pairing;
@@ -141,6 +143,51 @@ public sealed class ClusterHostedService : BackgroundService
 
         if (beacon.Role == NodeRole.Host && _settings.Role == NodeRole.Overseer)
             _hostRegistry.Upsert(beacon);
+
+        // A Host that sees an Overseer announces itself (carrying its own
+        // cluster token) so the Overseer can proxy node-to-node calls back to
+        // it. Without this, the Overseer would present its own token, which a
+        // remote Host rejects with 401 - so cross-machine control silently
+        // fails. This is the LAN-trust opt-in: announcing == "you may control
+        // me". A Host that never sees an Overseer beacon simply never announces.
+        if (beacon.Role == NodeRole.Overseer && _settings.Role == NodeRole.Host)
+            _ = AnnounceToOverseerAsync(beacon.Endpoint);
+    }
+
+    private async Task AnnounceToOverseerAsync(string overseerEndpoint)
+    {
+        try
+        {
+            var info = new NodeInfo
+            {
+                Id = _nodeId,
+                Name = _settings.NodeName,
+                Role = NodeRole.Host,
+                Endpoint = SelfEndpoint,
+                TlsEndpoint = SelfTlsEndpoint,
+                Hardware = _hardware,
+                Skills = [.. _settings.Worker.Skills],
+                MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
+                AgentAccess = _settings.Worker.AgentAccess,
+                ProviderPriority = [.. _settings.Providers.Priority],
+                LocalModel = _settings.Providers.OllamaModel ?? _recommendation.OllamaTag,
+                RecommendedModel = _recommendation.OllamaTag,
+                Version = typeof(ClusterHostedService).Assembly.GetName().Version?.ToString(3),
+                ModelTiers = _settings.Worker.ModelTiers,
+                WorkspacePath = _settings.Worker.WorkspacePath,
+                ClusterToken = _settingsStore.GetClusterToken()
+            };
+            var client = _httpFactory.CreateClient("cluster");
+            using var response = await client.PostAsJsonAsync($"{overseerEndpoint.TrimEnd('/')}/cluster/announce", info);
+            if (response.IsSuccessStatusCode)
+                _log.LogInformation("Announced to Overseer at {Endpoint}", overseerEndpoint);
+            else
+                _log.LogDebug("Overseer {Endpoint} rejected announce: {Status}", overseerEndpoint, (int)response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Failed to announce to Overseer at {Endpoint}", overseerEndpoint);
+        }
     }
 
     private async Task RegisterLoopAsync(CancellationToken ct)
@@ -167,7 +214,12 @@ public sealed class ClusterHostedService : BackgroundService
                         RecommendedModel = _recommendation.OllamaTag,
                         Version = typeof(ClusterHostedService).Assembly.GetName().Version?.ToString(3),
                         ModelTiers = _settings.Worker.ModelTiers,
-                        WorkspacePath = _settings.Worker.WorkspacePath
+                        WorkspacePath = _settings.Worker.WorkspacePath,
+                        // Share this Host's own cluster token so the Overseer
+                        // can proxy node-to-node calls back to it. Each node
+                        // mints its own token; the Overseer presenting its own
+                        // would be rejected with 401 by a remote Host.
+                        ClusterToken = _settingsStore.GetClusterToken()
                     };
                     var client = _httpFactory.CreateClient("cluster");
                     using var response = await client.PostAsJsonAsync($"{host}/cluster/register", info, ct);

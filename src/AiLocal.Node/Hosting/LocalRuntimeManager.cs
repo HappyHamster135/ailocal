@@ -319,7 +319,12 @@ public sealed class LocalRuntimeManager
 
             var body = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(body);
-            var model = RecommendedModel;
+            // Check the model the operator has actually chosen (falling back
+            // to the recommendation) - not the bare recommendation, which is
+            // what the provider itself will request. Otherwise a worker with
+            // llama3.1:8b installed but a different recommended tag reports
+            // "not installed" and can never be used.
+            var model = EffectiveModel;
             var installed = false;
 
             if (doc.RootElement.TryGetProperty("models", out var models) &&
@@ -337,6 +342,12 @@ public sealed class LocalRuntimeManager
             return (false, false);
         }
     }
+
+    /// <summary>The model the provider will actually request: the operator's
+    /// explicit choice, or the hardware recommendation when that's empty.</summary>
+    private string EffectiveModel => string.IsNullOrWhiteSpace(_settings.Providers.OllamaModel)
+        ? _recommendation.OllamaTag
+        : _settings.Providers.OllamaModel;
 
     private static async Task<bool> CommandExistsAsync(string command, CancellationToken ct)
     {

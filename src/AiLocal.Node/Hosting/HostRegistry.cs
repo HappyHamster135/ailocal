@@ -10,7 +10,8 @@ public sealed record KnownHost(
     string Name,
     string Endpoint,
     DateTimeOffset LastSeen,
-    bool IsExplicit);
+    bool IsExplicit,
+    string? ClusterToken = null);
 
 /// <summary>
 /// Overseer-side registry of every Host observed through discovery or explicit
@@ -49,6 +50,12 @@ public sealed class HostRegistry
 
     public string? PrimaryEndpoint => All.FirstOrDefault()?.Endpoint;
 
+    /// <summary>The Overseer's own cluster token, used as a fallback when
+    /// proxying to a Host we have no announced token for (e.g. an explicit
+    /// cross-subnet Host). On the same machine this matches the Host's token
+    /// anyway, since they share the settings file.</summary>
+    public string? OverseerToken { get; set; }
+
     public void Upsert(DiscoveryBeacon beacon)
     {
         if (beacon.Role != NodeRole.Host)
@@ -66,21 +73,47 @@ public sealed class HostRegistry
         Upsert(id, normalized, normalized, isExplicit: true);
     }
 
-    public void UpdateIdentity(string endpoint, string id, string name)
+    /// <summary>Records a Host announced via /cluster/announce, carrying the
+    /// Host's own cluster token so the Overseer can proxy back to it.</summary>
+    public void UpsertExplicitOrUpdate(string endpoint, string id, string name, string? clusterToken)
     {
         var normalized = NormalizeEndpoint(endpoint);
         _hosts.AddOrUpdate(
             normalized,
-            _ => new KnownHost(id, name, normalized, DateTimeOffset.UtcNow, false),
+            _ => new KnownHost(id, name, normalized, DateTimeOffset.UtcNow, false, clusterToken),
             (_, existing) => existing with
             {
                 Id = id,
                 Name = name,
-                LastSeen = DateTimeOffset.UtcNow
+                LastSeen = DateTimeOffset.UtcNow,
+                ClusterToken = clusterToken ?? existing.ClusterToken
+            });
+        Save(force: true);
+    }
+
+    public void UpdateIdentity(string endpoint, string id, string name, string? clusterToken = null)
+    {
+        var normalized = NormalizeEndpoint(endpoint);
+        _hosts.AddOrUpdate(
+            normalized,
+            _ => new KnownHost(id, name, normalized, DateTimeOffset.UtcNow, false, clusterToken),
+            (_, existing) => existing with
+            {
+                Id = id,
+                Name = name,
+                LastSeen = DateTimeOffset.UtcNow,
+                ClusterToken = clusterToken ?? existing.ClusterToken
             });
         RemoveAliases(id, normalized);
         Save(force: true);
     }
+
+    /// <summary>The cluster token a Host presented at registration, used by
+    /// the Overseer when proxying node-to-node calls back to that Host. Each
+    /// Host mints its own token, so the Overseer must present the *Host's*
+    /// token (not its own) or the Host rejects the call with 401.</summary>
+    public string? ClusterTokenFor(string endpoint) =>
+        _hosts.TryGetValue(NormalizeEndpoint(endpoint), out var host) ? host.ClusterToken : null;
 
     public void MapWorker(string workerId, string hostEndpoint)
     {

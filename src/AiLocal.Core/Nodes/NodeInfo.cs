@@ -33,6 +33,12 @@ public sealed class NodeInfo
     public string? LocalModel { get; set; }
     public string? RecommendedModel { get; set; }
     public string? Version { get; set; }
+    /// <summary>The registering node's own cluster token, shared with the
+    /// Overseer so it can proxy node-to-node calls back using the Host's
+    /// token (each node mints its own; presenting the Overseer's token to a
+    /// remote Host would be rejected with 401). Empty for Workers, which are
+    /// reached through their Host and never proxied to directly.</summary>
+    public string? ClusterToken { get; set; }
 
     /// <summary>Per-complexity model tiers this Worker wants the Host to
     /// use when dispatching an assignment with no explicit model hint.

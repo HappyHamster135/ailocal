@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using AiLocal.Core.Configuration;
+using AiLocal.Core.Nodes;
+using AiLocal.Core.Roles;
 using AiLocal.Node.Hosting;
 
 namespace AiLocal.Node.Roles;
@@ -17,6 +19,13 @@ public static class OverseerRole
 
     public static void MapEndpoints(WebApplication app)
     {
+        // Capture this Overseer's own cluster token so proxies fall back to it
+        // for any Host we have no announced token for (same-machine case,
+        // where both share the settings file and therefore the same token).
+        var store = app.Services.GetRequiredService<PersistentSettingsStore>();
+        var hosts = app.Services.GetRequiredService<HostRegistry>();
+        hosts.OverseerToken = store.GetClusterToken();
+
         app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
 
         app.MapGet("/api/host", (HostLocator locator, HostRegistry hosts) => Results.Ok(new
@@ -27,6 +36,20 @@ public static class OverseerRole
         app.MapGet("/api/hosts", (HostRegistry hosts) => Results.Ok(hosts.All));
         app.MapDelete("/api/hosts/{id}", (string id, HostRegistry hosts) =>
             hosts.Remove(id) ? Results.NoContent() : Results.NotFound());
+
+        // A Host that discovers this Overseer announces itself here (carrying
+        // its own cluster token) so the Overseer can proxy node-to-node calls
+        // back to it using the *Host's* token - each node mints its own, and
+        // presenting the Overseer's token to a remote Host is rejected with
+        // 401. This is the LAN-trust opt-in: a Host chooses to be controllable
+        // by announcing; one that never announces is simply never proxied to.
+        app.MapPost("/cluster/announce", (NodeInfo node, HostRegistry hosts) =>
+        {
+            if (node is not { Role: NodeRole.Host })
+                return Results.BadRequest(new { error = "only hosts may announce" });
+            hosts.UpsertExplicitOrUpdate(node.Endpoint, node.Id, node.Name, node.ClusterToken);
+            return Results.Ok(new { announced = node.Id });
+        });
 
         app.MapGet("/api/nodes", AggregateNodes);
         app.MapGet("/api/topology", AggregateTopology);
@@ -272,7 +295,7 @@ public static class OverseerRole
 
         if (endpoint is null)
             return Results.NotFound(new { error = "worker is not mapped to a known host" });
-        return await ProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+        return await ProxyEndpoint(endpoint, hosts, httpFactory, method, path, body, ct);
     }
 
     private static async Task RefreshWorkerIndex(
@@ -325,7 +348,7 @@ public static class OverseerRole
         IResult? lastResult = null;
         foreach (var endpoint in candidates)
         {
-            var (reached, result) = await TryProxyEndpoint(endpoint, httpFactory, method, path, body, ct);
+            var (reached, result) = await TryProxyEndpoint(endpoint, hosts, httpFactory, method, path, body, ct);
             if (reached)
                 return result;
             lastResult = result;
@@ -336,12 +359,13 @@ public static class OverseerRole
 
     private static async Task<IResult> ProxyEndpoint(
         string endpoint,
+        HostRegistry hosts,
         IHttpClientFactory httpFactory,
         HttpMethod method,
         string path,
         object? body,
         CancellationToken ct) =>
-        (await TryProxyEndpoint(endpoint, httpFactory, method, path, body, ct)).Result;
+        (await TryProxyEndpoint(endpoint, hosts, httpFactory, method, path, body, ct)).Result;
 
     /// <summary>Reached=true means the target answered (even a non-2xx status
     /// is a real answer worth relaying to the caller); Reached=false means the
@@ -349,6 +373,7 @@ public static class OverseerRole
     /// next endpoint instead of giving up.</summary>
     private static async Task<(bool Reached, IResult Result)> TryProxyEndpoint(
         string endpoint,
+        HostRegistry hosts,
         IHttpClientFactory httpFactory,
         HttpMethod method,
         string path,
@@ -360,6 +385,14 @@ public static class OverseerRole
             var client = httpFactory.CreateClient("cluster");
             client.Timeout = TimeSpan.FromSeconds(15);
             using var request = new HttpRequestMessage(method, $"{endpoint.TrimEnd('/')}{path}");
+            // Present the *target Host's* own cluster token, not the
+            // Overseer's - each node mints its own and rejects others with
+            // 401. Fall back to the Overseer's token only when we have no
+            // recorded token for this Host (e.g. a cross-subnet Host added by
+            // explicit endpoint that never announced).
+            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.OverseerToken;
+            if (!string.IsNullOrWhiteSpace(token))
+                request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
             if (body is not null)
                 request.Content = JsonContent.Create(body);
             using var response = await client.SendAsync(request, ct);
@@ -388,12 +421,13 @@ public static class OverseerRole
             .ToList();
 
         var tasks = endpoints.Select(endpoint =>
-            Fetch(endpoint, httpFactory, path, ct));
+            Fetch(endpoint, hosts, httpFactory, path, ct));
         return await Task.WhenAll(tasks);
     }
 
     private static async Task<HostPayload> Fetch(
         string endpoint,
+        HostRegistry hosts,
         IHttpClientFactory httpFactory,
         string path,
         CancellationToken ct)
@@ -402,7 +436,12 @@ public static class OverseerRole
         {
             var client = httpFactory.CreateClient("cluster");
             client.Timeout = TimeSpan.FromSeconds(4);
-            var json = await client.GetStringAsync($"{endpoint.TrimEnd('/')}{path}", ct);
+            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.OverseerToken;
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint.TrimEnd('/')}{path}");
+            if (!string.IsNullOrWhiteSpace(token))
+                request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
+            using var response = await client.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
             return new HostPayload(endpoint.TrimEnd('/'), JsonNode.Parse(json));
         }
         catch

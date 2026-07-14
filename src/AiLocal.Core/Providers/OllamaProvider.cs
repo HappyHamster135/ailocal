@@ -46,7 +46,9 @@ public sealed class OllamaProvider : IChatProvider
 
     public async Task<ProviderResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var model = request.ModelHint ?? _settings.OllamaModel ?? _recommendation.OllamaTag;
+        var model = !string.IsNullOrWhiteSpace(request.ModelHint) ? request.ModelHint
+            : !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+            : _recommendation.OllamaTag;
 
         var payload = new Dictionary<string, object?>
         {
@@ -193,7 +195,9 @@ public sealed class OllamaProvider : IChatProvider
         ChatRequest request,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var model = request.ModelHint ?? _settings.OllamaModel ?? _recommendation.OllamaTag;
+        var model = !string.IsNullOrWhiteSpace(request.ModelHint) ? request.ModelHint
+            : !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+            : _recommendation.OllamaTag;
 
         var messages = new List<object>();
         if (!string.IsNullOrWhiteSpace(request.System))
