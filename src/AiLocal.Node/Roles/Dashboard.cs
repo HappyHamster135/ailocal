@@ -556,6 +556,7 @@ internal static class Dashboard
         .dialog-body { padding: 16px; overflow: auto; max-height: calc(100vh - 170px); }
         .form-section { margin-bottom: 20px; }
         .form-title { font-weight: 740; margin-bottom: 10px; }
+        .form-subtitle { font-weight: 640; font-size: 13px; margin: 14px 0 8px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
         .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .field { display: grid; gap: 5px; min-width: 0; }
         .field.wide { grid-column: 1 / -1; }
@@ -875,7 +876,7 @@ internal static class Dashboard
             </div>
           </section>
           <section class="form-section">
-            <div class="form-title">Klustersäkerhet</div>
+            <div class="form-title">Säkerhet &amp; system</div>
             <div class="form-grid">
               <div class="field wide">
                 <span class="small">Nuvarande klusternyckel</span>
@@ -911,14 +912,19 @@ internal static class Dashboard
                 <input id="settingOperatorToken" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
               </label>
               <label class="check-field wide"><input id="clearOperatorToken" type="checkbox"> Ta bort operatörsnyckel</label>
+              <div class="form-subtitle">Uppdatering</div>
+              <div class="field wide">
+                <span class="small" id="updateStatus">Nuvarande version: ...</span>
+                <div class="token-row">
+                  <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
+                  <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
+                  <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
+                </div>
+              </div>
             </div>
           </section>
           <section class="form-section">
-            <div class="form-title">Providerordning</div>
-            <div class="settings-provider-list" id="settingsProviders"></div>
-          </section>
-          <section class="form-section">
-            <div class="form-title">Modeller och runtime</div>
+            <div class="form-title">Modeller &amp; provider</div>
             <div class="form-grid">
               <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
               <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
@@ -928,9 +934,7 @@ internal static class Dashboard
               <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
               <label class="check-field wide"><input id="settingAutoPull" type="checkbox"> Hämta vald lokal modell automatiskt</label>
             </div>
-          </section>
-          <section class="form-section">
-            <div class="form-title">API-nycklar</div>
+            <div class="form-subtitle">API-nycklar</div>
             <div class="form-grid">
               <label class="field">
                 <span class="small">Claude API-nyckel</span>
@@ -951,21 +955,9 @@ internal static class Dashboard
               <label class="check-field"><input id="clearGeminiKey" type="checkbox"> Ta bort Gemini-nyckel</label>
               <label class="check-field"><input id="clearOpenRouterKey" type="checkbox"> Ta bort OpenRouter-nyckel</label>
             </div>
+            <div class="form-subtitle">Providerordning (fallback-kedja)</div>
+            <div class="settings-provider-list" id="settingsProviders"></div>
           </section>
-          <section class="form-section" id="updateSection">
-            <div class="form-title">Uppdatering</div>
-            <div class="form-grid">
-              <div class="field wide">
-                <span class="small" id="updateStatus">Nuvarande version: ...</span>
-                <div class="token-row">
-                  <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
-                  <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
-                  <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
         <div class="dialog-foot">
           <button id="cancelSettings">Avbryt</button>
           <button class="primary" id="saveSettings">Spara</button>
