@@ -47,7 +47,11 @@ public class AgentLoopTests : IDisposable
     public async Task RunAsync_OffAccessLevel_RefusesWithoutCallingProvider()
     {
         var provider = FakeChatProvider.Success("test", "should never be reached");
-        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        // The loop reads its tool list from the EXECUTOR (the single source
+        // of truth) - so the executor, not just the RunAsync parameter, must
+        // be Off, which is the only combination real call sites can produce
+        // (both derive from the same settings value).
+        var loop = new AgentLoop(provider.CompleteAsync, new AgentToolExecutor(AgentAccessLevel.Off, _workspace));
 
         var result = await loop.RunAsync("do something", AgentAccessLevel.Off);
 

@@ -11,61 +11,74 @@ internal static class Dashboard
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>AiLocal</title>
       <style>
+        /* Both palettes are lifted from the actual Hermes Agent app (its
+           built-in "Nous" light theme and "Mono" dark theme, extracted from
+           the shipped bundle) rather than approximated by eye - the user
+           compared the two apps side by side and wants this one to read the
+           same. Notable consequences encoded as tokens instead of hardcoded
+           colors: --accent-fg (Hermes' dark-mode primary button is near-WHITE
+           with dark text, so "color: white" on .primary would vanish) and
+           --sidebar-bg (Hermes' sidebar is a step darker than the content
+           area, they are not the same surface). */
         :root {
           color-scheme: light;
-          --bg: #f6f7f9;
+          --bg: #f8faff;
+          --sidebar-bg: #f3f7ff;
           --surface: #ffffff;
-          --surface-2: #eef2f5;
-          --surface-soft: #fbfcfd;
-          --surface-active: #eef4ff;
-          --surface-selected: #f4f7ff;
-          --topbar-bg: rgba(255,255,255,.86);
-          --line: #d9e0e6;
-          --line-strong: #bcc8d1;
-          --kv-line: #eef1f4;
-          --user-bubble-border: #cfe0ff;
-          --text: #172029;
-          --muted: #667583;
-          --accent: #246bfe;
-          --accent-2: #087f8c;
-          --ok: #15803d;
-          --ok-bg: #f0faf3;
-          --ok-border: #bad5c2;
-          --ok-text: #166534;
-          --warn: #b45309;
-          --bad: #b91c1c;
-          --bad-bg: #fff5f5;
-          --bad-border: #efc3c3;
-          --radius: 8px;
-          --shadow: 0 1px 2px rgba(23,32,41,.05);
+          --surface-2: #f2f6ff;
+          --surface-soft: #fbfcff;
+          --surface-active: #e6eeff;
+          --surface-selected: #eff4ff;
+          --topbar-bg: rgba(248,250,255,.88);
+          --line: #d7e1fa;
+          --line-strong: #bcccf4;
+          --kv-line: #eef2fc;
+          --user-bubble-border: #c2d3fe;
+          --text: #17171a;
+          --muted: #666678;
+          --accent: #0053fd;
+          --accent-fg: #fcfcfc;
+          --accent-2: #1540b1;
+          --ok: #1f8a65;
+          --ok-bg: #eefaf4;
+          --ok-border: #b8dcca;
+          --ok-text: #1a6e51;
+          --warn: #c08532;
+          --bad: #cf2d56;
+          --bad-bg: #fdf1f4;
+          --bad-border: #f0c2ce;
+          --radius: 6px;
+          --shadow: 0 1px 2px rgba(23,23,26,.05);
         }
         :root[data-theme="dark"] {
           color-scheme: dark;
-          --bg: #0a0c10;
-          --surface: #14171c;
-          --surface-2: #1c2028;
-          --surface-soft: #10141a;
-          --surface-active: #1b2333;
-          --surface-selected: #182030;
-          --topbar-bg: rgba(16,19,24,.9);
-          --line: #22262e;
-          --line-strong: #333944;
-          --kv-line: #1c2028;
-          --user-bubble-border: #2c4a7c;
-          --text: #eef1f5;
-          --muted: #8992a1;
-          --accent: #5b8cff;
-          --accent-2: #22b8c8;
-          --ok: #3ddc84;
-          --ok-bg: #0f2116;
-          --ok-border: #1d4a30;
-          --ok-text: #6ee7a0;
-          --warn: #f0a020;
-          --bad: #ff6b6b;
-          --bad-bg: #2a1418;
-          --bad-border: #5c2530;
-          --radius: 8px;
-          --shadow: 0 1px 2px rgba(0,0,0,.3);
+          --bg: #0e0e0e;
+          --sidebar-bg: #0a0a0a;
+          --surface: #141414;
+          --surface-2: #1e1e1e;
+          --surface-soft: #111111;
+          --surface-active: #1a1a1a;
+          --surface-selected: #191919;
+          --topbar-bg: rgba(10,10,11,.92);
+          --line: #242424;
+          --line-strong: #303030;
+          --kv-line: #1a1a1a;
+          --user-bubble-border: #363636;
+          --text: #eaeaea;
+          --muted: #808080;
+          --accent: #eaeaea;
+          --accent-fg: #0e0e0e;
+          --accent-2: #9a9a9a;
+          --ok: #55a583;
+          --ok-bg: #0f1f18;
+          --ok-border: #1d4034;
+          --ok-text: #7fc8a9;
+          --warn: #c08532;
+          --bad: #e75e78;
+          --bad-bg: #241318;
+          --bad-border: #4a2530;
+          --radius: 6px;
+          --shadow: 0 1px 2px rgba(0,0,0,.35);
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; }
@@ -83,9 +96,9 @@ internal static class Dashboard
           margin: 0;
           background: var(--bg);
           color: var(--text);
-          font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-          font-size: 14px;
-          line-height: 1.4;
+          font-family: "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+          font-size: 13px;
+          line-height: 1.45;
         }
         button, input, textarea, select { font: inherit; }
         /* Exactly one transition rule existed anywhere in this stylesheet
@@ -98,14 +111,14 @@ internal static class Dashboard
           border: 1px solid var(--line);
           background: var(--surface);
           color: var(--text);
-          min-height: 36px;
+          min-height: 34px;
           padding: 0 12px;
-          border-radius: 7px;
+          border-radius: var(--radius);
           cursor: pointer;
         }
         button:hover { border-color: var(--line-strong); background: var(--surface-soft); }
         button:active { transform: scale(.97); }
-        button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+        button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
         button.ghost { background: transparent; }
         button.icon { width: 30px; min-height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
         .icon-svg { display: block; flex: 0 0 auto; }
@@ -114,10 +127,67 @@ internal static class Dashboard
           border: 1px solid var(--line);
           background: var(--surface);
           color: var(--text);
-          border-radius: 7px;
+          border-radius: var(--radius);
           outline: none;
         }
-        input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(36,107,254,.12); }
+        input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+        /* Native <select> looks like a Win95 relic against the rest of the
+           theme - replace the OS arrow with our own chevron and give the
+           control the same surface language as every other input. The open
+           popup list itself is OS-drawn and can only take flat colors. */
+        select {
+          appearance: none;
+          -webkit-appearance: none;
+          background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808080' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 9px center;
+          padding: 0 30px 0 10px;
+          min-height: 34px;
+          cursor: pointer;
+        }
+        select option { background: var(--surface); color: var(--text); }
+        /* Same treatment for checkboxes - the native ones read as "Windows
+           form", these read as part of the app. */
+        input[type="checkbox"] {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 16px;
+          height: 16px;
+          min-height: 0;
+          border: 1px solid var(--line-strong);
+          border-radius: 4px;
+          background: var(--surface);
+          display: inline-grid;
+          place-content: center;
+          cursor: pointer;
+          padding: 0;
+          flex: 0 0 auto;
+        }
+        input[type="checkbox"]::before {
+          content: "";
+          width: 9px;
+          height: 9px;
+          transform: scale(0);
+          transition: transform .1s ease;
+          clip-path: polygon(14% 44%, 0 60%, 40% 100%, 100% 20%, 86% 8%, 38% 72%);
+          background: var(--accent-fg);
+        }
+        input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+        input[type="checkbox"]:checked::before { transform: scale(1); }
+        input[type="checkbox"]:disabled { opacity: .4; cursor: default; }
+        /* Ambient depth (Hermes-style): two faint accent glows behind
+           everything - decorative only, never intercepts input. */
+        body::before {
+          content: "";
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          background:
+            radial-gradient(900px 500px at 85% -10%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 60%),
+            radial-gradient(700px 420px at -10% 110%, color-mix(in srgb, var(--accent-2) 4%, transparent), transparent 60%);
+        }
+        .app { position: relative; z-index: 1; }
         .app {
           min-height: 100%;
           display: grid;
@@ -131,7 +201,7 @@ internal static class Dashboard
           justify-content: space-between;
           gap: 12px;
           border-top: 1px solid var(--line);
-          background: var(--surface);
+          background: var(--sidebar-bg);
           color: var(--muted);
           font-size: 12px;
           overflow: hidden;
@@ -149,8 +219,8 @@ internal static class Dashboard
           .statusbar-left span:not(:first-child):not(:nth-child(2)) { display: none; }
         }
         .topbar {
-          height: 64px;
-          padding: 0 18px;
+          height: 54px;
+          padding: 0 6px 0 14px;
           display: flex;
           align-items: center;
           gap: 16px;
@@ -160,7 +230,31 @@ internal static class Dashboard
           position: sticky;
           top: 0;
           z-index: 5;
+          /* In the WebView2 shell the OS caption is stripped and THIS bar is
+             the window titlebar: draggable, double-click maximizes (WebView2
+             non-client region support). Interactive children opt out below. */
+          -webkit-app-region: drag;
+          app-region: drag;
         }
+        .topbar button, .topbar input, .topbar select, .topbar a {
+          -webkit-app-region: no-drag;
+          app-region: no-drag;
+        }
+        .win-controls { display: none; align-items: center; gap: 2px; margin-left: 4px; }
+        .desktop-shell .win-controls { display: flex; }
+        .win-btn {
+          width: 40px;
+          min-height: 32px;
+          border: none;
+          background: transparent;
+          color: var(--muted);
+          border-radius: 6px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .win-btn:hover { background: var(--surface-2); color: var(--text); border: none; }
+        .win-btn.win-close:hover { background: #c42b1c; color: #fff; }
         .brand {
           display: flex;
           align-items: center;
@@ -169,16 +263,17 @@ internal static class Dashboard
           flex: 0 0 auto;
         }
         .mark {
-          width: 34px;
-          height: 34px;
-          border-radius: 8px;
+          width: 30px;
+          height: 30px;
+          border-radius: 7px;
           background: linear-gradient(135deg, var(--accent), var(--accent-2));
-          color: white;
+          color: var(--accent-fg);
           display: grid;
           place-items: center;
           font-weight: 800;
+          font-size: 12px;
         }
-        .brand-title { font-size: 17px; font-weight: 760; letter-spacing: 0; }
+        .brand-title { font-size: 14px; font-weight: 650; letter-spacing: 0; }
         .role-strip {
           display: grid;
           grid-template-columns: repeat(3, minmax(112px, 1fr));
@@ -232,14 +327,48 @@ internal static class Dashboard
           grid-template-columns: 260px 1fr;
           min-height: 0;
           overflow: hidden;
+          /* Chromium animates grid tracks, so collapsing the sidebar slides
+             it shut instead of snapping - same feel as Hermes' panel toggle. */
+          transition: grid-template-columns .18s ease;
         }
+        .shell.sidebar-collapsed { grid-template-columns: 0px 1fr; }
+        .shell.sidebar-collapsed .sidebar { border-right: none; }
         .sidebar {
           display: grid;
-          grid-template-rows: auto auto auto 1fr;
+          grid-template-rows: auto auto auto auto 1fr;
           min-height: 0;
           overflow: hidden;
           border-right: 1px solid var(--line);
-          background: var(--surface);
+          background: var(--sidebar-bg);
+        }
+        .sidebar-top { padding: 10px 10px 0; }
+        .new-session-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          font-weight: 640;
+          font-size: 13px;
+        }
+        .kbd {
+          font-size: 10px;
+          padding: 1px 6px;
+          border: 1px solid var(--line-strong);
+          border-radius: 4px;
+          color: var(--muted);
+          font-family: "Cascadia Code", ui-monospace, Consolas, monospace;
+        }
+        .soon {
+          font-size: 9.5px;
+          padding: 1px 6px;
+          border: 1px solid var(--line-strong);
+          border-radius: 999px;
+          color: var(--muted);
+          margin-left: 6px;
+          text-transform: uppercase;
+          letter-spacing: .05em;
+          vertical-align: middle;
         }
         .sidebar-nav { padding: 10px; display: grid; gap: 3px; }
         .sidebar-section { padding: 10px; border-top: 1px solid var(--line); min-height: 0; }
@@ -335,7 +464,56 @@ internal static class Dashboard
           min-height: 0;
           min-width: 0;
         }
-        .chat-only-workspace .chat-panel { width: 100%; max-width: 860px; }
+        /* Hermes/Claude-Code chat layout: the conversation is NOT a framed
+           card - it sits directly on the app background as one centered
+           column, and the composer is the only "object" (a floating rounded
+           card at the bottom of that column). The .panel border/background
+           the section markup carries is neutralized here. */
+        .chat-only-workspace .chat-panel {
+          width: 100%;
+          max-width: 100%;
+          background: transparent;
+          border: none;
+          box-shadow: none;
+          border-radius: 0;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          position: relative; /* anchor for the .chat-outline jump rail */
+        }
+        .chat-only-workspace .chat-head,
+        .chat-only-workspace .git-bar,
+        .chat-only-workspace .composer {
+          width: min(880px, 100%);
+          margin-inline: auto;
+        }
+        .chat-only-workspace .chat-head { border-bottom: none; min-height: 52px; }
+        .chat-only-workspace .composer { border-top: none; padding-bottom: 16px; }
+        .chat-only-workspace .messages {
+          flex: 1;
+          width: min(880px, 100%);
+          margin-inline: auto;
+        }
+        .messages .empty {
+          border: none;
+          background: transparent;
+          margin: auto;
+          text-align: center;
+        }
+        .empty-hero { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; max-width: 420px; }
+        .hero-mark {
+          width: 56px;
+          height: 56px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, var(--accent), var(--accent-2));
+          color: var(--accent-fg);
+          display: grid;
+          place-items: center;
+          font-weight: 800;
+          font-size: 20px;
+          box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 22%, transparent);
+        }
+        .hero-title { font-size: 16px; font-weight: 680; color: var(--text); }
         .workspace {
           display: grid;
           grid-template-columns: 300px 1fr;
@@ -401,6 +579,11 @@ internal static class Dashboard
           box-shadow: var(--shadow);
           background: var(--surface);
         }
+        /* The global button:active { transform: scale(.97) } press-feedback
+           REPLACES this node's positioning transform (translate(-50%,-50%)),
+           teleporting it half a node-width down-right while pressed - restate
+           the translate so the press effect composes with it instead. */
+        .topology-node:active { transform: translate(-50%, -50%) scale(.98); }
         .topology-node.selected {
           border-color: var(--accent);
           box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
@@ -450,22 +633,27 @@ internal static class Dashboard
           padding: 0 14px;
           border-bottom: 1px solid var(--line);
         }
-        .panel-title { font-weight: 740; }
+        .panel-title { font-weight: 680; font-size: 11px; text-transform: uppercase;
+          letter-spacing: .06em; color: var(--muted); margin-bottom: 10px; }
+        /* Inside a flex panel-head the title sits centered next to its
+           subtitle - the standalone section-label margin above would push
+           it off its baseline there. */
+        .panel-head .panel-title, .sidebar-section-head .panel-title { margin-bottom: 0; }
         .small { font-size: 12px; color: var(--muted); }
         .content { padding: 12px; overflow: auto; }
         .kv {
           display: grid;
-          gap: 7px;
+          gap: 6px;
           margin-bottom: 12px;
         }
         .kv-row {
           display: flex;
           justify-content: space-between;
           gap: 10px;
-          padding: 8px 0;
+          padding: 6px 0;
           border-bottom: 1px solid var(--kv-line);
         }
-        .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .mono { font-family: "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px; }
         .node-list, .task-list { display: grid; gap: 8px; }
         /* The Jobb list is capped at 8 items but can still be taller than the
            inspector panel has room for - give it its own bounded scroll area
@@ -510,43 +698,193 @@ internal static class Dashboard
           padding: 0 14px;
           border-bottom: 1px solid var(--line);
         }
-        .chat-title { font-size: 16px; font-weight: 760; }
+        .chat-title { font-size: 14px; font-weight: 680; }
         .messages {
-          padding: 18px;
+          padding: 14px 18px 8px;
           overflow: auto;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
         }
+        /* Hermes/Claude-Code transcript: text and text - NO bubbles at all.
+           The user's turns get a thin quote-rail on the left (Claude Code's
+           input marker) instead of a box; the assistant's turns are bare
+           text on the background. white-space: pre-wrap lives on .msg-text
+           (the actual content node) rather than the whole article - on the
+           article it also preserved the HTML template's own indentation
+           newlines between child divs, which rendered as mysterious blank
+           vertical gaps inside every message. */
         .message {
-          width: fit-content;
-          max-width: min(78ch, 92%);
-          border: 1px solid var(--line);
-          background: var(--surface-soft);
-          border-radius: 8px;
-          padding: 12px 13px;
-          white-space: pre-wrap;
+          width: 100%;
+          max-width: 100%;
+          border: none;
+          background: transparent;
+          border-radius: 0;
+          padding: 3px 2px;
         }
+        .msg-text { white-space: pre-wrap; line-height: 1.55; }
+        /* User turns sit on the RIGHT (Hermes-style) but stay plain text -
+           a thin rail on the right edge instead of a bubble. */
         .message.user {
+          width: fit-content;
+          max-width: 82%;
           margin-left: auto;
-          background: var(--surface-active);
-          border-color: var(--user-bubble-border);
+          text-align: right;
+          border-right: 2px solid var(--line-strong);
+          padding-right: 10px;
         }
+        .message.user .message-meta { justify-content: flex-end; }
+        .message.user .msg-text { color: var(--muted); }
         .message.assistant { margin-right: auto; }
+        /* "Tänker..."-shimmer while a reply is pending/streaming - a light
+           sweep across the status word, same feel as Hermes' working lines. */
+        @keyframes shimmerSweep {
+          0% { background-position: -180px 0; }
+          100% { background-position: 180px 0; }
+        }
+        .thinking-shimmer {
+          background: linear-gradient(90deg, var(--muted) 20%, var(--text) 50%, var(--muted) 80%);
+          background-size: 180px 100%;
+          background-repeat: repeat;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: shimmerSweep 1.4s linear infinite;
+          width: fit-content;
+        }
+        /* Message-jump rail (Hermes' right-edge minimap): one tick per user
+           turn. The whole rail is one generous hover zone - hovering
+           ANYWHERE on it slides out a panel listing every sent message
+           (click to jump), so nobody has to aim at a 2px line. */
+        .chat-outline {
+          position: absolute;
+          right: 4px;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 5;
+          padding: 10px 6px;
+        }
+        .outline-ticks {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          align-items: flex-end;
+          max-height: 55vh;
+          overflow: hidden;
+        }
+        .outline-tick {
+          width: 22px;
+          height: 10px;
+          min-height: 10px;
+          padding: 0;
+          border: none;
+          background: transparent;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+        }
+        .outline-tick::after {
+          content: "";
+          width: 16px;
+          height: 2px;
+          border-radius: 2px;
+          background: var(--line-strong);
+          transition: background .12s ease, width .12s ease;
+        }
+        .outline-tick:hover { background: transparent; border: none; transform: none; }
+        .outline-tick:hover::after { background: var(--text); width: 22px; }
+        .outline-panel {
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 320px;
+          max-height: 380px;
+          overflow-y: auto;
+          background: var(--surface);
+          /* Transparent border instead of a margin-gap: the panel must stay
+             a hover-descendant of .chat-outline all the way over, or it
+             vanishes while the pointer crosses the gap. */
+          border: 1px solid var(--line-strong);
+          border-radius: 10px;
+          padding: 4px;
+          box-shadow: 0 16px 48px rgba(0,0,0,.45);
+          display: none;
+          gap: 1px;
+        }
+        .chat-outline:hover .outline-panel,
+        .chat-outline:focus-within .outline-panel { display: grid; }
+        .outline-item {
+          border: none;
+          background: transparent;
+          text-align: left;
+          font-size: 12px;
+          color: var(--muted);
+          padding: 6px 9px;
+          border-radius: 6px;
+          min-height: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          width: 100%;
+          display: block;
+        }
+        .outline-item:hover { background: var(--surface-2); color: var(--text); border: none; }
+        /* Small per-reply action row (Claude Code-style): appears under an
+           assistant turn on hover. */
+        .msg-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          margin-top: 2px;
+          opacity: 0;
+          transition: opacity .12s ease;
+        }
+        .message:hover .msg-actions { opacity: 1; }
+        .msg-action {
+          border: none;
+          background: transparent;
+          color: var(--muted);
+          width: 24px;
+          height: 22px;
+          min-height: 22px;
+          padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 5px;
+        }
+        .msg-action:hover { background: var(--surface-2); color: var(--text); border: none; }
+        .msg-action.copied { color: var(--ok); }
+        .msg-action-time { font-size: 11px; color: var(--muted); margin-left: 4px; }
+        /* Mini-terminal: the exact message a Worker received, shown inside
+           its history entry. */
+        .mini-term {
+          font-family: "Cascadia Code", ui-monospace, Consolas, monospace;
+          font-size: 11.5px;
+          background: var(--bg);
+          border: 1px solid var(--line);
+          border-left: 2px solid var(--accent-2);
+          border-radius: 6px;
+          padding: 8px 10px;
+          margin: 6px 0;
+          white-space: pre-wrap;
+          color: var(--muted);
+        }
         .message-meta {
           display: flex;
           gap: 8px;
           align-items: center;
           color: var(--muted);
-          font-size: 12px;
-          margin-bottom: 6px;
+          font-size: 11px;
+          margin-bottom: 2px;
         }
         .composer {
           border-top: 1px solid var(--line);
-          padding: 12px;
+          padding: 12px 14px 10px;
           display: grid;
-          gap: 10px;
-          background: var(--surface-soft);
+          gap: 8px;
+          background: transparent;
         }
         textarea {
           width: 100%;
@@ -555,6 +893,146 @@ internal static class Dashboard
           resize: vertical;
           padding: 11px;
         }
+        /* Hermes/Claude-Code-style input card: everything (text, attach,
+           mode selectors, send) lives inside one rounded bordered box, and
+           the box - not the bare textarea - carries the focus ring. */
+        .composer-box {
+          border: 1px solid var(--line-strong);
+          border-radius: 14px;
+          background: var(--surface);
+          padding: 12px 12px 10px;
+          display: grid;
+          gap: 6px;
+          transition: border-color .12s ease, box-shadow .12s ease;
+        }
+        .composer-box:focus-within {
+          border-color: var(--accent-2);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
+        }
+        .composer-box textarea {
+          border: none;
+          background: transparent;
+          padding: 2px 4px;
+          min-height: 72px;
+          max-height: 280px;
+          resize: none;
+          font-size: 13.5px;
+        }
+        .composer-tools select.mode-danger { color: var(--bad); font-weight: 640; }
+        .composer-box textarea:focus { border: none; box-shadow: none; }
+        .composer-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .composer-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .composer-tools select {
+          min-height: 28px;
+          font-size: 12px;
+          padding: 0 24px 0 6px;
+          border-color: transparent;
+          background-color: transparent;
+          background-position: right 6px center;
+          color: var(--muted);
+          max-width: 250px;
+        }
+        .composer-tools select:hover { background-color: var(--surface-2); color: var(--text); }
+        .composer-tools .icon { border-color: transparent; background: transparent; color: var(--muted); }
+        .composer-tools .icon:hover { background: var(--surface-2); color: var(--text); border-color: transparent; }
+        .composer-tools .small { font-size: 11.5px; }
+        .composer-tools input[type="number"] {
+          width: 52px;
+          min-height: 28px;
+          font-size: 12px;
+          padding: 0 6px;
+          border-color: transparent;
+          background: transparent;
+          color: var(--muted);
+        }
+        .composer-tools input[type="number"]:hover,
+        .composer-tools input[type="number"]:focus { background: var(--surface-2); color: var(--text); box-shadow: none; }
+        .composer-hint { font-size: 11px; color: var(--muted); opacity: .8; }
+        .menu-hidden-select { display: none !important; }
+        .tool-menu-wrap { position: relative; display: inline-flex; }
+        .tool-menu-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 28px;
+          padding: 0 8px;
+          font-size: 12px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--muted);
+          border-radius: 6px;
+        }
+        .tool-menu-btn:hover { background: var(--surface-2); color: var(--text); border-color: transparent; }
+        .tool-menu-btn.mode-danger { color: var(--bad); font-weight: 640; }
+        .tool-menu {
+          position: absolute;
+          bottom: calc(100% + 8px);
+          left: 0;
+          min-width: 240px;
+          background: var(--surface);
+          border: 1px solid var(--line-strong);
+          border-radius: 10px;
+          padding: 4px;
+          box-shadow: 0 16px 48px rgba(0,0,0,.45);
+          z-index: 60;
+          display: grid;
+          gap: 1px;
+        }
+        .tool-menu.hidden { display: none; }
+        .tool-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: none;
+          background: transparent;
+          min-height: 30px;
+          padding: 0 10px 0 6px;
+          border-radius: 6px;
+          font-size: 12.5px;
+          color: var(--text);
+          text-align: left;
+          width: 100%;
+        }
+        .tool-menu-item:hover { background: var(--surface-2); border: none; }
+        .tool-menu-item.disabled { opacity: .45; cursor: default; }
+        .tool-menu-check { width: 14px; display: inline-flex; flex: 0 0 auto; }
+        .send-btn {
+          width: 30px;
+          height: 30px;
+          min-height: 30px;
+          border-radius: 50%;
+          padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--accent);
+          border-color: var(--accent);
+          color: var(--accent-fg);
+          flex: 0 0 auto;
+        }
+        .send-btn:hover { background: var(--accent); opacity: .88; border-color: var(--accent); }
+        .send-btn:disabled { opacity: .35; cursor: default; }
+        .attach-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .attach-chips:empty { display: none; }
+        .attach-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 3px 9px;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          font-size: 11.5px;
+          color: var(--muted);
+          background: var(--surface-2);
+        }
+        .attach-chip button { border: none; background: none; min-height: 0; padding: 0; color: var(--muted); display: inline-flex; }
+        .attach-chip button:hover { color: var(--text); background: none; border: none; }
         .composer-actions {
           display: flex;
           align-items: center;
@@ -679,6 +1157,16 @@ internal static class Dashboard
         }
         .notice.bad { display: block; border-color: var(--bad-border); background: var(--bad-bg); color: var(--bad); }
         .notice.show { display: block; }
+        /* Info banners (first-run guidance, update available) are neutral
+           cards with an accent rail - the green "success alert" look made
+           the very first thing a new user sees feel like a warning. */
+        #firstRunBanner.show, #updateBanner.show {
+          background: var(--surface-2);
+          border-color: var(--line-strong);
+          color: var(--text);
+          border-left: 3px solid var(--accent);
+        }
+        .notice.banner-flex { display: flex; align-items: center; gap: 12px; }
         dialog {
           width: clamp(320px, 86vw, 1080px);
           height: clamp(420px, 82vh, 820px);
@@ -733,7 +1221,7 @@ internal static class Dashboard
         .dialog-body { padding: 16px; overflow: auto; min-height: 0; }
         .settings-body {
           display: grid;
-          grid-template-columns: 190px 1fr;
+          grid-template-columns: 216px 1fr;
           grid-template-rows: auto 1fr;
           padding: 0;
           overflow: hidden;
@@ -748,6 +1236,7 @@ internal static class Dashboard
           overflow-y: auto;
           min-height: 0;
         }
+        .settings-nav .view-tab { white-space: nowrap; font-size: 12.5px; }
         .settings-content { grid-row: 2; padding: 18px; overflow-y: auto; min-height: 0; }
         .settings-pane .form-subtitle:first-child { margin-top: 0; border-top: none; padding-top: 0; }
         .form-subtitle { font-weight: 640; font-size: 13px; margin: 14px 0 8px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
@@ -782,6 +1271,8 @@ internal static class Dashboard
           .schedules-workspace { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
           .shell { grid-template-columns: minmax(0, 1fr); }
           .sidebar { border-right: none; border-bottom: 1px solid var(--line); max-height: 46vh; }
+          /* Stacked layout has no second column to collapse - hide instead. */
+          .shell.sidebar-collapsed .sidebar { display: none; }
           .chat-only-workspace { padding: 8px; }
           .topology-scroll { min-height: 620px; }
           .topology-detail { min-height: 320px; }
@@ -831,6 +1322,7 @@ internal static class Dashboard
     <body>
       <div class="app">
         <header class="topbar">
+          <button class="icon ghost" id="sidebarToggleBtn" data-icon="panel-left" title="Visa/dölj sidopanel" style="border-color:transparent"></button>
           <div class="brand">
             <div class="mark">AI</div>
             <div>
@@ -850,6 +1342,11 @@ internal static class Dashboard
             <button class="icon" id="themeBtn" title="Ljust / mörkt läge"></button>
             <button id="settingsBtn">Inställningar</button>
           </div>
+          <div class="win-controls">
+            <button class="win-btn" data-win="minimize" data-icon="minus" data-icon-size="14" title="Minimera"></button>
+            <button class="win-btn" data-win="maximize" data-icon="square" data-icon-size="12" title="Maximera / återställ"></button>
+            <button class="win-btn win-close" data-win="close" data-icon="x" data-icon-size="14" title="Stäng"></button>
+          </div>
         </header>
 
         <div style="padding:0 14px">
@@ -860,8 +1357,14 @@ internal static class Dashboard
           <div class="notice" id="updateBanner" style="margin-top:10px"></div>
         </div>
 
-        <div class="shell">
+        <div class="shell" id="appShell">
           <aside class="sidebar" id="appSidebar">
+            <div class="sidebar-top">
+              <button class="new-session-btn" id="newSessionTopBtn">
+                <span style="display:inline-flex;align-items:center;gap:8px"><span data-icon="plus"></span> Ny session</span>
+                <span class="kbd">Ctrl N</span>
+              </button>
+            </div>
             <nav class="sidebar-nav" aria-label="Vyer">
               <button class="view-tab active" data-view="work"><span data-icon="monitor"></span> Kluster</button>
               <button class="view-tab" data-view="network"><span data-icon="globe"></span> Nätverk</button>
@@ -971,26 +1474,39 @@ internal static class Dashboard
               <span class="pill" id="providerSummary">Local</span>
             </div>
             <div class="messages" id="messages"></div>
+            <div class="chat-outline" id="delegateOutline" style="display:none"></div>
             <div class="composer" id="composer">
               <div class="notice" id="composerNotice"></div>
-              <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
-              <div class="composer-actions">
-                <div class="inline-fields">
-                  <label class="small" for="parallelism">Parallellitet</label>
-                  <input id="parallelism" type="number" min="1" max="32" value="4">
+              <div class="composer-box">
+                <div class="attach-chips" id="delegateAttachChips"></div>
+                <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
+                <div class="composer-toolbar">
+                  <div class="composer-tools">
+                    <button class="icon" id="delegateAttachBtn" data-icon="plus" title="Bifoga filer (förhandsvisning - skickas inte till klustret ännu)"></button>
+                    <select id="delegateModeSelect" class="mode-select" title="Agentens behörighet på den här datorn - ändras direkt, gäller alla sessioner på noden">
+                      <option value="Off">Behörighet: av (endast chatt)</option>
+                      <option value="Sandboxed">Begränsad arbetsyta</option>
+                      <option value="Full">Full åtkomst (bypass)</option>
+                    </select>
+                    <select id="modelSelect" title="Vilken modell Hosten använder - 'Auto' väljer efter uppgiftens komplexitet så du inte alltid betalar för den dyraste.">
+                      <option value="">Auto (efter komplexitet)</option>
+                      <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
+                      <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
+                      <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
+                    </select>
+                    <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
+                    <input id="parallelism" type="number" min="1" max="32" value="4">
+                    <label class="check-field small" style="min-height:28px" title="Skickar till en Worker med agentläge påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istället för ett vanligt engångssvar.">
+                      <input id="assignmentMode" type="checkbox"> Agentläge
+                    </label>
+                  </div>
+                  <div class="composer-tools">
+                    <span class="composer-hint">Enter skickar · Shift+Enter ny rad</span>
+                    <button class="send-btn" id="sendBtn" data-icon="arrow-up" title="Skicka"></button>
+                  </div>
                 </div>
-                <label class="small" for="modelSelect">Modell</label>
-                <select id="modelSelect" title="Vilken modell Hosten anvander - 'Auto' valjer efter uppgiftens komplexitet sa du inte alltid betalar for den dyraste.">
-                  <option value="">Auto (efter komplexitet)</option>
-                  <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
-                  <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
-                  <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
-                </select>
-                <label class="check-field" title="Skickar till en Worker med agentlage påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istallet för ett vanligt engangssvar.">
-                  <input id="assignmentMode" type="checkbox"> Assignment (agentlage)
-                </label>
-                <button class="primary" id="sendBtn">Skicka</button>
               </div>
+              <input type="file" id="delegateFileInput" multiple style="display:none">
             </div>
           </section>
         </main>
@@ -1017,14 +1533,30 @@ internal static class Dashboard
               <button id="gitCommitBtn">Commit</button>
             </div>
             <div class="messages" id="sessionMessages"></div>
+            <div class="chat-outline" id="sessionOutline" style="display:none"></div>
             <div class="composer" id="sessionComposer">
               <div class="notice" id="sessionNotice"></div>
-              <textarea id="sessionPrompt" placeholder="Skriv ett meddelande till agenten i den här mappen"></textarea>
-              <div class="composer-actions">
-                <span class="small" id="sessionRunningIndicator"></span>
-                <button id="sessionCancelBtn" style="display:none">Avbryt</button>
-                <button class="primary" id="sessionSendBtn">Skicka</button>
+              <div class="composer-box">
+                <div class="attach-chips" id="sessionAttachChips"></div>
+                <textarea id="sessionPrompt" placeholder="Skriv ett meddelande till agenten i den här mappen"></textarea>
+                <div class="composer-toolbar">
+                  <div class="composer-tools">
+                    <button class="icon" id="sessionAttachBtn" data-icon="plus" title="Bifoga filer (förhandsvisning - skickas inte till agenten ännu)"></button>
+                    <select id="sessionModeSelect" class="mode-select" title="Agentens behörighet på den här datorn - ändras direkt, gäller alla sessioner på noden">
+                      <option value="Off">Behörighet: av (endast chatt)</option>
+                      <option value="Sandboxed">Begränsad arbetsyta</option>
+                      <option value="Full">Full åtkomst (bypass)</option>
+                    </select>
+                  </div>
+                  <div class="composer-tools">
+                    <span class="small" id="sessionRunningIndicator"></span>
+                    <span class="composer-hint">Enter skickar · Shift+Enter ny rad</span>
+                    <button id="sessionCancelBtn" class="icon" data-icon="stop" style="display:none" title="Avbryt körningen"></button>
+                    <button class="send-btn" id="sessionSendBtn" data-icon="arrow-up" title="Skicka"></button>
+                  </div>
+                </div>
               </div>
+              <input type="file" id="sessionFileInput" multiple style="display:none">
             </div>
           </section>
         </main>
@@ -1140,10 +1672,16 @@ internal static class Dashboard
           <div class="notice" id="settingsNotice" style="grid-column:1 / -1"></div>
           <nav class="settings-nav" aria-label="Inställningskategorier">
             <button class="view-tab active" data-settings-cat="general"><span data-icon="monitor"></span> Allmänt</button>
+            <button class="view-tab" data-settings-cat="appearance"><span data-icon="sun"></span> Utseende</button>
             <button class="view-tab" data-settings-cat="agent"><span data-icon="folder"></span> Agent &amp; arbetsyta</button>
             <button class="view-tab" data-settings-cat="models"><span data-icon="globe"></span> Modeller &amp; providers</button>
+            <button class="view-tab" data-settings-cat="ollama"><span data-icon="monitor"></span> Ollama</button>
+            <button class="view-tab" data-settings-cat="memory"><span data-icon="folder"></span> Minne &amp; kontext</button>
             <button class="view-tab" data-settings-cat="security"><span data-icon="key"></span> Säkerhet</button>
+            <button class="view-tab" data-settings-cat="notifications"><span data-icon="alert-triangle"></span> Notiser</button>
+            <button class="view-tab" data-settings-cat="advanced"><span data-icon="wrench"></span> Avancerat</button>
             <button class="view-tab" data-settings-cat="update"><span data-icon="refresh"></span> Uppdatering</button>
+            <button class="view-tab" data-settings-cat="about"><span data-icon="shield"></span> Om</button>
           </nav>
           <div class="settings-content">
             <section class="settings-pane" data-settings-pane="general">
@@ -1185,6 +1723,19 @@ internal static class Dashboard
                     Sandbox: agenten kan bara läsa/skriva här. Full: även kommandons startmapp. Endast den här datorns ägare sätter detta.
                   </span>
                 </label>
+                <label class="check-field wide">
+                  <input id="settingAiReviewWrites" type="checkbox"> AI-granskning av filändringar
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Hostens starkaste modell godkänner varje filskrivning innan den landar på disk under kluster-assignments.
+                  Avslag skickas tillbaka till agenten som rättningsinstruktion - byggt för svagare lokala modeller.
+                </span>
+                <label class="check-field wide">
+                  <input id="settingAllowInternet" type="checkbox"> Internetåtkomst för agenten
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Ger agenten ett fetch_url-verktyg så den kan hämta webbsidor (http/https) och läsa dem som text - oberoende av agentlägets filåtkomst.
+                </span>
                 <div class="field wide" style="margin-top:4px">
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
                   <div class="model-tier-grid">
@@ -1292,6 +1843,113 @@ internal static class Dashboard
                 </div>
               </div>
             </section>
+            <!-- Panes below are the DESIGN SHELL for the finished app: every
+                 planned-but-unbuilt capability gets a visible, honest
+                 placeholder (disabled control + "Kommer"-chip) so the full
+                 product can be reviewed as a whole before each part is
+                 implemented for real. Theme switching in Utseende is live. -->
+            <section class="settings-pane hidden" data-settings-pane="appearance">
+              <div class="form-grid">
+                <label class="field">
+                  <span class="small">Tema</span>
+                  <select id="settingThemeSelect">
+                    <option value="dark">Mörkt</option>
+                    <option value="light">Ljust</option>
+                    <option value="system" disabled>Följ systemet (kommer)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="small">Accentfärg <span class="soon">Kommer</span></span>
+                  <select disabled><option>Mono (grå)</option><option>Nous-blå</option><option>Egen...</option></select>
+                </label>
+                <label class="field">
+                  <span class="small">Täthet <span class="soon">Kommer</span></span>
+                  <select disabled><option>Kompakt</option><option>Normal</option><option>Luftig</option></select>
+                </label>
+                <label class="field">
+                  <span class="small">Typsnitt för kod <span class="soon">Kommer</span></span>
+                  <select disabled><option>Cascadia Code</option><option>JetBrains Mono</option><option>Consolas</option></select>
+                </label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="ollama">
+              <div class="form-grid">
+                <div class="field wide">
+                  <span class="small">Installerade modeller <span class="soon">Kommer</span></span>
+                  <div class="empty">Listan över lokalt installerade Ollama-modeller visas här, med storlek och möjlighet att ta bort.</div>
+                </div>
+                <label class="field wide">
+                  <span class="small">Hämta ny modell <span class="soon">Kommer</span></span>
+                  <div class="token-row">
+                    <input disabled placeholder="t.ex. llama3.1:8b, qwen2.5-coder:14b">
+                    <button disabled type="button">Hämta</button>
+                  </div>
+                  <span class="small" style="display:block;margin-top:4px">Rekommendationer utifrån din hårdvara (VRAM) visas här.</span>
+                </label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="memory">
+              <div class="form-grid">
+                <div class="field wide">
+                  <span class="small">Projektinstruktioner (AILOCAL.md)</span>
+                  <span class="small" style="display:block">Lägg en <span class="mono">AILOCAL.md</span> i en sessions mapp så läses den automatiskt in som instruktioner till agenten - fungerar redan idag.</span>
+                  <div class="token-row" style="margin-top:6px">
+                    <button disabled type="button">Öppna för aktiv session <span class="soon">Kommer</span></button>
+                  </div>
+                </div>
+                <label class="field">
+                  <span class="small">Historikgräns per session <span class="soon">Kommer</span></span>
+                  <input disabled value="500 meddelanden">
+                </label>
+                <label class="field">
+                  <span class="small">Globalt minne mellan sessioner <span class="soon">Kommer</span></span>
+                  <select disabled><option>Av</option><option>På</option></select>
+                </label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="notifications">
+              <div class="form-grid">
+                <label class="check-field wide"><input type="checkbox" disabled> Notis när ett jobb blir klart <span class="soon">Kommer</span></label>
+                <label class="check-field wide"><input type="checkbox" disabled> Notis när en filändring väntar på godkännande <span class="soon">Kommer</span></label>
+                <label class="check-field wide"><input type="checkbox" disabled> Notis när en Worker tappar kontakten <span class="soon">Kommer</span></label>
+                <label class="check-field wide"><input type="checkbox" disabled> Ljud vid notiser <span class="soon">Kommer</span></label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="advanced">
+              <div class="form-grid">
+                <div class="field wide">
+                  <span class="small">Datamapp</span>
+                  <input class="mono" id="settingDataPath" readonly>
+                </div>
+                <div class="field wide">
+                  <div class="token-row">
+                    <button disabled type="button">Öppna loggmapp <span class="soon">Kommer</span></button>
+                    <button disabled type="button">Exportera sessioner <span class="soon">Kommer</span></button>
+                    <button disabled type="button">Rensa historik <span class="soon">Kommer</span></button>
+                  </div>
+                </div>
+                <label class="field">
+                  <span class="small">Max tokens per svar</span>
+                  <span class="small" style="display:block">Flyttad hit från Modeller i nästa steg <span class="soon">Kommer</span></span>
+                </label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="about">
+              <div class="form-grid">
+                <div class="field wide">
+                  <span class="small">Version</span>
+                  <span class="mono" id="aboutVersion">...</span>
+                </div>
+                <div class="field wide">
+                  <span class="small">Projekt</span>
+                  <a href="https://github.com/HappyHamster135/ailocal" target="_blank" rel="noopener">github.com/HappyHamster135/ailocal</a>
+                </div>
+                <div class="field wide">
+                  <span class="small">Vad är AiLocal?</span>
+                  <span class="small" style="display:block">Ett privat AI-kluster för hemmalabbet: dina datorer samarbetar mot samma mål med lokala Ollama-modeller och moln-API:er (Claude, ChatGPT, Gemini, OpenRouter), med sessioner per mapp, delegering över nätverket och schemalagda jobb.</span>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
         <div class="dialog-foot">
@@ -1299,6 +1957,28 @@ internal static class Dashboard
           <button class="primary" id="saveSettings">Spara</button>
         </div>
       </dialog>
+
+      <!-- File-write approval modal. Must sit BEFORE the script: the script
+           executes synchronously at parse time and wires these ids at top
+           level, so markup placed after it doesn't exist yet - that exact
+           mistake (modal after the script) made the wiring throw and killed
+           the whole dashboard script on load. -->
+      <div class="modal-overlay" id="diffModal" style="display:none">
+        <div class="modal diff-modal">
+          <div class="modal-head">
+            <div>
+              <div class="modal-title">Agenten vill skriva en fil</div>
+              <div class="small mono" id="diffModalPath"></div>
+            </div>
+            <button class="icon" id="diffModalClose" data-icon="x" title="Stäng"></button>
+          </div>
+          <pre class="diff-view" id="diffModalBody"></pre>
+          <div class="modal-foot">
+            <button id="diffRejectBtn">Avvisa</button>
+            <button class="primary" id="diffApproveBtn">Godkänn &amp; skriv</button>
+          </div>
+        </div>
+      </div>
 
       <script>
         const AUTH_HEADER = 'X-AiLocal-Token';
@@ -1415,7 +2095,14 @@ internal static class Dashboard
           refresh: '<path d="M4 12a8 8 0 1 1 2.5 5.8"/><polyline points="4 17 4 12 9 12"/>',
           plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
           'chevron-up': '<polyline points="6 15 12 9 18 15"/>',
-          'chevron-down': '<polyline points="6 9 12 15 18 9"/>'
+          'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
+          'arrow-up': '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
+          stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
+          minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+          square: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
+          copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><rect x="4" y="4" width="11" height="11" rx="2"/>',
+          'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>',
+          shield: '<polygon points="12 3 20 6 20 12 12 21 4 12 4 6"/>'
         };
         const icon = (name, size = 16) =>
           `<svg class="icon-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
@@ -1892,28 +2579,86 @@ internal static class Dashboard
           loadGitStatus();
         }
 
+        // Hopprailen till höger: ett streck per användar-tur. Hela railen är
+        // en hover-yta - så fort pekaren är över den fälls en panel ut med
+        // ALLA skickade meddelanden i klartext, klickbara för att hoppa.
+        // Byggs om efter varje render eftersom transkriptet ersätts via
+        // innerHTML.
+        function renderChatOutline(containerId, outlineId) {
+          const container = $(containerId);
+          const outline = $(outlineId);
+          if (!container || !outline) return;
+          const userTurns = [...container.querySelectorAll('.message.user')];
+          if (userTurns.length === 0) {
+            outline.innerHTML = '';
+            outline.style.display = 'none';
+            return;
+          }
+          outline.style.display = 'block';
+          const texts = userTurns.map(el => (el.querySelector('.msg-text')?.textContent ?? '').trim());
+          outline.innerHTML = `
+            <div class="outline-ticks">
+              ${userTurns.map((_, i) => `<button class="outline-tick" data-outline-idx="${i}"></button>`).join('')}
+            </div>
+            <div class="outline-panel">
+              ${texts.map((text, i) => `<button class="outline-item" data-outline-idx="${i}" title="${esc(trunc(text, 200))}">${esc(trunc(text, 90))}</button>`).join('')}
+            </div>`;
+          outline.querySelectorAll('[data-outline-idx]').forEach(el => {
+            el.onclick = () => {
+              const target = container.querySelectorAll('.message.user')[Number(el.dataset.outlineIdx)];
+              if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            };
+          });
+        }
+
+        // Kopiera-knappen i svarsraden: texten hämtas från meddelandets egen
+        // DOM (samma innehåll oavsett vilket transkript den sitter i).
+        function wireMessageActions(containerId) {
+          $(containerId)?.querySelectorAll('.msg-action[data-copy]').forEach(btn => {
+            btn.onclick = async () => {
+              const text = btn.closest('.message')?.querySelector('.msg-text')?.textContent ?? '';
+              try {
+                await navigator.clipboard.writeText(text);
+                btn.classList.add('copied');
+                setTimeout(() => btn.classList.remove('copied'), 900);
+              } catch { /* clipboard kan nekas - knappen gör då inget */ }
+            };
+          });
+        }
+        const msgActionsHtml = `
+          <div class="msg-actions">
+            <button class="msg-action" data-copy title="Kopiera svaret">${icon('copy', 12)}</button>
+          </div>`;
+
         function persistedSessionMessageHtml(m) {
           if (m.role === 'user')
-            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div>${esc(m.content)}</div></article>`;
+            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
           if (m.role === 'tool')
             return `<article class="message assistant">
               <div class="message-meta"><span class="pill">✓ ${esc(m.toolName ?? 'verktyg')}</span></div>
-              <div class="mono small" style="white-space:pre-wrap">${esc(trunc(m.content ?? '', 2000))}</div>
+              <div class="mono small msg-text">${esc(trunc(m.content ?? '', 2000))}</div>
             </article>`;
           const toolLines = (m.toolCalls ?? []).map(tc => `> ${tc.name}(${trunc(tc.argumentsJson ?? '', 160)})`).join('\n');
           const body = [toolLines, m.content].filter(Boolean).join('\n');
           return `<article class="message assistant">
             <div class="message-meta"><strong>AiLocal</strong></div>
-            <div>${body ? esc(body) : '<span class="small">...</span>'}</div>
+            <div class="msg-text">${body ? esc(body) : '<span class="small">...</span>'}</div>
+            ${body ? msgActionsHtml : ''}
           </article>`;
         }
 
         function liveSessionBubbleHtml(m) {
           if (m.role === 'user')
-            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div>${esc(m.content)}</div></article>`;
+            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
+          // Innan första steget kommit: visa ett skimrande "Tänker..." så det
+          // syns att agenten arbetar - stegen (resonemang/verktyg) tar över
+          // raden så fort de börjar strömma in.
+          const body = m.content
+            ? `<div class="msg-text">${esc(m.content)}</div>`
+            : `<div class="msg-text"><span class="thinking-shimmer">Tänker...</span></div>`;
           return `<article class="message assistant">
             <div class="message-meta"><strong>AiLocal</strong>${m.state ? `<span>${esc(m.state)}</span>` : ''}</div>
-            <div>${esc(m.content)}</div>
+            ${body}
           </article>`;
         }
 
@@ -1922,110 +2667,120 @@ internal static class Dashboard
           const persisted = state.activeSession?.messages ?? [];
           const all = [...persisted.map(m => persistedSessionMessageHtml(m)), ...state.sessionLiveMessages.map(m => liveSessionBubbleHtml(m))];
           if (!all.length) {
-            box.innerHTML = `<div class="empty">Inga meddelanden ännu i den här sessionen.</div>`;
+            box.innerHTML = `<div class="empty empty-hero">
+              <div class="hero-mark">AI</div>
+              <div class="hero-title">Vad ska agenten göra i den här mappen?</div>
+              <div class="small">Den läser, skriver och kör kommandon i mappens kontext - historiken sparas och går att återuppta.</div>
+            </div>`;
+            renderChatOutline('sessionMessages', 'sessionOutline');
             return;
-            }
-
-            // --- Git awareness (session folder) ---
-            function wireGitBar() {
-            $('gitDiffBtn').onclick = () => showGitDiff();
-            $('gitCommitBtn').onclick = () => doGitCommit();
-            }
-
-            async function loadGitStatus() {
-            const id = state.activeSessionId;
-            const bar = $('gitBar');
-            if (!id) { bar.style.display = 'none'; return; }
-            try {
-              const status = await fetchJson(`/api/sessions/${id}/git/status`);
-              if (!status || !status.isRepo) { bar.style.display = 'none'; return; }
-              bar.style.display = 'flex';
-              $('gitBranch').textContent = status.branch ? `⎇ ${status.branch}` : '(ingen branch)';
-              const parts = [];
-              if (status.ahead) parts.push(`↑${status.ahead}`);
-              if (status.behind) parts.push(`↓${status.behind}`);
-              const counts = [
-                status.staged?.length && `${status.staged.length} staged`,
-                status.unstaged?.length && `${status.unstaged.length} ändrad`,
-                status.untracked?.length && `${status.untracked.length} ny`
-              ].filter(Boolean);
-              $('gitStatus').textContent = [...parts, ...counts].join(' · ') || 'rent';
-            } catch {
-              bar.style.display = 'none';
-            }
-            }
-
-            async function showGitDiff() {
-            const id = state.activeSessionId;
-            if (!id) return;
-            const { diff } = await fetchJson(`/api/sessions/${id}/git/diff`) ?? { diff: '' };
-            openDiffModal('Arbetskopia', '(git diff)', diff);
-            }
-
-            async function doGitCommit() {
-            const id = state.activeSessionId;
-            const msg = $('gitCommitMsg').value.trim();
-            if (!id || !msg) { showSessionNotice('Skriv ett commit-meddelande.', true); return; }
-            try {
-              const res = await fetchJson(`/api/sessions/${id}/git/commit`, {
-                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: msg })
-              });
-              $('gitCommitMsg').value = '';
-              showSessionNotice('Commit skapad.');
-              await loadGitStatus();
-            } catch (error) {
-              showSessionNotice(error.message, true);
-            }
-            }
-
-            // --- File-write approval (preview before save) ---
-            let _pendingDiffPath = '';
-
-            function openDiffModal(title, path, diff) {
-            _pendingDiffPath = path;
-            $('diffModalPath').textContent = path;
-            $('diffModalBody').textContent = diff || '(tom fil / ingen skillnad att visa)';
-            $('diffModal').style.display = 'flex';
-            }
-            function closeDiffModal() { $('diffModal').style.display = 'none'; }
-
-            async function approvePendingChange(approve, reason) {
-            const id = state.activeSessionId;
-            if (!id) return;
-            try {
-              await fetchJson(`/api/sessions/${id}/approve-change`, {
-                method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ approve, reason: reason || null })
-              });
-            } catch (error) {
-              showSessionNotice(error.message, true);
-            } finally {
-              closeDiffModal();
-            }
-            }
-
-            $('diffModalClose').onclick = closeDiffModal;
-            $('diffApproveBtn').onclick = () => approvePendingChange(true);
-            $('diffRejectBtn').onclick = () => {
-            const reason = window.prompt('Varför avvisas ändringen? (valfritt)');
-            approvePendingChange(false, reason || undefined);
-            };
-            $('diffModal').addEventListener('click', e => { if (e.target === $('diffModal')) closeDiffModal(); });
-
-            // Called from the run-loop when a step of kind "awaiting_approval"
-            // arrives - surfaces the diff for the operator to approve/reject.
-            function handleApprovalStep(detailJson) {
-            try {
-              const d = JSON.parse(detailJson);
-              openDiffModal('Agenten vill skriva en fil', d.path || '(okänd fil)', d.diff || '');
-            } catch {
-              openDiffModal('Agenten vill skriva en fil', '', '');
-            }
-            }
+          }
           const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
           const previousScrollTop = box.scrollTop;
           box.innerHTML = all.join('');
           box.scrollTop = wasNearBottom ? box.scrollHeight : previousScrollTop;
+          renderChatOutline('sessionMessages', 'sessionOutline');
+          wireMessageActions('sessionMessages');
+        }
+
+        // --- Git awareness (session folder) ---
+        // These lived NESTED inside renderSessionMessages (a stray brace
+        // during that feature's merge) - function declarations inside a
+        // function are scoped to it, so renderSessionView's wireGitBar()/
+        // loadGitStatus() calls and the run-loop's handleApprovalStep()
+        // threw ReferenceError: opening a session crashed its render and
+        // the git bar + approval modal never worked in the shipped build.
+        function wireGitBar() {
+          $('gitDiffBtn').onclick = () => showGitDiff();
+          $('gitCommitBtn').onclick = () => doGitCommit();
+        }
+
+        async function loadGitStatus() {
+          const id = state.activeSessionId;
+          const bar = $('gitBar');
+          if (!id) { bar.style.display = 'none'; return; }
+          try {
+            const status = await fetchJson(`/api/sessions/${id}/git/status`);
+            if (!status || !status.isRepo) { bar.style.display = 'none'; return; }
+            bar.style.display = 'flex';
+            $('gitBranch').textContent = status.branch ? `⎇ ${status.branch}` : '(ingen branch)';
+            const parts = [];
+            if (status.ahead) parts.push(`↑${status.ahead}`);
+            if (status.behind) parts.push(`↓${status.behind}`);
+            const counts = [
+              status.staged?.length && `${status.staged.length} staged`,
+              status.unstaged?.length && `${status.unstaged.length} ändrad`,
+              status.untracked?.length && `${status.untracked.length} ny`
+            ].filter(Boolean);
+            $('gitStatus').textContent = [...parts, ...counts].join(' · ') || 'rent';
+          } catch {
+            bar.style.display = 'none';
+          }
+        }
+
+        async function showGitDiff() {
+          const id = state.activeSessionId;
+          if (!id) return;
+          const { diff } = await fetchJson(`/api/sessions/${id}/git/diff`) ?? { diff: '' };
+          openDiffModal('Arbetskopia', '(git diff)', diff);
+        }
+
+        async function doGitCommit() {
+          const id = state.activeSessionId;
+          const msg = $('gitCommitMsg').value.trim();
+          if (!id || !msg) { showSessionNotice('Skriv ett commit-meddelande.', true); return; }
+          try {
+            await fetchJson(`/api/sessions/${id}/git/commit`, {
+              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: msg })
+            });
+            $('gitCommitMsg').value = '';
+            showSessionNotice('Commit skapad.');
+            await loadGitStatus();
+          } catch (error) {
+            showSessionNotice(error.message, true);
+          }
+        }
+
+        // --- File-write approval (preview before save) ---
+        function openDiffModal(title, path, diff) {
+          $('diffModalPath').textContent = path;
+          $('diffModalBody').textContent = diff || '(tom fil / ingen skillnad att visa)';
+          $('diffModal').style.display = 'flex';
+        }
+        function closeDiffModal() { $('diffModal').style.display = 'none'; }
+
+        async function approvePendingChange(approve, reason) {
+          const id = state.activeSessionId;
+          if (!id) return;
+          try {
+            await fetchJson(`/api/sessions/${id}/approve-change`, {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ approve, reason: reason || null })
+            });
+          } catch (error) {
+            showSessionNotice(error.message, true);
+          } finally {
+            closeDiffModal();
+          }
+        }
+
+        $('diffModalClose').onclick = closeDiffModal;
+        $('diffApproveBtn').onclick = () => approvePendingChange(true);
+        $('diffRejectBtn').onclick = () => {
+          const reason = window.prompt('Varför avvisas ändringen? (valfritt)');
+          approvePendingChange(false, reason || undefined);
+        };
+        $('diffModal').addEventListener('click', e => { if (e.target === $('diffModal')) closeDiffModal(); });
+
+        // Called from the run-loop when a step of kind "awaiting_approval"
+        // arrives - surfaces the diff for the operator to approve/reject.
+        function handleApprovalStep(detailJson) {
+          try {
+            const d = JSON.parse(detailJson);
+            openDiffModal('Agenten vill skriva en fil', d.path || '(okänd fil)', d.diff || '');
+          } catch {
+            openDiffModal('Agenten vill skriva en fil', '', '');
+          }
         }
 
         function showSessionNotice(message, isError = false) {
@@ -2601,13 +3356,19 @@ internal static class Dashboard
             const assignment = t.assignmentReason
               ? `<div class="small" style="margin-top:6px">${esc(t.assignmentReason)}</div>`
               : '';
+            // Mini-terminal med exakt vad workern FICK - "Goal" som rubrik
+            // sa ingenting om vilket meddelande som faktiskt skickades.
+            const promptBlock = t.prompt
+              ? `<div class="mini-term">&rsaquo; ${esc(trunc(t.prompt, 600))}</div>`
+              : '';
+            const summaryTitle = t.prompt ? trunc(t.prompt, 64) : (t.title || '(okänt)');
             // The 3s refresh cycle rebuilds this whole list from scratch, which
             // would otherwise silently re-collapse an entry the operator just
             // opened to read - re-apply the "open" attribute from tracked state.
             const isOpen = state.openHistoryIds.has(t.id);
             return `<details class="hist" data-hist-id="${esc(t.id)}" ${isOpen ? 'open' : ''}>
-              <summary><span class="hist-title">${esc(t.title || t.prompt)}</span><span class="pill">${esc(status)}</span></summary>
-              <div class="hist-body"><div class="small">${esc(meta)}</div>${assignment}<div>${esc(trunc(body, 1200))}</div></div>
+              <summary><span class="hist-title">${esc(summaryTitle)}</span><span class="pill">${esc(status)}</span></summary>
+              <div class="hist-body"><div class="small">${esc(meta)}</div>${promptBlock}${assignment}<div>${esc(trunc(body, 1200))}</div></div>
             </details>`;
           }).join('');
         }
@@ -2703,7 +3464,11 @@ internal static class Dashboard
           // pass, not an oversight.
           const allMessages = [...state.messages, ...state.assignmentMessages];
           if (!allMessages.length) {
-            box.innerHTML = `<div class="empty">Inga meddelanden ännu.</div>`;
+            box.innerHTML = `<div class="empty empty-hero">
+              <div class="hero-mark">AI</div>
+              <div class="hero-title">Vad vill du få gjort?</div>
+              <div class="small">Beskriv ett mål så bryter Hosten ner det och delegerar till klustrets Workers.</div>
+            </div>`;
             return;
           }
           // The refresh loop calls this every ~3s (more often while a reply
@@ -2724,10 +3489,14 @@ internal static class Dashboard
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
             const live = inFlight && state.streamBuffer && state.streamBuffer.taskId === m.taskId;
             const content = live ? state.streamBuffer.text : m.content;
+            // Väntar svaret fortfarande (inga tokens ännu): visa ett skimrande
+            // statusord istället för en tom rad, så det syns att den arbetar.
+            const waitingWord = { Pending: 'Köar...', Queued: 'Köar...', Dispatched: 'Skickar till worker...', Running: 'Tänker...' }[m.state] ?? 'Arbetar...';
+            const showShimmer = inFlight && !(content && content.trim());
             return `
             <article class="message ${m.role === 'user' ? 'user' : 'assistant'}">
               <div class="message-meta">
-                <strong>${m.role === 'user' ? 'You' : 'AiLocal'}</strong>
+                <strong>${m.role === 'user' ? 'Du' : 'AiLocal'}</strong>
                 ${m.isAssignment ? '<span class="pill">Assignment</span>' : ''}
                 ${m.subtaskTitle ? `<span class="pill">${esc(m.subtaskTitle)}</span>` : ''}
                 ${m.workerName ? `<span class="small">${esc(m.workerName)}</span>` : ''}
@@ -2735,7 +3504,10 @@ internal static class Dashboard
                 ${m.provider ? `<span>${esc(m.provider)}/${esc(m.model ?? '')}</span>` : ''}
                 ${inFlight ? `<button class="icon" title="Avbryt" data-cancel-task="${esc(m.taskId)}">${icon('x', 14)}</button>` : ''}
               </div>
-              <div>${esc(content)}</div>
+              ${showShimmer
+                ? `<div class="msg-text"><span class="thinking-shimmer">${esc(waitingWord)}</span></div>`
+                : `<div class="msg-text">${esc(content)}</div>`}
+              ${m.role !== 'user' && !inFlight && content ? msgActionsHtml : ''}
             </article>`;
           }).join('');
           box.scrollTop = wasNearBottom ? box.scrollHeight : previousScrollTop;
@@ -2746,6 +3518,8 @@ internal static class Dashboard
           wirePlanBubbles();
 
           manageStreaming();
+          renderChatOutline('messages', 'delegateOutline');
+          wireMessageActions('messages');
         }
 
         const planStateLabels = {
@@ -3039,7 +3813,13 @@ internal static class Dashboard
 
             if (messagesResult.status === 'fulfilled')
               state.messages = messagesResult.value ?? [];
-            if (state.activeView === 'chat') renderMessages();
+            // The render-only-the-active-view optimization checked for a view
+            // named 'chat' - which doesn't exist (the view is 'delegate'), so
+            // incoming chat replies were NEVER rendered after a refresh: the
+            // Worker answered, /api/chat had the reply, the transcript stayed
+            // empty. Streaming (manageStreaming) is also started from inside
+            // renderMessages, so live token streaming silently died too.
+            if (state.activeView === 'delegate') renderMessages();
 
             if (schedulesResult.status === 'fulfilled')
               state.schedules = schedulesResult.value ?? [];
@@ -3113,35 +3893,32 @@ internal static class Dashboard
             box.className = 'notice';
             return;
           }
-          if (state.local.role === 'Launcher') {
-            box.innerHTML =
-              'Nytt kluster? Klicka <strong>"Starta kluster (Host + Worker)"</strong> till vänster för att komma igång på den här datorn, ' +
-              'eller välj Host/Worker/Overseer ovan. Kopiera klusternyckeln från Host-inställningarna till andra datorer som ska gå med. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
-            box.className = 'notice show';
-            const dismiss = $('dismissFirstRun');
-            if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
-          } else if (state.local.role === 'Host' && !state.nodes.length) {
-            box.innerHTML =
-              'Ingen Worker ansluten ännu. Starta en Worker på den här eller en annan dator på samma nätverk - den dyker upp under ' +
-              '"Upptäckta enheter" här nedanför, redo att anslutas med ett klick. Ser du den inte? Klistra in klusternyckeln ' +
-              '(Inställningar -> Klustersäkerhet) på Worker-datorn istället. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
-            box.className = 'notice show';
-            const dismiss = $('dismissFirstRun');
-            if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
-          } else if (state.local.role === 'Worker' && !state.local.hostEndpoint) {
-            box.innerHTML =
-              'Den här Workern är inte ansluten till någon Host än. Öppna Host-datorns instrumentpanel - den ser den här ' +
-              'datorn automatiskt under "Upptäckta enheter" och kan ansluta med ett klick. Väntar du på en bekräftelse ' +
-              'istället? Kolla om det ligger en väntande förfrågan högst upp på den här sidan. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
-            box.className = 'notice show';
-            const dismiss = $('dismissFirstRun');
-            if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
-          } else {
+
+          const bannerText = state.local.role === 'Launcher'
+            ? 'Nytt kluster? Klicka <strong>"Starta kluster (Host + Worker)"</strong> till vänster för att komma igång på den här datorn, ' +
+              'eller välj Host/Worker/Overseer ovan. Kopiera klusternyckeln från Host-inställningarna till andra datorer som ska gå med.'
+            : state.local.role === 'Host' && !state.nodes.length
+              ? 'Ingen Worker ansluten ännu. Starta en Worker på den här eller en annan dator på samma nätverk - den dyker upp under ' +
+                '"Upptäckta enheter" här nedanför, redo att anslutas med ett klick. Ser du den inte? Klistra in klusternyckeln ' +
+                '(Inställningar -> Klustersäkerhet) på Worker-datorn istället.'
+              : state.local.role === 'Worker' && !state.local.hostEndpoint
+                ? 'Den här Workern är inte ansluten till någon Host än. Öppna Host-datorns instrumentpanel - den ser den här ' +
+                  'datorn automatiskt under "Upptäckta enheter" och kan ansluta med ett klick. Väntar du på en bekräftelse ' +
+                  'istället? Kolla om det ligger en väntande förfrågan högst upp på den här sidan.'
+                : null;
+
+          if (bannerText === null) {
             box.className = 'notice';
+            return;
           }
+
+          // Flexrad med texten i en egen span - kryssknappen var tidigare
+          // float:right rakt i textflödet och hamnade aldrig vertikalt
+          // centrerad mot innehållet.
+          box.innerHTML = `<span style="flex:1">${bannerText}</span>
+            <button class="icon" id="dismissFirstRun" title="Stäng">${icon('x')}</button>`;
+          box.className = 'notice show banner-flex';
+          $('dismissFirstRun').onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
         }
 
         let updateChecked = false;
@@ -3239,6 +4016,8 @@ internal static class Dashboard
           $('settingMaxConcurrentTasks').value = data.maxConcurrentTasks ?? 1;
           $('settingAgentAccess').value = data.agentAccess ?? 'Off';
           $('settingWorkspacePath').value = data.workspacePath ?? '';
+          $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
+          $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingTierSimple').value = data.modelTiers?.simple ?? '';
           $('settingTierMedium').value = data.modelTiers?.medium ?? '';
           $('settingTierComplex').value = data.modelTiers?.complex ?? '';
@@ -3257,6 +4036,8 @@ internal static class Dashboard
           $('toggleOperatorTokenVisibility').innerHTML = icon('eye');
           $('settingAutoStartRow').style.display = data.startWithWindowsSupported === false ? 'none' : 'flex';
           $('settingAutoStart').checked = data.startWithWindows ?? false;
+          $('settingDataPath').value = data.settingsPath ?? '';
+          reflectAgentAccess(data.agentAccess ?? 'Off');
           $('settingAnthropicModel').value = data.anthropicModel ?? '';
           $('settingGeminiModel').value = data.geminiModel ?? '';
           $('settingOpenRouterModel').value = data.openRouterModel ?? '';
@@ -3400,6 +4181,8 @@ internal static class Dashboard
           switchSettingsCategory('general');
           $('settingsNotice').className = 'notice';
           $('saveSettings').disabled = true;
+          $('settingThemeSelect').value = document.documentElement.getAttribute('data-theme') || 'dark';
+          $('aboutVersion').textContent = state.updateInfo?.currentVersion ? `v${state.updateInfo.currentVersion}` : '...';
           $('settingsTitle').textContent = targetId ? 'Konfigurera Worker' : 'Nodinställningar';
           const node = state.nodes.find(n => n.id === targetId);
           $('settingsSubtitle').textContent = node ? `${node.name} | ${node.endpoint}` : (state.local?.name ?? '');
@@ -3557,6 +4340,8 @@ internal static class Dashboard
             maxConcurrentTasks: Number($('settingMaxConcurrentTasks').value),
             agentAccess: $('settingAgentAccess').value,
             workspacePath: $('settingWorkspacePath').value.trim() || null,
+            aiReviewWrites: $('settingAiReviewWrites').checked,
+            allowInternet: $('settingAllowInternet').checked,
             modelTiers: {
               simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
               medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',
@@ -3917,12 +4702,18 @@ internal static class Dashboard
         document.querySelectorAll('[data-settings-cat]').forEach(button => {
           button.onclick = () => switchSettingsCategory(button.dataset.settingsCat);
         });
+        $('settingThemeSelect').onchange = () => {
+          const value = $('settingThemeSelect').value;
+          if (value === 'dark' || value === 'light') applyTheme(value);
+        };
         $('settingsDialog').addEventListener('click', event => {
           if (event.target === $('settingsDialog')) closeSettingsDialog();
         });
         $('settingsDialog').addEventListener('close', refresh);
+        // Enter skickar, Shift+Enter radbryter - samma tangentmodell som
+        // Hermes/Claude Code. Ctrl+Enter fungerar fortfarande av gammal vana.
         $('prompt').addEventListener('keydown', event => {
-          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') sendMessage();
+          if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }
         });
         window.addEventListener('resize', () => {
           if (state.activeView === 'network') renderTopology();
@@ -3948,8 +4739,158 @@ internal static class Dashboard
         $('sessionPinBtn').onclick = () => { if (state.activeSessionId) toggleSessionPin(state.activeSessionId); };
         $('sessionDeleteBtn').onclick = () => { if (state.activeSessionId) deleteSession(state.activeSessionId); };
         $('sessionPrompt').addEventListener('keydown', event => {
-          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') sendSessionMessage();
+          if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendSessionMessage(); }
         });
+
+        // I WebView2-skalet: aktivera fönsterknapparna och markera dokumentet
+        // så CSS:en visar dem (vanlig webbläsare har egna fönsterkontroller).
+        if (window.chrome?.webview) {
+          document.body.classList.add('desktop-shell');
+          document.querySelectorAll('[data-win]').forEach(btn => {
+            btn.onclick = () => window.chrome.webview.postMessage('win:' + btn.dataset.win);
+          });
+        }
+
+        $('newSessionTopBtn').onclick = () => toggleNewSessionForm(true);
+        window.addEventListener('keydown', event => {
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+            event.preventDefault();
+            toggleNewSessionForm(true);
+          }
+        });
+
+        // Sidopanels-toggle (Hermes-stil): läget överlever omladdning.
+        function applySidebarCollapsed(collapsed) {
+          $('appShell').classList.toggle('sidebar-collapsed', collapsed);
+          try { localStorage.setItem('ailocal-sidebar-collapsed', collapsed ? '1' : ''); } catch {}
+        }
+        $('sidebarToggleBtn').onclick = () => {
+          applySidebarCollapsed(!$('appShell').classList.contains('sidebar-collapsed'));
+        };
+        try {
+          if (localStorage.getItem('ailocal-sidebar-collapsed') === '1') applySidebarCollapsed(true);
+        } catch {}
+
+        // Filbilagor (skal): valda filer visas som chips i composern men
+        // skickas inte med ännu - flödet finns så designen kan utvärderas
+        // innan uppladdning/inbäddning byggs på riktigt.
+        const attachments = { delegate: [], session: [] };
+        function renderAttachChips(kind, chipsElId) {
+          $(chipsElId).innerHTML = attachments[kind].map((f, i) => `
+            <span class="attach-chip">${icon('folder', 12)} ${esc(f.name)}
+              <button type="button" data-detach="${kind}:${i}" title="Ta bort">${icon('x', 11)}</button>
+            </span>`).join('');
+          document.querySelectorAll(`#${chipsElId} [data-detach]`).forEach(btn => {
+            btn.onclick = () => {
+              const [k, index] = btn.dataset.detach.split(':');
+              attachments[k].splice(Number(index), 1);
+              renderAttachChips(k, chipsElId);
+            };
+          });
+        }
+        function wireAttach(kind, btnId, inputId, chipsElId) {
+          $(btnId).onclick = () => $(inputId).click();
+          $(inputId).addEventListener('change', () => {
+            attachments[kind].push(...[...$(inputId).files]);
+            $(inputId).value = '';
+            renderAttachChips(kind, chipsElId);
+          });
+        }
+        wireAttach('delegate', 'delegateAttachBtn', 'delegateFileInput', 'delegateAttachChips');
+        wireAttach('session', 'sessionAttachBtn', 'sessionFileInput', 'sessionAttachChips');
+
+        // Custom dropdown för composer-verktygen: den STÄNGDA selecten gick
+        // att tema, men den ÖPPNA popuplistan ritas av OS:et och förblir
+        // Windows-grå oavsett CSS. Den nativa selecten göms och styrs från
+        // en egen knapp+meny - selecten blir kvar i DOM som sanningskälla så
+        // all befintlig värde-/change-wiring fortsätter fungera orörd.
+        const toolMenuSyncs = [];
+        function syncToolMenus() { toolMenuSyncs.forEach(sync => sync()); }
+        function attachToolMenu(selectId) {
+          const select = $(selectId);
+          if (!select) return;
+          select.classList.add('menu-hidden-select');
+
+          const wrap = document.createElement('span');
+          wrap.className = 'tool-menu-wrap';
+          select.insertAdjacentElement('afterend', wrap);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'tool-menu-btn';
+          btn.title = select.title;
+          const menu = document.createElement('div');
+          menu.className = 'tool-menu hidden';
+          wrap.append(btn, menu);
+
+          const syncLabel = () => {
+            const opt = select.options[select.selectedIndex];
+            btn.innerHTML = `<span>${esc(opt ? opt.textContent : '')}</span>${icon('chevron-down', 11)}`;
+            btn.classList.toggle('mode-danger', select.classList.contains('mode-danger'));
+          };
+          const close = () => menu.classList.add('hidden');
+          btn.onclick = event => {
+            event.stopPropagation();
+            document.querySelectorAll('.tool-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+            menu.innerHTML = [...select.options].map((opt, i) => `
+              <button type="button" class="tool-menu-item ${opt.disabled ? 'disabled' : ''}" data-index="${i}" ${opt.disabled ? 'disabled' : ''}>
+                <span class="tool-menu-check">${i === select.selectedIndex ? icon('check', 12) : ''}</span>${esc(opt.textContent)}
+              </button>`).join('');
+            menu.querySelectorAll('.tool-menu-item:not(.disabled)').forEach(item => {
+              item.onclick = () => {
+                select.selectedIndex = Number(item.dataset.index);
+                select.dispatchEvent(new Event('change'));
+                close();
+                syncLabel();
+              };
+            });
+            menu.classList.toggle('hidden');
+          };
+          document.addEventListener('click', close);
+          window.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+          select.addEventListener('change', syncLabel);
+          toolMenuSyncs.push(syncLabel);
+          syncLabel();
+        }
+
+        // Behörighetsval vid terminalen (Claude-Code-stil "bypass permissions"):
+        // speglar och ÄNDRAR nodens verkliga agentläge via PUT /api/settings -
+        // Full åtkomst markeras rött, precis som bypass-läget i förlagan.
+        function reflectAgentAccess(value) {
+          ['sessionModeSelect', 'delegateModeSelect'].forEach(id => {
+            const el = $(id);
+            if (!el) return;
+            el.value = value;
+            el.classList.toggle('mode-danger', value === 'Full');
+          });
+          syncToolMenus();
+        }
+        async function loadAgentAccess() {
+          try {
+            const s = await fetchJson('/api/settings');
+            reflectAgentAccess(s.agentAccess ?? 'Off');
+          } catch { /* operatörsnyckel utan admin - selecten behåller default */ }
+        }
+        async function changeAgentAccess(value) {
+          try {
+            const data = await fetchJson('/api/settings', {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ agentAccess: value })
+            });
+            reflectAgentAccess(data.agentAccess ?? value);
+          } catch (error) {
+            showGlobalNotice(error.message, true);
+            loadAgentAccess();
+          }
+        }
+        ['sessionModeSelect', 'delegateModeSelect'].forEach(id => {
+          const el = $(id);
+          if (el) el.onchange = () => changeAgentAccess(el.value);
+        });
+        attachToolMenu('sessionModeSelect');
+        attachToolMenu('delegateModeSelect');
+        attachToolMenu('modelSelect');
+        loadAgentAccess();
 
         function applyTheme(theme) {
           document.documentElement.setAttribute('data-theme', theme);
@@ -4006,22 +4947,6 @@ internal static class Dashboard
         refresh();
         setInterval(refresh, 3000);
       </script>
-    <div class="modal-overlay" id="diffModal" style="display:none">
-      <div class="modal diff-modal">
-        <div class="modal-head">
-          <div>
-            <div class="modal-title">Agenten vill skriva en fil</div>
-            <div class="small mono" id="diffModalPath"></div>
-          </div>
-          <button class="icon" id="diffModalClose" title="Stäng">✕</button>
-        </div>
-        <pre class="diff-view" id="diffModalBody"></pre>
-        <div class="modal-foot">
-          <button id="diffRejectBtn">Avvisa</button>
-          <button class="primary" id="diffApproveBtn">Godkänn &amp; skriv</button>
-        </div>
-      </div>
-    </div>
     </body>
     </html>
     """;

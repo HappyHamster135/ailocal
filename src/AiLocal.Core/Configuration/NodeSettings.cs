@@ -58,6 +58,19 @@ public sealed class WorkerProfileSettings
     /// an assignment with no explicit model hint, so a trivial task doesn't
     /// burn the most expensive model. Editable per Worker.</summary>
     public ModelTiers ModelTiers { get; set; } = new();
+
+    /// <summary>When on, every file write during a Host-dispatched assignment
+    /// is first reviewed by the Host's strongest model (POST
+    /// /cluster/review-change); a rejection is fed back to this Worker's
+    /// (often small, local) model as a tool error with the reviewer's reason
+    /// so it can correct itself. Quality gate for weak models - review
+    /// failures fail open, this is not a security boundary.</summary>
+    public bool AiReviewWrites { get; set; }
+
+    /// <summary>When on, the agent gets a fetch_url tool (http/https, text
+    /// extraction) so it can look things up on the internet. Independent of
+    /// AgentAccess - network reach, not filesystem reach.</summary>
+    public bool AllowInternet { get; set; }
 }
 
 /// <summary>Which (provider, model) to use for a task of a given skill+complexity.

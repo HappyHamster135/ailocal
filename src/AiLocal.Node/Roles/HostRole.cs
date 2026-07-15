@@ -544,6 +544,15 @@ public static class HostRole
                     statusCode: StatusCodes.Status403Forbidden);
         });
 
+        // AI review of a Worker's pending file write (see ChangeReviewer):
+        // the Worker pauses before writing, sends the raw old/new content
+        // here, and this Host's strongest configured model approves or
+        // rejects with a reason the small model can act on. Node-only route
+        // (/cluster/*), so only token-holding cluster members can ask.
+        app.MapPost("/cluster/review-change", async (
+            ReviewChangeRequest change, FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
+            Results.Ok(await ChangeReviewer.ReviewAsync(provider, settings, change, ct)));
+
         app.MapGet("/tasks", (TaskBoard board) => Results.Ok(board.All));
         app.MapGet("/api/tasks", (TaskBoard board) => Results.Ok(board.All));
 

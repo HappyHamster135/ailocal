@@ -79,7 +79,11 @@ public sealed class AgentLoop
         }
         TokenUsage Usage() => new(inputTokens, outputTokens);
 
-        var toolDefs = AgentToolExecutor.ToolsFor(accessLevel);
+        // Ask the executor for ITS tool list rather than recomputing it from
+        // the access level here - the executor knows about flags this loop
+        // doesn't (internet access), and two call sites deriving the list
+        // independently is exactly how they'd drift apart.
+        var toolDefs = _tools.Tools;
         // history is seeded from a prior run's own returned Messages (see
         // AgentRunResult) - clone it so repeated resumes never share/mutate
         // a list some earlier caller still holds a reference to.

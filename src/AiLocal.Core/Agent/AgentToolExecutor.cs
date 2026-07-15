@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using AiLocal.Core.Contracts;
 
 namespace AiLocal.Core.Agent;
@@ -47,21 +48,31 @@ public sealed class AgentToolExecutor
 
     private readonly AgentAccessLevel _level;
     private readonly string _workspaceRoot;
+    private readonly bool _allowInternet;
     private readonly Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? _approvalGate;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
         string workspaceRoot,
-        Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? approvalGate = null)
+        Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? approvalGate = null,
+        bool allowInternet = false)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _approvalGate = approvalGate;
+        _allowInternet = allowInternet;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level)
+    /// <summary>The tool list THIS executor actually accepts - the single
+    /// source of truth AgentLoop advertises to the model. Before this
+    /// property existed the loop called the static ToolsFor(level) itself,
+    /// which meant the loop and the executor had to agree on the flags out
+    /// of band; an instance property can't drift from its own switch.</summary>
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet);
+
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -81,6 +92,15 @@ public sealed class AgentToolExecutor
                 "Run a shell command on this Worker's machine and return its stdout/stderr. Times out after 5 minutes.",
                 """{"type":"object","properties":{"command":{"type":"string"},"workingDirectory":{"type":"string","description":"Optional; defaults to the current directory."}},"required":["command"]}"""));
 
+        // Internet is a separate operator opt-in, not an access tier: it's
+        // network reach, orthogonal to how much of the FILESYSTEM the agent
+        // may touch - a Sandboxed agent with internet on can research docs
+        // without gaining a single byte of extra disk access.
+        if (allowInternet)
+            tools.Add(new("fetch_url",
+                "Fetch a web page over http/https and return its readable text content (HTML tags stripped). Use for looking things up on the internet.",
+                """{"type":"object","properties":{"url":{"type":"string","description":"Absolute http:// or https:// URL to fetch."}},"required":["url"]}"""));
+
         return tools;
     }
 
@@ -98,6 +118,8 @@ public sealed class AgentToolExecutor
                 "list_files" => ListFiles(call, root),
                 "run_command" when _level == AgentAccessLevel.Full => await RunCommandAsync(call, root, ct),
                 "run_command" => Error(call, "run_command is not available at this Worker's current access level (Sandboxed allows file access only)."),
+                "fetch_url" when _allowInternet => await FetchUrlAsync(call, root, ct),
+                "fetch_url" => Error(call, "fetch_url is not available - internet access is disabled on this Worker (Inställningar -> Agent & arbetsyta)."),
                 _ => Error(call, $"unknown tool: {call.Name}")
             };
         }
@@ -220,6 +242,56 @@ public sealed class AgentToolExecutor
 
         var output = $"exit code: {process.ExitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}";
         return new ToolResult(call.Id, call.Name, Truncate(output), IsError: process.ExitCode != 0);
+    }
+
+    // Shared across calls/executors: sockets are pooled per handler, and a
+    // per-call HttpClient would exhaust ports under an agent that reads many
+    // pages. Redirects are capped by the default handler (50); the 10s
+    // timeout is per request.
+    private static readonly HttpClient FetchClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private const int MaxFetchBytes = 1_000_000;
+
+    private async Task<ToolResult> FetchUrlAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var rawUrl = RequireString(args, "url");
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return Error(call, $"fetch_url only accepts absolute http:// or https:// URLs, got: {rawUrl}");
+
+        using var response = await FetchClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+            return Error(call, $"fetch failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase} from {uri}");
+
+        // Read at most MaxFetchBytes no matter what Content-Length claims -
+        // the model asked for "the page", not an unbounded download.
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        var buffer = new char[MaxFetchBytes];
+        var read = await reader.ReadBlockAsync(buffer, ct);
+        var raw = new string(buffer, 0, read);
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+        var text = contentType.Contains("html", StringComparison.OrdinalIgnoreCase) || raw.TrimStart().StartsWith('<')
+            ? HtmlToText(raw)
+            : raw;
+        return new ToolResult(call.Id, call.Name, Truncate($"[{uri}]\n{text}"));
+    }
+
+    /// <summary>Crude, dependency-free readable-text extraction: good enough
+    /// for an agent to read documentation/articles, deliberately not a
+    /// browser. Scripts/styles removed entirely, remaining tags stripped,
+    /// the handful of entities that dominate real pages decoded, whitespace
+    /// collapsed to at most one blank line.</summary>
+    public static string HtmlToText(string html)
+    {
+        var text = Regex.Replace(html, "<(script|style)[^>]*>.*?</\\1>", " ", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<br\\s*/?>|</p>|</div>|</li>|</h[1-6]>|</tr>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<[^>]+>", " ");
+        text = text.Replace("&nbsp;", " ").Replace("&amp;", "&").Replace("&lt;", "<")
+            .Replace("&gt;", ">").Replace("&quot;", "\"").Replace("&#39;", "'");
+        text = Regex.Replace(text, "[ \\t]+", " ");
+        text = Regex.Replace(text, "( ?\\n ?)+", "\n");
+        return text.Trim();
     }
 
     private static void TryKill(Process process)

@@ -31,6 +31,8 @@ public sealed record SettingsUpdate(
     int? MaxTokens = null,
     bool? AutoPullOllamaModel = null,
     string? WorkspacePath = null,
+    bool? AiReviewWrites = null,
+    bool? AllowInternet = null,
     ModelTiers? ModelTiers = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
@@ -51,6 +53,8 @@ internal sealed class StoredNodeSettings
     public int MaxConcurrentTasks { get; set; } = 1;
     public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
     public string? WorkspacePath { get; set; }
+    public bool AiReviewWrites { get; set; }
+    public bool AllowInternet { get; set; }
     public ModelTiers ModelTiers { get; set; } = new();
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
@@ -132,6 +136,8 @@ public sealed class PersistentSettingsStore
         settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
         settings.Worker.AgentAccess = stored.AgentAccess;
         settings.Worker.WorkspacePath = stored.WorkspacePath;
+        settings.Worker.AiReviewWrites = stored.AiReviewWrites;
+        settings.Worker.AllowInternet = stored.AllowInternet;
         settings.Worker.ModelTiers = stored.ModelTiers;
         settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
         settings.Providers.DefaultModel = stored.AnthropicModel;
@@ -166,6 +172,8 @@ public sealed class PersistentSettingsStore
                 maxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
                 agentAccess = _settings.Worker.AgentAccess.ToString(),
                 workspacePath = _settings.Worker.WorkspacePath,
+                aiReviewWrites = _settings.Worker.AiReviewWrites,
+                allowInternet = _settings.Worker.AllowInternet,
                 modelTiers = new
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
@@ -250,6 +258,12 @@ public sealed class PersistentSettingsStore
             // sandbox root / run_command working dir - it can't override it.
             if (update.WorkspacePath is not null)
                 _settings.Worker.WorkspacePath = NullIfWhiteSpace(update.WorkspacePath);
+
+            if (update.AiReviewWrites.HasValue)
+                _settings.Worker.AiReviewWrites = update.AiReviewWrites.Value;
+
+            if (update.AllowInternet.HasValue)
+                _settings.Worker.AllowInternet = update.AllowInternet.Value;
 
             if (update.ModelTiers is not null)
                 _settings.Worker.ModelTiers = update.ModelTiers;
@@ -436,6 +450,8 @@ public sealed class PersistentSettingsStore
         _stored.MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks;
         _stored.AgentAccess = _settings.Worker.AgentAccess;
         _stored.WorkspacePath = _settings.Worker.WorkspacePath;
+        _stored.AiReviewWrites = _settings.Worker.AiReviewWrites;
+        _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.ModelTiers = _settings.Worker.ModelTiers;
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).

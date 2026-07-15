@@ -80,7 +80,8 @@ public static class WorkerRole
         // to turn this on remotely, it can only ever be told no.
         app.MapPost("/execute/assignment", async (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
-            NodeSettings settings, CancellationToken ct) =>
+            NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
+            CancellationToken ct) =>
         {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
@@ -92,7 +93,6 @@ public static class WorkerRole
                 return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
 
             ctx.Response.Headers.CacheControl = "no-cache";
-            ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.ContentType = "text/event-stream";
             // The operator chooses the folder (Settings -> Agentlage) - a Worker
             // picks where ITS agent runs, never the Host. Null => the
@@ -100,7 +100,47 @@ public static class WorkerRole
             var workspaceRoot = string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
                 ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
                 : settings.Worker.WorkspacePath;
-            var executor = new AgentToolExecutor(accessLevel, workspaceRoot);
+
+            // AI review (opt-in): every file write pauses and asks the Host's
+            // strong model first; a rejection comes back as a tool error with
+            // the reviewer's reason so the (often small, local) model here
+            // can correct itself and retry. Quality gate, not security -
+            // review failures fail OPEN (see ChangeReviewer's doc).
+            Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? gate = null;
+            var reviewHost = hostLocator.HostEndpoint;
+            if (settings.Worker.AiReviewWrites && !string.IsNullOrWhiteSpace(reviewHost))
+            {
+                var hostEndpoint = reviewHost;
+                gate = async (proposal, gateCt) =>
+                {
+                    try
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(gateCt);
+                        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+                        var client = httpFactory.CreateClient("cluster");
+                        using var response = await client.PostAsJsonAsync(
+                            $"{hostEndpoint}/cluster/review-change",
+                            new ReviewChangeRequest(proposal.Path, proposal.OldContent, proposal.NewContent, req.Assignment),
+                            timeout.Token);
+                        if (!response.IsSuccessStatusCode)
+                            return new FileChangeDecision(true);
+                        var verdict = await response.Content.ReadFromJsonAsync<ReviewChangeResponse>(timeout.Token);
+                        return verdict is { Approve: false }
+                            ? new FileChangeDecision(false, $"AI-granskaren avvisade ändringen: {verdict.Reason}")
+                            : new FileChangeDecision(true);
+                    }
+                    catch (OperationCanceledException) when (gateCt.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        return new FileChangeDecision(true);
+                    }
+                };
+            }
+
+            var executor = new AgentToolExecutor(accessLevel, workspaceRoot, gate, settings.Worker.AllowInternet);
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
             var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>

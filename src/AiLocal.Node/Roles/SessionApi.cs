@@ -147,7 +147,7 @@ public static class SessionApi
                     return new FileChangeDecision(decision.Approve, decision.Reason);
                 }
 
-                var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate);
+                var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet);
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
                 var result = await loop.RunAsync(req.Message, accessLevel, req.ModelHint, onStep: async step =>

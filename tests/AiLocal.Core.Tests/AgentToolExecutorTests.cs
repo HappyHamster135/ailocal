@@ -259,4 +259,124 @@ public class AgentToolExecutorTests : IDisposable
 
         Assert.True(result.IsError);
     }
+
+    // --- Approval gate (first coverage - the gate had none before) ---
+
+    [Fact]
+    public async Task Gate_Approve_WritesTheFile()
+    {
+        FileChangeProposal? seen = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            (proposal, _) => { seen = proposal; return Task.FromResult(new FileChangeDecision(true)); });
+
+        var result = await executor.ExecuteAsync(
+            Call("write_file", new { path = "ok.txt", content = "granskad" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Equal("granskad", File.ReadAllText(Path.Combine(_workspace, "ok.txt")));
+        Assert.NotNull(seen);
+        Assert.Null(seen!.OldContent);
+        Assert.Equal("granskad", seen.NewContent);
+    }
+
+    [Fact]
+    public async Task Gate_Reject_DoesNotWrite_AndReturnsReasonAsToolError()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            (_, _) => Task.FromResult(new FileChangeDecision(false, "AI-granskaren avvisade ändringen: fel filtyp.")));
+
+        var result = await executor.ExecuteAsync(
+            Call("write_file", new { path = "nej.txt", content = "x" }), CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Equal("AI-granskaren avvisade ändringen: fel filtyp.", result.Output);
+        Assert.False(File.Exists(Path.Combine(_workspace, "nej.txt")));
+    }
+
+    [Fact]
+    public async Task Gate_SeesOldContent_WhenOverwritingExistingFile()
+    {
+        File.WriteAllText(Path.Combine(_workspace, "fanns.txt"), "gammalt");
+        FileChangeProposal? seen = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            (proposal, _) => { seen = proposal; return Task.FromResult(new FileChangeDecision(true)); });
+
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "fanns.txt", content = "nytt" }), CancellationToken.None);
+
+        Assert.Equal("gammalt", seen!.OldContent);
+    }
+
+    [Fact]
+    public async Task NoGate_WritesImmediately_UnchangedBehavior()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+
+        var result = await executor.ExecuteAsync(
+            Call("write_file", new { path = "fritt.txt", content = "utan gate" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.True(File.Exists(Path.Combine(_workspace, "fritt.txt")));
+    }
+
+    // --- fetch_url / internet access ---
+
+    [Fact]
+    public void ToolsFor_AllowInternet_AddsFetchUrl_AndDefaultOmitsIt()
+    {
+        Assert.Contains(AgentToolExecutor.ToolsFor(AgentAccessLevel.Sandboxed, allowInternet: true),
+            t => t.Name == "fetch_url");
+        Assert.DoesNotContain(AgentToolExecutor.ToolsFor(AgentAccessLevel.Sandboxed),
+            t => t.Name == "fetch_url");
+        // Off means no tools at all, internet or not.
+        Assert.Empty(AgentToolExecutor.ToolsFor(AgentAccessLevel.Off, allowInternet: true));
+    }
+
+    [Fact]
+    public void InstanceTools_MatchConstructorFlags()
+    {
+        var withInternet = new AgentToolExecutor(AgentAccessLevel.Full, _workspace, allowInternet: true);
+        var without = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+
+        Assert.Contains(withInternet.Tools, t => t.Name == "fetch_url");
+        Assert.DoesNotContain(without.Tools, t => t.Name == "fetch_url");
+    }
+
+    [Fact]
+    public async Task FetchUrl_WhenInternetDisabled_ReturnsToolError()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+
+        var result = await executor.ExecuteAsync(
+            Call("fetch_url", new { url = "https://example.com" }), CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Contains("internet", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchUrl_RejectsNonHttpSchemes_WithoutTouchingNetwork()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace, allowInternet: true);
+
+        var result = await executor.ExecuteAsync(
+            Call("fetch_url", new { url = "file:///C:/Windows/win.ini" }), CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Contains("http", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void HtmlToText_StripsMarkupScriptsAndDecodesEntities()
+    {
+        var text = AgentToolExecutor.HtmlToText(
+            "<html><head><style>body{color:red}</style><script>alert(1)</script></head>" +
+            "<body><h1>Rubrik</h1><p>F&ouml;rsta &amp; andra.</p><div>Rad tv&aring;</div></body></html>");
+
+        Assert.Contains("Rubrik", text);
+        Assert.Contains("& andra", text);
+        Assert.DoesNotContain("alert(1)", text);
+        Assert.DoesNotContain("color:red", text);
+        Assert.DoesNotContain("<p>", text);
+    }
 }
