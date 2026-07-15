@@ -553,6 +553,36 @@ public static class HostRole
             ReviewChangeRequest change, FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
             Results.Ok(await ChangeReviewer.ReviewAsync(provider, settings, change, ct)));
 
+        // PR-style review of a completed isolated task: pulls the task's full
+        // diff from the Worker and runs it through the Host's AI code reviewer
+        // (ChangeReviewer) as a single diff. The operator then merges or
+        // discards based on the verdict - this is the "AI granskar slutdiffen"
+        // half of git-isolation, complementing the per-write pre-review.
+        app.MapPost("/api/isolation/review", async (
+            IsolationReviewRequest req, FallbackChatProvider provider, NodeSettings settings,
+            IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.WorkerEndpoint) || string.IsNullOrWhiteSpace(req.TaskId))
+                return Results.Problem(detail: "workerEndpoint och taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+
+            var client = httpFactory.CreateClient("cluster");
+            using var diffReq = new HttpRequestMessage(HttpMethod.Post, $"{req.WorkerEndpoint.TrimEnd('/')}/execute/isolation/diff")
+            {
+                Content = JsonContent.Create(new { taskId = req.TaskId })
+            };
+            using var diffResp = await client.SendAsync(diffReq, ct);
+            if (!diffResp.IsSuccessStatusCode)
+                return Results.Problem(detail: "Kunde inte hämta diff från Worker.", statusCode: StatusCodes.Status502BadGateway);
+            var diffPayload = await diffResp.Content.ReadFromJsonAsync<IsolationDiffResponse>(ct);
+            var diff = diffPayload?.Diff ?? "";
+            if (string.IsNullOrWhiteSpace(diff))
+                return Results.Ok(new { approved = true, reason = "(ingen diff - tasken producerade inga ändringar)", diff });
+
+            var verdict = await ChangeReviewer.ReviewAsync(provider, settings,
+                new ReviewChangeRequest("(isolated task diff)", null, diff, req.Goal), ct);
+            return Results.Ok(new { approved = verdict.Approve, reason = verdict.Reason, diff });
+        });
+
         app.MapGet("/tasks", (TaskBoard board) => Results.Ok(board.All));
         app.MapGet("/api/tasks", (TaskBoard board) => Results.Ok(board.All));
 
@@ -710,9 +740,32 @@ public static class HostRole
                     statusCode: StatusCodes.Status503ServiceUnavailable);
 
             var client = httpFactory.CreateClient("cluster");
+
+            // Optional git task-isolation: give this assignment its own
+            // worktree+branch on the Worker so it can't collide with another
+            // task running against the same repo. Created before dispatch,
+            // merged/discarded by the operator afterwards (the Worker's
+            // /execute/isolation/* endpoints). A failure here falls back to a
+            // normal (non-isolated) run rather than blocking the assignment.
+            string? workspaceOverride = null;
+            if (req.UseIsolation)
+            {
+                try
+                {
+                    using var createReq = new HttpRequestMessage(HttpMethod.Post, $"{candidate.PreferredEndpoint}/execute/isolation/create");
+                    using var createResp = await client.SendAsync(createReq, ct);
+                    if (createResp.IsSuccessStatusCode)
+                    {
+                        var created = await createResp.Content.ReadFromJsonAsync<IsolationCreated>(ct);
+                        workspaceOverride = created?.Worktree;
+                    }
+                }
+                catch { /* isolation is best-effort; fall through un-isolated */ }
+            }
+
             using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, $"{candidate.PreferredEndpoint}/execute/assignment")
             {
-                Content = JsonContent.Create(req)
+                Content = JsonContent.Create(req with { WorkspaceOverride = workspaceOverride })
             };
 
             HttpResponseMessage upstreamResponse;

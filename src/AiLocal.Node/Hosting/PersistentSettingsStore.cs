@@ -33,6 +33,7 @@ public sealed record SettingsUpdate(
     string? WorkspacePath = null,
     bool? AiReviewWrites = null,
     bool? AllowInternet = null,
+    bool? UseGitIsolation = null,
     ModelTiers? ModelTiers = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
@@ -55,6 +56,7 @@ internal sealed class StoredNodeSettings
     public string? WorkspacePath { get; set; }
     public bool AiReviewWrites { get; set; }
     public bool AllowInternet { get; set; }
+    public bool UseGitIsolation { get; set; }
     public ModelTiers ModelTiers { get; set; } = new();
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
@@ -138,6 +140,7 @@ public sealed class PersistentSettingsStore
         settings.Worker.WorkspacePath = stored.WorkspacePath;
         settings.Worker.AiReviewWrites = stored.AiReviewWrites;
         settings.Worker.AllowInternet = stored.AllowInternet;
+        settings.Worker.UseGitIsolation = stored.UseGitIsolation;
         settings.Worker.ModelTiers = stored.ModelTiers;
         settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
         settings.Providers.DefaultModel = stored.AnthropicModel;
@@ -174,6 +177,7 @@ public sealed class PersistentSettingsStore
                 workspacePath = _settings.Worker.WorkspacePath,
                 aiReviewWrites = _settings.Worker.AiReviewWrites,
                 allowInternet = _settings.Worker.AllowInternet,
+                useGitIsolation = _settings.Worker.UseGitIsolation,
                 modelTiers = new
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
@@ -264,6 +268,9 @@ public sealed class PersistentSettingsStore
 
             if (update.AllowInternet.HasValue)
                 _settings.Worker.AllowInternet = update.AllowInternet.Value;
+
+            if (update.UseGitIsolation.HasValue)
+                _settings.Worker.UseGitIsolation = update.UseGitIsolation.Value;
 
             if (update.ModelTiers is not null)
                 _settings.Worker.ModelTiers = update.ModelTiers;
@@ -452,6 +459,7 @@ public sealed class PersistentSettingsStore
         _stored.WorkspacePath = _settings.Worker.WorkspacePath;
         _stored.AiReviewWrites = _settings.Worker.AiReviewWrites;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
+        _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.ModelTiers = _settings.Worker.ModelTiers;
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).

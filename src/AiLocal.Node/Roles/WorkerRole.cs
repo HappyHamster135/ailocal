@@ -16,7 +16,18 @@ namespace AiLocal.Node.Roles;
 /// from the same plan that need to land on the same machine to share a
 /// workspace. The Worker itself ignores it; a Worker only ever executes on
 /// itself.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null);
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false);
+
+/// <summary>Response from POST /execute/isolation/create: the freshly created
+/// worktree+branch for one isolated task.</summary>
+public sealed record IsolationCreated(string TaskId, string Branch, string Worktree);
+
+/// <summary>Body for POST /api/isolation/review (Host): review a completed
+/// isolated task's diff with the Host's AI reviewer.</summary>
+public sealed record IsolationReviewRequest(string WorkerEndpoint, string TaskId, string? Goal = null);
+
+/// <summary>Response shape of Worker's POST /execute/isolation/diff.</summary>
+public sealed record IsolationDiffResponse(string TaskId, string Diff);
 
 public static class WorkerRole
 {
@@ -96,10 +107,15 @@ public static class WorkerRole
             ctx.Response.ContentType = "text/event-stream";
             // The operator chooses the folder (Settings -> Agentlage) - a Worker
             // picks where ITS agent runs, never the Host. Null => the
-            // default agent-workspace under this Worker's own data dir.
-            var workspaceRoot = string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
-                ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
-                : settings.Worker.WorkspacePath;
+            // default agent-workspace under this Worker's own data dir. A
+            // non-null WorkspaceOverride (e.g. a git worktree created for task
+            // isolation) takes precedence so the agent works in that isolated
+            // directory instead of the shared workspace.
+            var workspaceRoot = !string.IsNullOrWhiteSpace(req.WorkspaceOverride)
+                ? req.WorkspaceOverride
+                : string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
+                    ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
+                    : settings.Worker.WorkspacePath;
 
             // AI review (opt-in): every file write pauses and asks the Host's
             // strong model first; a rejection comes back as a tool error with
@@ -153,6 +169,78 @@ public static class WorkerRole
                 $"data: {JsonSerializer.Serialize(new { final = result })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
+        });
+
+        // --- Task isolation (git worktree per task) ---------------------------------
+        // Each "employee" (agent run) gets its own worktree+branch so two
+        // tasks on the same repo never overwrite each other. The Host creates
+        // one before dispatching (with useIsolation), then merges or discards
+        // it after the agent reports done - discard is the free undo button.
+
+        app.MapPost("/execute/isolation/create", async (
+            GitIsolationService isolation, NodeSettings settings, CancellationToken ct) =>
+        {
+            var repoPath = ResolveRepoPath(settings);
+            if (repoPath is null)
+                return Results.Problem(detail: "Git-isolation kräver att Agentlage -> Arbetsmapp är ett git-repo.", statusCode: StatusCodes.Status400BadRequest);
+            if (!await isolation.CanIsolateAsync(repoPath, ct))
+                return Results.Problem(detail: "Arbetsmappen är inte ett git-repo - kan inte isolera.", statusCode: StatusCodes.Status400BadRequest);
+
+            var task = await isolation.CreateAsync(repoPath, "Uppgift", baseBranch: null, ct);
+            return task is null
+                ? Results.Problem(detail: "Kunde inte skapa isolerad arbetsyta (git worktree misslyckades).", statusCode: StatusCodes.Status500InternalServerError)
+                : Results.Ok(new { taskId = task.TaskId, branch = task.BranchName, worktree = task.WorktreePath });
+        });
+
+        app.MapGet("/execute/isolation/list", (GitIsolationService isolation) =>
+            Results.Ok(isolation.ListActive().Select(t => new
+            {
+                taskId = t.TaskId,
+                branch = t.BranchName,
+                baseBranch = t.BaseBranch,
+                worktree = t.WorktreePath,
+                title = t.Title,
+                createdAt = t.CreatedAt
+            })));
+
+        app.MapPost("/execute/isolation/commit", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationCommitRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var result = await isolation.CommitAsync(body.TaskId, body.Message ?? "Agent-ändringar", ct);
+            return Results.Ok(new { success = result.Success, output = result.Output });
+        });
+
+        app.MapPost("/execute/isolation/diff", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var diff = await isolation.DiffAsync(body.TaskId, ct);
+            return Results.Ok(new { taskId = body.TaskId, diff });
+        });
+
+        app.MapPost("/execute/isolation/merge", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await isolation.MergeAsync(body.TaskId, ct);
+            return Results.Ok(new { success, output });
+        });
+
+        app.MapPost("/execute/isolation/discard", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            await isolation.DiscardAsync(body.TaskId, ct);
+            return Results.Ok(new { discarded = true });
         });
 
         app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
@@ -247,5 +335,20 @@ public static class WorkerRole
         catch { /* not JSON, or an unexpected shape - fall back to the status code */ }
 
         return null;
+    }
+
+    /// <summary>Request bodies for the isolation endpoints.</summary>
+    private sealed record IsolationTaskRequest(string TaskId);
+    private sealed record IsolationCommitRequest(string TaskId, string? Message = null);
+
+    /// <summary>Resolves the repo path the agent works in: the explicit
+    /// WorkspacePath if set, else the default agent-workspace. Isolation only
+    /// makes sense when that path is itself a git repo.</summary>
+    private static string? ResolveRepoPath(NodeSettings settings)
+    {
+        var path = string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
+            ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
+            : settings.Worker.WorkspacePath;
+        return path;
     }
 }

@@ -33,18 +33,18 @@ public sealed record GitCommitResult(bool Success, string Output);
 /// see GitApi's doc comment for why that's a deliberate v1 boundary, not an
 /// oversight.
 /// </summary>
-public sealed class GitService
+public class GitService
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
     private const int MaxDiffChars = 100_000;
 
-    public async Task<bool> IsRepoAsync(string folderPath, CancellationToken ct = default)
+    public virtual async Task<bool> IsRepoAsync(string folderPath, CancellationToken ct = default)
     {
         var (exitCode, _, _) = await RunGitAsync(folderPath, ["rev-parse", "--is-inside-work-tree"], ct);
         return exitCode == 0;
     }
 
-    public async Task<GitStatus> GetStatusAsync(string folderPath, CancellationToken ct = default)
+    public virtual async Task<GitStatus> GetStatusAsync(string folderPath, CancellationToken ct = default)
     {
         if (!await IsRepoAsync(folderPath, ct))
             return new GitStatus(false, null, 0, 0, [], [], []);
@@ -53,7 +53,7 @@ public sealed class GitService
         return exitCode == 0 ? ParseStatus(stdout) : new GitStatus(true, null, 0, 0, [], [], []);
     }
 
-    public async Task<string> GetDiffAsync(string folderPath, bool staged, CancellationToken ct = default)
+    public virtual async Task<string> GetDiffAsync(string folderPath, bool staged, CancellationToken ct = default)
     {
         string[] args = staged ? ["diff", "--staged"] : ["diff"];
         var (exitCode, stdout, stderr) = await RunGitAsync(folderPath, args, ct);
@@ -68,7 +68,7 @@ public sealed class GitService
     /// same reasoning as GitStatus not needing one: this mirrors write_file
     /// being whole-file rather than patch-based, not a limitation anyone's
     /// asked to lift yet.</summary>
-    public async Task<GitCommitResult> CommitAsync(string folderPath, string message, CancellationToken ct = default)
+    public virtual async Task<GitCommitResult> CommitAsync(string folderPath, string message, CancellationToken ct = default)
     {
         var (addExit, _, addErr) = await RunGitAsync(folderPath, ["add", "-A"], ct);
         if (addExit != 0)
@@ -80,6 +80,99 @@ public sealed class GitService
         // actually has content so the message is never silently empty.
         var output = string.IsNullOrWhiteSpace(commitOut) ? commitErr : commitOut;
         return new GitCommitResult(commitExit == 0, output);
+    }
+
+    /// <summary>True when the repo has staged/unstaged/untracked changes the
+    /// next commit would capture - used to decide whether an isolated task
+    /// actually produced anything worth merging.</summary>
+    public virtual async Task<bool> HasUncommittedChangesAsync(string folderPath, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(folderPath, ct)) return false;
+        var (exitCode, stdout, _) = await RunGitAsync(folderPath, ["status", "--porcelain"], ct);
+        return exitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
+    }
+
+    public virtual async Task<string?> GetCurrentBranchAsync(string folderPath, CancellationToken ct = default)
+    {
+        var (exitCode, stdout, _) = await RunGitAsync(folderPath, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
+        return exitCode == 0 ? stdout.Trim() : null;
+    }
+
+    /// <summary>Creates a linked worktree at <paramref name="worktreePath"/>
+    /// on a new branch <paramref name="branchName"/>, branched from the
+    /// optional <paramref name="baseRef"/> (defaults to the current HEAD).
+    /// Worktrees give true filesystem isolation: two tasks get two real
+    /// directories and two real branches, so they can never overwrite each
+    /// other's files - the keystone of multi-agent (many "employees") work on
+    /// one repo.</summary>
+    public virtual async Task<bool> CreateWorktreeAsync(
+        string repoPath, string worktreePath, string branchName, string? baseRef = null, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(repoPath, ct)) return false;
+        var args = new List<string> { "worktree", "add", "-b", branchName, worktreePath };
+        if (!string.IsNullOrWhiteSpace(baseRef)) args.Add(baseRef!);
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, args, ct);
+        if (exitCode != 0 && stderr.Contains("already exists"))
+            return false;
+        return exitCode == 0;
+    }
+
+    /// <summary>Merges <paramref name="branchName"/> (from its worktree) into
+    /// the worktree's base branch, fast-forward when possible. The merge
+    /// happens in the worktree's own directory so the branch ref is resolved
+    /// naturally; the caller then discards the worktree.</summary>
+    /// <summary>Checks out <paramref name="branch"/> in <paramref name="repoPath"/>
+    /// (the main repo, not a worktree). Used before merging a task branch back
+    /// into its base - the caller ensures repoPath is left on the base
+    /// branch, so the subsequent merge lands in the right place.</summary>
+    public virtual async Task<(bool Success, string Output)> CheckoutAsync(
+        string repoPath, string branch, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(repoPath, ct))
+            return (false, "not a git repo");
+        var (exitCode, stdout, stderr) = await RunGitAsync(repoPath, ["checkout", branch], ct);
+        var output = string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
+        return (exitCode == 0, output);
+    }
+
+    /// <summary>Merges <paramref name="branchName"/> into the repo's currently
+    /// checked-out branch (which the caller has switched to the task's base via
+    /// <see cref="CheckoutAsync"/> first). Runs against the main repo, not the
+    /// task worktree, so the change lands on the base branch's real history.</summary>
+    public virtual async Task<(bool Success, string Output)> MergeAsync(
+        string repoPath, string branchName, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(repoPath, ct))
+            return (false, "not a git repo");
+
+        var (exitCode, stdout, stderr) = await RunGitAsync(repoPath,
+            ["merge", "--no-ff", "-m", $"Merge task branch {branchName}", branchName], ct);
+        var output = string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
+        return (exitCode == 0, output);
+    }
+
+    /// <summary>Removes a worktree (both its directory and the branch it
+    /// created). Force-clears any stray lock files first so a discarded task
+    /// never leaves a dangling worktree behind.</summary>
+    public virtual async Task<bool> RemoveWorktreeAsync(
+        string repoPath, string worktreePath, string branchName, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(repoPath, ct)) return false;
+        // Best-effort: prune stale locks then remove the worktree.
+        await RunGitAsync(repoPath, ["worktree", "prune"], ct);
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath,
+            ["worktree", "remove", "--force", worktreePath], ct);
+        // The branch may still be needed by the caller post-merge; only the
+        // worktree removal is forced. Branch cleanup is the caller's choice.
+        return exitCode == 0 || stderr.Contains("not a working tree");
+    }
+
+    /// <summary>Deletes a branch by name (after it's been merged or discarded).</summary>
+    public virtual async Task<bool> DeleteBranchAsync(string repoPath, string branchName, CancellationToken ct = default)
+    {
+        if (!await IsRepoAsync(repoPath, ct)) return false;
+        var (exitCode, _, _) = await RunGitAsync(repoPath, ["branch", "-D", branchName], ct);
+        return exitCode == 0;
     }
 
     private static GitStatus ParseStatus(string stdout)

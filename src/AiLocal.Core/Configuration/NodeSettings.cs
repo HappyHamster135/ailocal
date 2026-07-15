@@ -67,6 +67,14 @@ public sealed class WorkerProfileSettings
     /// failures fail open, this is not a security boundary.</summary>
     public bool AiReviewWrites { get; set; }
 
+    /// <summary>When on, each agent assignment the Host dispatches runs in its
+    /// own git worktree+branch (forked from the workspace's current branch), so
+    /// multiple "employees" working the same repo never overwrite each other.
+    /// After the agent finishes, the Host/operator reviews the diff as a PR and
+    /// merges or discards it - discard is the free undo button. Requires the
+    /// workspace to be a git repo; a non-repo silently runs un-isolated.</summary>
+    public bool UseGitIsolation { get; set; }
+
     /// <summary>When on, the agent gets a fetch_url tool (http/https, text
     /// extraction) so it can look things up on the internet. Independent of
     /// AgentAccess - network reach, not filesystem reach.</summary>

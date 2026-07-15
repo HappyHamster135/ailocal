@@ -1459,6 +1459,14 @@ internal static class Dashboard
                   <div class="panel-title" style="margin-bottom:8px">Jobb</div>
                   <div class="task-list" id="tasks"></div>
                 </section>
+                <section class="detail-section">
+                  <div class="panel-title" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                    <span>Uppgifts-branches</span>
+                    <button class="btn ghost sm" id="refreshIsolationBtn" type="button">Uppdatera</button>
+                  </div>
+                  <div class="small" style="margin-bottom:6px">Varje agent-uppgift med Git-isolering får en egen branch. Granska diffen, merga eller kasta (ångra).</div>
+                  <div class="task-list" id="isolationList"><div class="small" style="opacity:.6">Inga aktiva isolerade uppgifter.</div></div>
+                </section>
               </div>
             </div>
           </aside>
@@ -1735,6 +1743,13 @@ internal static class Dashboard
                 </label>
                 <span class="small" style="display:block;margin-top:-6px">
                   Ger agenten ett fetch_url-verktyg så den kan hämta webbsidor (http/https) och läsa dem som text - oberoende av agentlägets filåtkomst.
+                </span>
+                <label class="check-field wide">
+                  <input id="settingUseGitIsolation" type="checkbox"> Git-isolering per uppgift
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Varje assignment får sin egen git-worktree + branch i Arbetsmappen (kräver att den är ett git-repo). Flera "anställda" skriver inte över varandra,
+                  och när agenten är klar granskas diffen som en PR innan merge. Kräver att Arbetsmapp är ett git-repo - annars körs det vanligt.
                 </span>
                 <div class="field wide" style="margin-top:4px">
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
@@ -3444,6 +3459,9 @@ internal static class Dashboard
           }
         }
 
+        function renderTasks() {
+          $('taskCount').textContent = state.tasks.length;
+
         async function cancelTask(id) {
           if (!window.confirm('Avbryt den här uppgiften?')) return;
           try {
@@ -3452,6 +3470,67 @@ internal static class Dashboard
           } catch (error) {
             showGlobalNotice(error.message, true);
           }
+        }
+
+        // --- Git task-isolation panel -------------------------------------------
+        // Lists the Worker's currently-isolated agent tasks (one worktree+branch
+        // each). Merge folds the branch into its base; Discard throws it away
+        // (the free undo button); "Visa diff" opens the change inline.
+        async function refreshIsolation() {
+          const el = $('isolationList');
+          let tasks;
+          try {
+            tasks = await fetchJson('/execute/isolation/list');
+          } catch {
+            el.innerHTML = '<div class="small" style="opacity:.6">Kunde inte läsa isolerade uppgifter (agentläge/worktree saknas).</div>';
+            return;
+          }
+          if (!tasks || !tasks.length) {
+            el.innerHTML = '<div class="small" style="opacity:.6">Inga aktiva isolerade uppgifter.</div>';
+            return;
+          }
+          el.innerHTML = tasks.map(t => `<div class="node">
+            <div class="node-main"><span class="mono">${esc(t.branch)}</span><span class="pill">${esc(t.baseBranch)}</span></div>
+            <div class="small">${esc(trunc(t.title || t.taskId, 64))}</div>
+            <div class="detail-actions">
+              <button class="btn ghost sm" data-iso-merge="${esc(t.taskId)}">Merge</button>
+              <button class="btn ghost sm" data-iso-discard="${esc(t.taskId)}">Kasta</button>
+              <button class="btn ghost sm" data-iso-diff="${esc(t.taskId)}">Visa diff</button>
+            </div>
+            <pre class="iso-diff" id="iso-diff-${esc(t.taskId)}" style="display:none;max-height:240px;overflow:auto"></pre>
+          </div>`).join('');
+          el.querySelectorAll('[data-iso-merge]').forEach(b => b.onclick = () => isoMerge(b.dataset.isoMerge));
+          el.querySelectorAll('[data-iso-discard]').forEach(b => b.onclick = () => isoDiscard(b.dataset.isoDiscard));
+          el.querySelectorAll('[data-iso-diff]').forEach(b => b.onclick = () => isoDiff(b.dataset.isoDiff));
+        }
+
+        async function isoMerge(taskId) {
+          if (!window.confirm('Merga den här uppgifts-branchen in i sin bas?')) return;
+          try {
+            const r = await fetchJson('/execute/isolation/merge', { method: 'POST', body: JSON.stringify({ taskId }) });
+            showGlobalNotice(r.success ? 'Mergad: ' + (r.output || 'OK') : 'Merge misslyckades: ' + (r.output || ''), !r.success);
+            await refreshIsolation();
+          } catch (e) { showGlobalNotice(e.message, true); }
+        }
+
+        async function isoDiscard(taskId) {
+          if (!window.confirm('Kasta den här uppgifts-branchen? Ändringarna försvinner (ångra).')) return;
+          try {
+            await fetchJson('/execute/isolation/discard', { method: 'POST', body: JSON.stringify({ taskId }) });
+            showGlobalNotice('Uppgifts-branch kastad.');
+            await refreshIsolation();
+          } catch (e) { showGlobalNotice(e.message, true); }
+        }
+
+        async function isoDiff(taskId) {
+          const pre = $('iso-diff-' + taskId);
+          if (!pre) return;
+          if (pre.style.display !== 'none') { pre.style.display = 'none'; return; }
+          try {
+            const r = await fetchJson('/execute/isolation/diff', { method: 'POST', body: JSON.stringify({ taskId }) });
+            pre.textContent = r.diff || '(ingen diff)';
+            pre.style.display = 'block';
+          } catch (e) { showGlobalNotice(e.message, true); }
         }
 
         function renderMessages() {
@@ -4018,6 +4097,7 @@ internal static class Dashboard
           $('settingWorkspacePath').value = data.workspacePath ?? '';
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
+          $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingTierSimple').value = data.modelTiers?.simple ?? '';
           $('settingTierMedium').value = data.modelTiers?.medium ?? '';
           $('settingTierComplex').value = data.modelTiers?.complex ?? '';
@@ -4342,6 +4422,7 @@ internal static class Dashboard
             workspacePath: $('settingWorkspacePath').value.trim() || null,
             aiReviewWrites: $('settingAiReviewWrites').checked,
             allowInternet: $('settingAllowInternet').checked,
+            useGitIsolation: $('settingUseGitIsolation').checked,
             modelTiers: {
               simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
               medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',
@@ -4942,10 +5023,13 @@ internal static class Dashboard
         };
         initAuth();
         initIcons();
+        const refreshIsolationBtn = $('refreshIsolationBtn');
+        if (refreshIsolationBtn) refreshIsolationBtn.onclick = () => refreshIsolation();
 
         loadProviders();
         refresh();
         setInterval(refresh, 3000);
+        refreshIsolation();
       </script>
     </body>
     </html>
