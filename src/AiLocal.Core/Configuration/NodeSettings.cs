@@ -60,10 +60,35 @@ public sealed class WorkerProfileSettings
     public ModelTiers ModelTiers { get; set; } = new();
 }
 
+/// <summary>Which (provider, model) to use for a task of a given skill+complexity.
+/// Lets the router send e.g. writing to ChatGPT, coding to Claude, private/data
+/// to a local Ollama model - so several models collaborate on one goal instead
+/// of everything funnelling through a single provider.</summary>
+public sealed record ModelRoute(string Skill, string Provider, string Model, int MinComplexity = 1)
+{
+    public static List<ModelRoute> Defaults() => new()
+    {
+        // Coding favours Claude (strong tool use); harder code -> Opus.
+        new("coding", "anthropic", "claude-sonnet-5", 1),
+        new("coding", "anthropic", "claude-opus-4-8", 4),
+        // Writing/creative favours ChatGPT.
+        new("writing", "openai", "gpt-4o", 1),
+        // Research: Claude, fall back to Gemini for breadth.
+        new("research", "anthropic", "claude-sonnet-5", 1),
+        new("research", "gemini", "gemini-2.5-flash", 3),
+        // Data/vision: OpenAI or Claude.
+        new("data", "openai", "gpt-4o", 1),
+        new("vision", "anthropic", "claude-opus-4-8", 1),
+        // General: local Ollama when available (cheap, private), else Haiku.
+        new("general", "ollama", "", 1),
+        new("general", "anthropic", "claude-haiku-4-5", 1),
+    };
+}
+
 /// <summary>Which model the Host picks for a task, keyed off the task's
-/// computed complexity (1-5). Values are Anthropic model ids - the hint this
-/// produces is only ever honored by AnthropicProvider (see ChatRequest.ModelHint),
-/// so this only has an effect when Anthropic ends up serving the request.</summary>
+/// computed complexity (1-5) and skill. Values used to be Anthropic model ids
+/// only (see the historical ModelHint note in ChatRequest); now the router
+/// picks a (provider, model) pair per task so multiple models collaborate.</summary>
 public sealed class ModelTiers
 {
     /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).</summary>
@@ -75,9 +100,40 @@ public sealed class ModelTiers
     /// <summary>complexity 5 (hard: architecture, deep research, debugging).</summary>
     public string Complex { get; set; } = "claude-opus-4-8";
 
-    /// <summary>The model for a 1-5 complexity score.</summary>
+    /// <summary>Provider-aware routes. The router picks the first route whose
+    /// skill matches the task and whose MinComplexity is met; falls back to the
+    /// complexity tiers above (Anthropic) when nothing matches.</summary>
+    public List<ModelRoute> Routes { get; set; } = ModelRoute.Defaults();
+
+    /// <summary>The model for a 1-5 complexity score (Anthropic-only legacy path).</summary>
     public string ForComplexity(int complexity) =>
         complexity <= 2 ? Simple : complexity <= 4 ? Medium : Complex;
+
+    /// <summary>Pick a (provider, model) for a task. Skill is matched
+    /// case-insensitively; if no skill route applies, falls back to the
+    /// complexity tier (Anthropic). Returns ("anthropic", tier) as a safe
+    /// default so dispatch never ends up with an empty provider.</summary>
+    public (string Provider, string Model) ForTask(string? skill, int complexity)
+    {
+        var norm = (skill ?? "general").Trim().ToLowerInvariant();
+        var c = Math.Clamp(complexity, 1, 5);
+
+        var route = Routes
+            .Where(r => r.Skill.Equals(norm, StringComparison.OrdinalIgnoreCase) && c >= r.MinComplexity)
+            .OrderBy(r => r.MinComplexity == c ? 0 : 1) // exact complexity match first
+            .ThenByDescending(r => r.MinComplexity)
+            .FirstOrDefault();
+
+        if (route is not null)
+        {
+            var model = string.IsNullOrWhiteSpace(route.Model)
+                ? ForComplexity(c) // ollama route with no explicit model -> use tier default
+                : route.Model;
+            return (route.Provider, model);
+        }
+
+        return ("anthropic", ForComplexity(c));
+    }
 }
 
 public sealed class ProviderSettings

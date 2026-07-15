@@ -6,13 +6,16 @@ public sealed class ChatRequest
     public string? System { get; set; }
     public List<ChatMessage> Messages { get; set; } = new();
 
-    /// <summary>Optional model override, honored by AnthropicProvider only -
-    /// every current source of this (the dashboard's model dropdown,
-    /// ModelTiers) produces an Anthropic model id, which means nothing to any
-    /// other provider. A Gemini/Ollama/OpenRouter model 404s on a Claude id
-    /// instead of resolving to anything, which used to break the fallback
-    /// chain the moment Anthropic itself failed over to one of them.</summary>
+    /// <summary>Optional model override, honored by the matched provider. Sources
+    /// now produce provider-specific model ids via ModelTiers.ForTask, not just
+    /// Anthropic ids.</summary>
     public string? ModelHint { get; set; }
+
+    /// <summary>Optional preferred provider for this request (e.g. "openai" for a
+    /// writing task). When set, the fallback chain tries it first, then the rest
+    /// of ProviderOrder as backup - so the router can steer a task to a specific
+    /// model while still degrading gracefully if that provider is down.</summary>
+    public string? PreferredProvider { get; set; }
 
     /// <summary>Optional per-request provider order, e.g. ["anthropic", "ollama"].</summary>
     public List<string>? ProviderOrder { get; set; }

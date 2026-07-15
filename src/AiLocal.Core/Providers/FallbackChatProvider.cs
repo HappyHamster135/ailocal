@@ -30,7 +30,7 @@ public sealed class FallbackChatProvider
     {
         var errors = new List<string>();
 
-        foreach (var provider in BuildChain(request.ProviderOrder))
+        foreach (var provider in BuildChain(request))
         {
             if (IsCoolingDown(provider.Name))
             {
@@ -76,7 +76,7 @@ public sealed class FallbackChatProvider
     {
         var errors = new List<string>();
 
-        foreach (var provider in BuildChain(request.ProviderOrder))
+        foreach (var provider in BuildChain(request))
         {
             if (IsCoolingDown(provider.Name))
             {
@@ -177,15 +177,27 @@ public sealed class FallbackChatProvider
         }
     }
 
-    private IReadOnlyList<IChatProvider> BuildChain(IReadOnlyCollection<string>? overrideOrder)
+    private IReadOnlyList<IChatProvider> BuildChain(ChatRequest request)
     {
-        var names = overrideOrder is { Count: > 0 }
-            ? overrideOrder
+        var names = request.ProviderOrder is { Count: > 0 }
+            ? request.ProviderOrder
             : _settings.Priority;
 
-        var chain = names
+        var ordered = names
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // A preferred provider (set by the task router) goes first, then the
+        // configured order as backup - so a writing task hits ChatGPT but still
+        // degrades to Claude/Ollama if OpenAI is down.
+        if (!string.IsNullOrWhiteSpace(request.PreferredProvider) &&
+            !ordered.Contains(request.PreferredProvider, StringComparer.OrdinalIgnoreCase))
+        {
+            ordered.Insert(0, request.PreferredProvider);
+        }
+
+        var chain = ordered
             .Select(n => _providers.TryGetValue(n, out var provider) ? provider : null)
             .OfType<IChatProvider>()
             .ToList();

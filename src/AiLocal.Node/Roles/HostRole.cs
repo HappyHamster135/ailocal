@@ -1358,14 +1358,19 @@ public static class HostRole
         IHttpClientFactory httpFactory, TaskStreamHub streamHub, CancellationToken ct)
     {
         // No explicit model hint from the operator (or the assignment
-        // request): pick one from this Worker's per-complexity tiers so a
-        // trivial task doesn't burn the most expensive model. The planner
-        // already scored the task 1-5, so we lean on that instead of
-        // always defaulting to claude-opus.
-        var model = modelHint
-            ?? worker.ModelTiers.ForComplexity(task.Complexity ?? 3)
-            ?? "claude-opus-4-8";
-        var chat = new ChatRequest { System = task.System, ModelHint = model, ProviderOrder = providerOrder };
+        // request): pick a (provider, model) for this task from the Worker's
+        // per-skill tiers, so a writing task goes to ChatGPT, coding to Claude,
+        // private/data to a local Ollama model, etc. - multiple models
+        // collaborating on the goal instead of everything hitting one provider.
+        var (provider, tieredModel) = worker.ModelTiers.ForTask(task.RequiredSkill, task.Complexity ?? 3);
+        var model = modelHint ?? tieredModel;
+        var chat = new ChatRequest
+        {
+            System = task.System,
+            ModelHint = model,
+            PreferredProvider = provider,
+            ProviderOrder = providerOrder
+        };
         if (task.ContextMessages is { Count: > 0 } context)
             chat.Messages.AddRange(context);
         chat.Messages.Add(new ChatMessage("user", task.Prompt));
