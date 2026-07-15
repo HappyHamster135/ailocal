@@ -12,6 +12,7 @@ internal sealed class PersistedHostState
     public List<string> BlockedNodeIds { get; set; } = [];
     public List<AgentTask> Tasks { get; set; } = [];
     public List<ConversationEntry> Messages { get; set; } = [];
+    public List<HostNotice> Notices { get; set; } = [];
     public DateTimeOffset SavedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -88,6 +89,21 @@ public sealed class HostStateStore
         lock (_gate)
         {
             _state.Messages = [.. messages];
+            SaveLocked();
+        }
+    }
+
+    public IReadOnlyList<HostNotice> ReadNotices()
+    {
+        lock (_gate)
+            return [.. _state.Notices];
+    }
+
+    public void SaveNotices(IEnumerable<HostNotice> notices)
+    {
+        lock (_gate)
+        {
+            _state.Notices = [.. notices];
             SaveLocked();
         }
     }

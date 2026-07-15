@@ -1472,6 +1472,16 @@ internal static class Dashboard
                   <div class="small" style="margin-bottom:6px">Varje uppgift körs som en roll: systemprompt + modellval. "Anställda" lämnar över kontext på en delad anteckningsyta.</div>
                   <div class="task-list" id="rolesList"><div class="small" style="opacity:.6">Laddar roller...</div></div>
                 </section>
+                <section class="detail-section">
+                  <div class="panel-title" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                    <span>Notiser</span>
+                    <span>
+                      <label class="check-field" style="margin-right:8px"><input type="checkbox" id="noticeSound"> ljud</label>
+                      <button class="btn ghost sm" id="clearNoticesBtn" type="button">Rensa</button>
+                    </span>
+                  </div>
+                  <div class="task-list" id="noticesList"><div class="small" style="opacity:.6">Inga notiser.</div></div>
+                </section>
               </div>
             </div>
           </aside>
@@ -1944,10 +1954,8 @@ internal static class Dashboard
             </section>
             <section class="settings-pane hidden" data-settings-pane="notifications">
               <div class="form-grid">
-                <label class="check-field wide"><input type="checkbox" disabled> Notis när ett jobb blir klart <span class="soon">Kommer</span></label>
+                <div class="small">Notiser visas live i panelen <strong>Notiser</strong> (till höger i översikten): mål klart, mål misslyckades, behöver dig (t.ex. pausat utan workers), och worker nere. Ljud-toggle finns i den panelen.</div>
                 <label class="check-field wide"><input type="checkbox" disabled> Notis när en filändring väntar på godkännande <span class="soon">Kommer</span></label>
-                <label class="check-field wide"><input type="checkbox" disabled> Notis när en Worker tappar kontakten <span class="soon">Kommer</span></label>
-                <label class="check-field wide"><input type="checkbox" disabled> Ljud vid notiser <span class="soon">Kommer</span></label>
               </div>
             </section>
             <section class="settings-pane hidden" data-settings-pane="advanced">
@@ -3495,6 +3503,44 @@ internal static class Dashboard
               <div class="small">${esc(trunc(r.systemPrompt, 90))}</div>
             </div>`).join('');
           } catch { /* roles panel is best-effort */ }
+        }
+
+        const noticeLabels = { TaskDone: 'Klart', TaskFailed: 'Misslyckades', NeedsYou: 'Behöver dig', WorkerDown: 'Worker nere' };
+        let lastNoticeAt = null;
+        async function renderNotices() {
+          try {
+            const notices = await fetchJson('/api/notices');
+            const el = $('noticesList');
+            if (!el) return;
+            if (!notices.length) { el.innerHTML = '<div class="small" style="opacity:.6">Inga notiser.</div>'; return; }
+            // Beep once when a brand-new notice arrives (and sound is enabled).
+            const newest = notices.length ? notices[0].at : null;
+            if (newest && lastNoticeAt && newest > lastNoticeAt && $('noticeSound').checked) playNoticeSound();
+            if (newest) lastNoticeAt = newest;
+            el.innerHTML = notices.slice(0, 30).map(n => {
+              const label = noticeLabels[n.type] || n.type;
+              const when = n.at ? new Date(n.at).toLocaleString() : '';
+              return `<div class="node">
+                <div class="node-main"><span class="pill ${n.type === 'WorkerDown' || n.type === 'TaskFailed' ? 'bad' : 'good'}">${esc(label)}</span>${n.refId ? `<span class="mono small">${esc(n.refId)}</span>` : ''}</div>
+                <div class="small">${esc(n.message)}</div>
+                <div class="small" style="opacity:.5">${esc(when)}</div>
+              </div>`;
+            }).join('');
+          } catch { /* notices panel is best-effort */ }
+        }
+
+        function playNoticeSound() {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 660; osc.type = 'sine';
+            gain.gain.setValueAtTime(0.001, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+            osc.start(); osc.stop(ctx.currentTime + 0.26);
+          } catch { /* audio is best-effort */ }
         }
 
         async function cancelTask(id) {
@@ -5064,12 +5110,19 @@ internal static class Dashboard
         initIcons();
         const refreshIsolationBtn = $('refreshIsolationBtn');
         if (refreshIsolationBtn) refreshIsolationBtn.onclick = () => refreshIsolation();
+        const clearNoticesBtn = $('clearNoticesBtn');
+        if (clearNoticesBtn) clearNoticesBtn.onclick = async () => {
+          try { await fetch('/api/notices', { method: 'DELETE', headers: authHeaders() }); await renderNotices(); }
+          catch (e) { showGlobalNotice(e.message, true); }
+        };
 
         loadProviders();
         refresh();
         setInterval(refresh, 3000);
         refreshIsolation();
         renderRoles();
+        renderNotices();
+        setInterval(renderNotices, 5000);
       </script>
     </body>
     </html>

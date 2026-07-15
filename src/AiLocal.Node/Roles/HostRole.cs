@@ -645,6 +645,14 @@ public static class HostRole
             return Results.Ok(roles);
         });
 
+        // Operator notices (goal done / failed / needs you / worker down).
+        app.MapGet("/api/notices", () => Results.Ok(NoticeBoard.All().OrderByDescending(n => n.At)));
+        app.MapDelete("/api/notices", () =>
+        {
+            NoticeBoard.Clear();
+            return Results.Ok(new { cleared = true });
+        });
+
         app.MapGet("/tasks/{id}", (string id, TaskBoard board) =>
             board.Get(id) is { } task ? Results.Ok(task) : Results.NotFound());
 
@@ -921,6 +929,11 @@ public static class HostRole
 
         ScheduleApi.MapEndpoints(app);
 
+        // Bind the operator notice board to durable host state up front so the
+        // static dispatch methods can fire events (goal done / worker down) that
+        // survive a restart.
+        NoticeBoard.Bind(app.Services.GetRequiredService<HostStateStore>());
+
         // Resume in-flight goals interrupted by a Host restart. They were
         // marked Paused (not Failed) in the TaskBoard constructor, so the
         // company keeps its work - we just re-plan and re-dispatch them.
@@ -940,6 +953,18 @@ public static class HostRole
                 var cancellationRegistry = app.Services.GetRequiredService<TaskCancellationRegistry>();
                 var settings = app.Services.GetRequiredService<NodeSettings>();
                 var log = app.Services.GetRequiredService<ILogger<TaskBoard>>();
+
+                if (reg.AvailableWorkers().Count == 0)
+                {
+                    // Inga workers att ateruppta pa - foretaget ar "oppet" men
+                    // ingen ar inloggad. S ag operatoren att dessa mal vantar,
+                    // och lamna dem Paused for manuell/auto-aterupptagning nar
+                    // en worker kopplar upp sig.
+                    foreach (var root in interrupted)
+                        NoticeBoard.Add(NoticeType.NeedsYou,
+                            $"Mål pausat efter omstart - inga workers anslutna. Återuppta när en worker är online: {root.Prompt}", root.Id);
+                    return;
+                }
 
                 foreach (var root in interrupted)
                 {
@@ -1657,6 +1682,8 @@ public static class HostRole
             RecordHealth(worker, success: false, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
             log.LogWarning("dispatch failed: {Message}{Unreachable}", ex.Message,
                 nodeUnreachable ? $" (worker {worker.Name} unreachable - flagged offline)" : "");
+            if (nodeUnreachable)
+                NoticeBoard.Add(NoticeType.WorkerDown, $"Worker '{worker.Name}' svarar inte - flaggad offline. Uppgifter omdirigeras när den kommer tillbaka.", worker.Id);
         }
         finally
         {
@@ -1868,6 +1895,7 @@ public static class HostRole
                     .Where(c => c.State is TaskState.Failed or TaskState.Cancelled)
                     .Select(c => $"{c.Title ?? c.Id}: {c.Error ?? c.State.ToString()}"));
                 board.Save();
+                NoticeBoard.Add(NoticeType.TaskFailed, $"Mål misslyckades: {parent.Prompt}", parent.Id);
                 return;
             }
 
@@ -1875,6 +1903,7 @@ public static class HostRole
                 .Where(c => c.State is TaskState.Failed or TaskState.Cancelled)
                 .Select(c => $"{c.Title ?? c.Id}: {c.Error ?? c.State.ToString()}"));
             log.LogWarning("goal {TaskId} partially failed - delivering completed subtasks", parent.Id);
+            NoticeBoard.Add(NoticeType.TaskDone, $"Mål delvis klart (vissa delar misslyckades): {parent.Prompt}", parent.Id);
         }
 
         var usableChildren = children.Where(c => c.State != TaskState.Cancelled).ToList();
@@ -1937,6 +1966,7 @@ public static class HostRole
             "parent task {TaskId} completed from {Count} subtasks",
             parent.Id,
             children.Count);
+        NoticeBoard.Add(NoticeType.TaskDone, $"Mål klart: {parent.Prompt}", parent.Id);
 
         parent.CompletedAt = DateTimeOffset.UtcNow;
         board.Save();
