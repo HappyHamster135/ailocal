@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -92,51 +93,50 @@ public static class SelfUpdater
         if (release is null)
             return new UpdateApplyResult(false, fetchError ?? "Kunde inte hämta senaste versionen från GitHub.");
 
-        var asset = MatchingAsset(release);
-        if (asset is null)
+        var exeDir = Path.GetDirectoryName(exePath)!;
+        var updates = CollectUpdates(release, exeDir);
+        if (updates.Count == 0)
             return new UpdateApplyResult(false, "Hittade ingen matchande fil i senaste GitHub-releasen.");
 
-        var exeName = Path.GetFileName(exePath);
-        var exeDir = Path.GetDirectoryName(exePath)!;
-        var newPath = Path.Combine(exeDir, exeName + ".new");
-
+        // Download every binary in the package to a .new next to it, so the
+        // swap below is atomic per file and the whole release lands together.
         long totalBytes = 0;
+        var downloaded = new List<(string CurrentPath, string NewPath, GitHubAssetDto Asset)>();
         try
         {
             var client = httpFactory.CreateClient("github");
-            using var response = await client.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
-            totalBytes = response.Content.Headers.ContentLength ?? 0;
-            Current = new UpdateProgress("downloading", 0, totalBytes);
-
-            const int BufferSize = 64 * 1024;
-            var buffer = new byte[BufferSize];
-            await using (var fileStream = File.Create(newPath))
-            await using (var httpStream = await response.Content.ReadAsStreamAsync(ct))
+            foreach (var (currentPath, asset) in updates)
             {
-                long downloadedBytes = 0;
-                int read;
-                while ((read = await httpStream.ReadAsync(buffer, ct)) > 0)
+                var newPath = currentPath + ".new";
+                using var response = await client.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+                response.EnsureSuccessStatusCode();
+                totalBytes += response.Content.Headers.ContentLength ?? 0;
+
+                const int BufferSize = 64 * 1024;
+                var buffer = new byte[BufferSize];
+                await using (var fileStream = File.Create(newPath))
+                await using (var httpStream = await response.Content.ReadAsStreamAsync(ct))
                 {
-                    await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
-                    downloadedBytes += read;
-                    Current = new UpdateProgress("downloading", downloadedBytes, totalBytes);
+                    long downloadedBytes = 0;
+                    int read;
+                    while ((read = await httpStream.ReadAsync(buffer, ct)) > 0)
+                    {
+                        await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                        downloadedBytes += read;
+                        Current = new UpdateProgress("downloading", downloadedBytes, totalBytes);
+                    }
                 }
+                var info = new FileInfo(newPath);
+                if (!info.Exists || info.Length < MinPlausibleExeBytes)
+                    throw new InvalidOperationException($"Nedladdad fil {asset.Name} ser inte korrekt ut (för liten).");
+                downloaded.Add((currentPath, newPath, asset));
             }
         }
         catch (Exception ex)
         {
-            TryDelete(newPath);
+            foreach (var (_, newPath, _) in downloaded) TryDelete(newPath);
             Current = new UpdateProgress("error", 0, 0, ex.Message);
             return new UpdateApplyResult(false, $"Nedladdning misslyckades: {ex.Message}");
-        }
-
-        var downloaded = new FileInfo(newPath);
-        if (!downloaded.Exists || downloaded.Length < MinPlausibleExeBytes)
-        {
-            TryDelete(newPath);
-            Current = new UpdateProgress("error", 0, 0, "Den nedladdade filen ser inte korrekt ut (för liten).");
-            return new UpdateApplyResult(false, "Den nedladdade filen ser inte korrekt ut (för liten).");
         }
 
         Current = new UpdateProgress("installing", totalBytes, totalBytes);
@@ -144,11 +144,11 @@ public static class SelfUpdater
         string scriptPath;
         try
         {
-            scriptPath = WriteSwapScript(exeDir, exeName);
+            scriptPath = WriteSwapScript(exeDir, downloaded, currentExe: exePath);
         }
         catch (Exception ex)
         {
-            TryDelete(newPath);
+            foreach (var (_, newPath, _) in downloaded) TryDelete(newPath);
             Current = new UpdateProgress("error", 0, 0, ex.Message);
             return new UpdateApplyResult(false, $"Kunde inte förbereda omstarten: {ex.Message}");
         }
@@ -212,6 +212,28 @@ public static class SelfUpdater
         return release.Assets?.FirstOrDefault(a => string.Equals(a.Name, exeName, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Every .exe sitting next to the one currently running that also
+    /// exists as an asset in the latest release - i.e. the full self-contained
+    /// package (ailocal.exe + ailocal-app.exe), not just the single binary the
+    /// user launched. A "real" updater swaps all of them in one pass so the
+    /// launcher and the node never drift onto different versions.</summary>
+    internal static List<(string ExePath, GitHubAssetDto Asset)> CollectUpdates(GitHubReleaseDto release, string exeDir)
+    {
+        var result = new List<(string, GitHubAssetDto)>();
+        if (release.Assets is null || !Directory.Exists(exeDir))
+            return result;
+
+        foreach (var file in Directory.EnumerateFiles(exeDir, "*.exe"))
+        {
+            var name = Path.GetFileName(file);
+            var asset = release.Assets.FirstOrDefault(a =>
+                string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (asset is not null)
+                result.Add((file, asset));
+        }
+        return result;
+    }
+
     private static void TryDelete(string path)
     {
         try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort */ }
@@ -225,52 +247,55 @@ public static class SelfUpdater
     /// download into its place, relaunches with the original arguments, then
     /// best-effort cleans up the renamed original and itself.
     /// </summary>
-    private static string WriteSwapScript(string exeDir, string exeName)
+    private static string WriteSwapScript(
+        string exeDir,
+        IReadOnlyList<(string CurrentPath, string NewPath, GitHubAssetDto Asset)> downloaded,
+        string currentExe)
     {
-        var exePath = Path.Combine(exeDir, exeName);
-        var newPath = exePath + ".new";
-        var oldPath = exePath + ".old";
         var logPath = Path.Combine(exeDir, "update.log");
         var relaunchArgs = string.Join(' ', Environment.GetCommandLineArgs().Skip(1).Select(QuoteArg));
         var scriptPath = Path.Combine(Path.GetTempPath(), $"ailocal-update-{Guid.NewGuid():N}.cmd");
 
-        var script = $"""
+        // Build a rename+swap block per binary so the whole package updates
+        // together: each running exe is moved to .old, each verified .new is
+        // moved into its place, and on any failure we jump to :done (don't
+        // half-swap the package - leave the rest for the next update attempt).
+        var swaps = new StringBuilder();
+        var cleanups = new StringBuilder();
+        foreach (var (currentPath, newPath, _) in downloaded)
+        {
+            var oldPath = currentPath + ".old";
+            var loopLabel = "renameLoop_" + Guid.NewGuid().ToString("N")[..12];
+            swaps.AppendLine($"if exist \"{oldPath}\" del /f /q \"{oldPath}\" >nul 2>&1");
+            swaps.AppendLine("set RETRIES=0");
+            swaps.AppendLine($":{loopLabel}");
+            swaps.AppendLine($"move /y \"{currentPath}\" \"{oldPath}\" >nul 2>&1");
+            swaps.AppendLine($"if exist \"{currentPath}\" (");
+            swaps.AppendLine("  set /a RETRIES+=1");
+            swaps.AppendLine("  if %RETRIES% GEQ 30 (");
+            swaps.AppendLine($"    echo [%date% %time%] update: gave up renaming \"{currentPath}\" >> \"{logPath}\"");
+            swaps.AppendLine("    goto :done");
+            swaps.AppendLine("  )");
+            swaps.AppendLine("  ping -n 2 127.0.0.1 >nul");
+            swaps.AppendLine($"  goto :{loopLabel}");
+            swaps.AppendLine(")");
+            swaps.AppendLine($"move /y \"{newPath}\" \"{currentPath}\" >nul 2>&1");
+            swaps.AppendLine($"if not exist \"{currentPath}\" (");
+            swaps.AppendLine($"  echo [%date% %time%] update: \"{currentPath}\" missing after move, restoring >> \"{logPath}\"");
+            swaps.AppendLine($"  move /y \"{oldPath}\" \"{currentPath}\" >nul 2>&1");
+            swaps.AppendLine("  goto :done");
+            swaps.AppendLine(")");
+            cleanups.AppendLine($"if exist \"{oldPath}\" del /f /q \"{oldPath}\" >nul 2>&1");
+        }
+
+        var script = $$"""
             @echo off
-            echo [%date% %time%] update: renaming current exe out of the way >> "{logPath}"
-            if exist "{oldPath}" del /f /q "{oldPath}" >nul 2>&1
-            set RETRIES=0
-            :renameLoop
-            move /y "{exePath}" "{oldPath}" >nul 2>&1
-            if exist "{exePath}" (
-              set /a RETRIES+=1
-              if %RETRIES% GEQ 30 (
-                echo [%date% %time%] update: gave up waiting to rename the running exe >> "{logPath}"
-                goto :cleanup
-              )
-              ping -n 2 127.0.0.1 >nul
-              goto :renameLoop
-            )
-            move /y "{newPath}" "{exePath}" >nul 2>&1
-            if not exist "{exePath}" (
-              echo [%date% %time%] update: new exe missing after move, restoring old >> "{logPath}"
-              move /y "{oldPath}" "{exePath}" >nul 2>&1
-              goto :cleanup
-            )
-            echo [%date% %time%] update: swapped ok, relaunching >> "{logPath}"
-            start "" "{exePath}" {relaunchArgs}
-            :cleanup
-            set DRETRIES=0
-            :deleteLoop
-            if exist "{oldPath}" (
-              del /f /q "{oldPath}" >nul 2>&1
-              if exist "{oldPath}" (
-                set /a DRETRIES+=1
-                if %DRETRIES% LSS 10 (
-                  ping -n 2 127.0.0.1 >nul
-                  goto :deleteLoop
-                )
-              )
-            )
+            echo [%date% %time%] update: swapping {{downloaded.Count}} binary/ies >> "{{logPath}}"
+            {{swaps}}
+            echo [%date% %time%] update: swapped ok, relaunching >> "{{logPath}}"
+            start "" "{{currentExe}}" {{relaunchArgs}}
+            :done
+            {{cleanups}}
             (goto) 2>nul & del "%~f0"
             """;
 
