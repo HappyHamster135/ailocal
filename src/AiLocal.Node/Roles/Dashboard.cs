@@ -113,7 +113,7 @@ internal static class Dashboard
         .app {
           min-height: 100%;
           display: grid;
-          grid-template-rows: auto auto auto 1fr auto;
+          grid-template-rows: auto auto 1fr auto;
         }
         .statusbar {
           height: 30px;
@@ -191,21 +191,18 @@ internal static class Dashboard
         .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
         .dot.ok { background: var(--ok); }
         .dot.bad { background: var(--bad); }
-        .viewbar {
-          min-height: 44px;
-          padding: 6px 14px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          border-bottom: 1px solid var(--line);
-          background: var(--surface);
-        }
         .view-tab {
-          min-height: 32px;
-          padding: 0 14px;
-          font-weight: 680;
+          min-height: 34px;
+          padding: 0 10px;
+          font-weight: 640;
+          font-size: 13px;
           background: transparent;
           border-color: transparent;
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 8px;
+          width: 100%;
         }
         .view-tab.active {
           color: var(--accent);
@@ -213,9 +210,97 @@ internal static class Dashboard
           border-color: var(--line);
         }
         .hidden { display: none !important; }
+        .shell {
+          display: grid;
+          grid-template-columns: 260px 1fr;
+          min-height: 0;
+          overflow: hidden;
+        }
+        .sidebar {
+          display: grid;
+          grid-template-rows: auto auto auto 1fr;
+          min-height: 0;
+          overflow: hidden;
+          border-right: 1px solid var(--line);
+          background: var(--surface);
+        }
+        .sidebar-nav { padding: 10px; display: grid; gap: 3px; }
+        .sidebar-section { padding: 10px; border-top: 1px solid var(--line); min-height: 0; }
+        .sidebar-section-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .new-session-form { display: grid; gap: 8px; margin-top: 8px; }
+        .new-session-form input { min-height: 32px; padding: 0 9px; font-size: 13px; }
+        .new-session-form .composer-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 0; background: none; border: none; }
+        #sessionSearchInput { width: 100%; min-height: 32px; padding: 0 9px; font-size: 13px; }
+        .sessions-list {
+          overflow-y: auto;
+          min-height: 0;
+          padding: 6px 4px 10px;
+          display: grid;
+          gap: 2px;
+          align-content: start;
+        }
+        .session-group-label {
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: .05em;
+          color: var(--muted);
+          padding: 10px 6px 4px;
+        }
+        .session-item {
+          border-radius: 7px;
+          padding: 6px;
+          border: 1px solid transparent;
+          cursor: pointer;
+        }
+        .session-item:hover { background: var(--surface-soft); }
+        .session-item.active { background: var(--surface-selected); border-color: var(--line); }
+        .session-item-row { display: flex; align-items: center; gap: 4px; }
+        .session-item-title {
+          flex: 1 1 auto;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-weight: 610;
+          font-size: 13px;
+        }
+        .session-item-meta {
+          margin-left: 26px;
+          font-size: 11px;
+          color: var(--muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .icon-mini {
+          width: 22px;
+          height: 22px;
+          min-height: 22px;
+          padding: 0;
+          border: none;
+          background: transparent;
+          font-size: 12px;
+          border-radius: 5px;
+          flex: 0 0 auto;
+        }
+        .icon-mini:hover { background: var(--surface-2); }
+        .views { min-height: 0; overflow: hidden; display: grid; }
+        .chat-only-workspace {
+          display: flex;
+          justify-content: center;
+          padding: 14px;
+          min-height: 0;
+          min-width: 0;
+        }
+        .chat-only-workspace .chat-panel { width: 100%; max-width: 860px; }
         .workspace {
           display: grid;
-          grid-template-columns: 280px minmax(360px, 1fr) 320px;
+          grid-template-columns: 300px 1fr;
           gap: 14px;
           padding: 14px;
           min-height: 0;
@@ -609,9 +694,11 @@ internal static class Dashboard
           .role-btn { padding: 0 8px; }
           .status-line { min-width: 0; width: 100%; justify-content: flex-start; }
           .workspace { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
-          .viewbar { padding: 6px 8px; }
           .topology-workspace { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
           .schedules-workspace { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
+          .shell { grid-template-columns: minmax(0, 1fr); }
+          .sidebar { border-right: none; border-bottom: 1px solid var(--line); max-height: 46vh; }
+          .chat-only-workspace { padding: 8px; }
           .topology-scroll { min-height: 620px; }
           .topology-detail { min-height: 320px; }
           .side, .inspector { min-height: 280px; }
@@ -657,12 +744,35 @@ internal static class Dashboard
           <div class="notice" id="updateBanner" style="margin-top:10px"></div>
         </div>
 
-        <nav class="viewbar" aria-label="Vyer">
-          <button class="view-tab active" data-view="work">Arbete</button>
-          <button class="view-tab" data-view="network">Nätverk</button>
-          <button class="view-tab" data-view="schedules">Schema</button>
-        </nav>
-
+        <div class="shell">
+          <aside class="sidebar" id="appSidebar">
+            <nav class="sidebar-nav" aria-label="Vyer">
+              <button class="view-tab active" data-view="work">🖥 Kluster</button>
+              <button class="view-tab" data-view="network">🌐 Nätverk</button>
+              <button class="view-tab" data-view="schedules">🕒 Schema</button>
+              <button class="view-tab" data-view="delegate" id="delegateNavBtn">🚀 Delegera till kluster</button>
+            </nav>
+            <div class="sidebar-section">
+              <div class="sidebar-section-head">
+                <div class="panel-title">Sessioner</div>
+                <button class="icon" id="newSessionToggleBtn" title="Ny session">+</button>
+              </div>
+              <div class="new-session-form hidden" id="newSessionForm">
+                <div class="notice" id="newSessionNotice"></div>
+                <input id="newSessionFolderPath" placeholder="Mappsökväg, t.ex. C:\projekt\mitt-projekt">
+                <input id="newSessionTitle" placeholder="Namn (valfritt)">
+                <div class="composer-actions">
+                  <button id="newSessionCancelBtn">Avbryt</button>
+                  <button class="primary" id="newSessionCreateBtn">Skapa</button>
+                </div>
+              </div>
+            </div>
+            <div class="sidebar-section">
+              <input id="sessionSearchInput" placeholder="Sök sessioner...">
+            </div>
+            <div class="sessions-list" id="sessionsList"></div>
+          </aside>
+          <div class="views">
         <main class="workspace" id="workView">
           <aside class="panel side">
             <div class="panel-head">
@@ -693,38 +803,6 @@ internal static class Dashboard
               </div>
             </div>
           </aside>
-
-          <section class="panel chat-panel">
-            <div class="chat-head">
-              <div>
-                <div class="chat-title">Meddelanden</div>
-                <div class="small" id="chatSub">Host och Overseer kan skicka mål här.</div>
-              </div>
-              <span class="pill" id="providerSummary">Local</span>
-            </div>
-            <div class="messages" id="messages"></div>
-            <div class="composer" id="composer">
-              <div class="notice" id="composerNotice"></div>
-              <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
-              <div class="composer-actions">
-                <div class="inline-fields">
-                  <label class="small" for="parallelism">Parallellitet</label>
-                  <input id="parallelism" type="number" min="1" max="32" value="4">
-                </div>
-                <label class="small" for="modelSelect">Modell</label>
-                <select id="modelSelect" title="Vilken modell Hosten anvander - 'Auto' valjer efter uppgiftens komplexitet sa du inte alltid betalar for den dyraste.">
-                  <option value="">Auto (efter komplexitet)</option>
-                  <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
-                  <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
-                  <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
-                </select>
-                <label class="check-field" title="Skickar till en Worker med agentlage påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istallet för ett vanligt engangssvar.">
-                  <input id="assignmentMode" type="checkbox"> Assignment (agentlage)
-                </label>
-                <button class="primary" id="sendBtn">Skicka</button>
-              </div>
-            </div>
-          </section>
 
           <aside class="panel inspector">
             <div class="panel-head">
@@ -759,6 +837,66 @@ internal static class Dashboard
               </div>
             </div>
           </aside>
+        </main>
+
+        <main class="chat-only-workspace hidden" id="delegateView">
+          <section class="panel chat-panel">
+            <div class="chat-head">
+              <div>
+                <div class="chat-title">Meddelanden</div>
+                <div class="small" id="chatSub">Host och Overseer kan skicka mål här.</div>
+              </div>
+              <span class="pill" id="providerSummary">Local</span>
+            </div>
+            <div class="messages" id="messages"></div>
+            <div class="composer" id="composer">
+              <div class="notice" id="composerNotice"></div>
+              <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
+              <div class="composer-actions">
+                <div class="inline-fields">
+                  <label class="small" for="parallelism">Parallellitet</label>
+                  <input id="parallelism" type="number" min="1" max="32" value="4">
+                </div>
+                <label class="small" for="modelSelect">Modell</label>
+                <select id="modelSelect" title="Vilken modell Hosten anvander - 'Auto' valjer efter uppgiftens komplexitet sa du inte alltid betalar for den dyraste.">
+                  <option value="">Auto (efter komplexitet)</option>
+                  <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
+                  <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
+                  <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
+                </select>
+                <label class="check-field" title="Skickar till en Worker med agentlage påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istallet för ett vanligt engangssvar.">
+                  <input id="assignmentMode" type="checkbox"> Assignment (agentlage)
+                </label>
+                <button class="primary" id="sendBtn">Skicka</button>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <main class="chat-only-workspace hidden" id="sessionView">
+          <section class="panel chat-panel">
+            <div class="chat-head">
+              <div>
+                <div class="chat-title" id="sessionTitle">Session</div>
+                <div class="small mono" id="sessionFolderPath"></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="pill" id="sessionUsagePill"></span>
+                <button class="icon" id="sessionPinBtn" title="Nåla">📍</button>
+                <button class="icon" id="sessionDeleteBtn" title="Ta bort session">🗑</button>
+              </div>
+            </div>
+            <div class="messages" id="sessionMessages"></div>
+            <div class="composer" id="sessionComposer">
+              <div class="notice" id="sessionNotice"></div>
+              <textarea id="sessionPrompt" placeholder="Skriv ett meddelande till agenten i den här mappen"></textarea>
+              <div class="composer-actions">
+                <span class="small" id="sessionRunningIndicator"></span>
+                <button id="sessionCancelBtn" style="display:none">Avbryt</button>
+                <button class="primary" id="sessionSendBtn">Skicka</button>
+              </div>
+            </div>
+          </section>
         </main>
 
         <main class="topology-workspace hidden" id="networkView">
@@ -837,6 +975,8 @@ internal static class Dashboard
             </div>
           </aside>
         </main>
+          </div>
+        </div>
         <footer class="statusbar">
           <div class="statusbar-left">
             <span class="dot" id="statusGatewayDot"></span>
@@ -849,6 +989,7 @@ internal static class Dashboard
             <span id="statusCronCount"></span>
           </div>
           <div class="statusbar-right">
+            <span id="statusSessionTokens" class="mono"></span>
             <span id="statusCost" class="mono"></span>
             <span class="statusbar-sep">|</span>
             <span id="statusVersion" class="mono"></span>
@@ -1059,7 +1200,19 @@ internal static class Dashboard
           // them mid-install even while btn.disabled was set directly on the
           // (about-to-be-discarded) DOM node - inviting a duplicate click on
           // an operation the UI already says can "take several minutes".
-          nodeBusyAction: null
+          nodeBusyAction: null,
+          sessions: [],
+          activeSessionId: null,
+          activeSession: null,
+          // Optimistic user turn + live-updating assistant turn for the
+          // session currently running - cleared and replaced by the real
+          // persisted history (a fresh GET) once the run succeeds, same
+          // "don't trust the client's own guess once the server truth is
+          // available" approach renderMessages() uses for streaming chat.
+          sessionLiveMessages: [],
+          sessionSearch: '',
+          newSessionFormOpen: false,
+          activeSessionRuns: 0
         };
 
         const $ = id => document.getElementById(id);
@@ -1173,8 +1326,12 @@ internal static class Dashboard
               : `${local.role}`;
           $('quickstartBtn').style.display = local.role === 'Launcher' ? 'block' : 'none';
           // A Worker has no /api/chat endpoint - it receives dispatched work
-          // from a Host, it doesn't accept goals directly.
+          // from a Host, it doesn't accept goals directly. Sessions are
+          // unaffected (see #sessionComposer) - /api/sessions is local-only
+          // and every role has it.
           $('composer').style.display = local.role === 'Worker' ? 'none' : 'grid';
+          $('delegateNavBtn').style.display = local.role === 'Worker' ? 'none' : 'flex';
+          if (local.role === 'Worker' && state.activeView === 'delegate') switchView('work');
           renderInspector();
         }
 
@@ -1216,15 +1373,24 @@ internal static class Dashboard
 
           $('statusProjectName').textContent = state.local?.name ?? '';
 
-          const activeAgents = state.tasks.filter(t => {
+          // Both mechanisms count as "agents doing work right now" - a
+          // cluster-dispatched assignment (Host/Overseer "Delegera till
+          // kluster") and a session run are different plumbing for the same
+          // underlying AgentLoop, and hiding either one would make this
+          // figure lie about what's actually running.
+          const activeClusterTasks = state.tasks.filter(t => {
             const s = typeof t.state === 'number' ? stateName[t.state] : t.state;
             return cancellableStates.includes(s);
           }).length;
-          $('statusAgentsCount').textContent = `${activeAgents} agents`;
+          $('statusAgentsCount').textContent = `${activeClusterTasks + state.activeSessionRuns} agents`;
 
           const activeCron = state.schedules.filter(s => s.enabled).length;
           $('statusCronCount').textContent = `${activeCron} cron`;
 
+          const activeTokens = state.activeSession?.totalUsage
+            ? (state.activeSession.totalUsage.inputTokens || 0) + (state.activeSession.totalUsage.outputTokens || 0)
+            : 0;
+          $('statusSessionTokens').textContent = activeTokens ? `${activeTokens.toLocaleString('sv-SE')} tok |` : '';
           $('statusCost').textContent = state.stats ? (fmtUsd(state.stats.today.costUsd) || '$0.00') : '';
           $('statusVersion').textContent = state.updateInfo?.currentVersion ? `v${state.updateInfo.currentVersion}` : '';
         }
@@ -1405,11 +1571,327 @@ internal static class Dashboard
           });
         }
 
+        // ---- Sessions (folder-bound, resumable agent conversations) ----
+        // Local-only by design (see SessionApi's doc comment) - every call
+        // here hits THIS node's own /api/sessions, never a Host-mediated
+        // proxy, so there's no WorkerId to pick: whichever node's dashboard
+        // you're looking at is where the session runs.
+
+        function folderBaseName(path) {
+          const trimmed = (path || '').replace(/[\\/]+$/, '');
+          const parts = trimmed.split(/[\\/]/);
+          return parts[parts.length - 1] || path || '';
+        }
+
+        async function loadSessions() {
+          try {
+            state.sessions = await fetchJson('/api/sessions') ?? [];
+          } catch {
+            state.sessions = [];
+          }
+          renderSessions();
+        }
+
+        function sessionItemHtml(s) {
+          const active = state.activeSessionId === s.id ? 'active' : '';
+          return `
+          <div class="session-item ${active}">
+            <div class="session-item-row">
+              <button class="icon-mini" data-session-pin="${esc(s.id)}" title="${s.pinned ? 'Ta bort nål' : 'Nåla'}">${s.pinned ? '📌' : '📍'}</button>
+              <div class="session-item-title" data-session-open="${esc(s.id)}" title="${esc(s.title)}">${esc(s.title)}</div>
+              <button class="icon-mini" data-session-delete="${esc(s.id)}" title="Ta bort">✕</button>
+            </div>
+            <div class="session-item-meta" data-session-open="${esc(s.id)}">${esc(folderBaseName(s.folderPath))} · ${ago(s.lastActiveAt)}</div>
+          </div>`;
+        }
+
+        function renderSessions() {
+          const q = state.sessionSearch.trim().toLowerCase();
+          const filtered = !q ? state.sessions : state.sessions.filter(s =>
+            s.title.toLowerCase().includes(q) || s.folderPath.toLowerCase().includes(q));
+
+          const pinned = filtered.filter(s => s.pinned);
+          const rest = filtered.filter(s => !s.pinned);
+          const groups = new Map();
+          for (const s of rest) {
+            const key = folderBaseName(s.folderPath);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(s);
+          }
+
+          let html = '';
+          if (pinned.length) html += `<div class="session-group-label">Nålade</div>${pinned.map(sessionItemHtml).join('')}`;
+          for (const [group, items] of groups)
+            html += `<div class="session-group-label">${esc(group)}</div>${items.map(sessionItemHtml).join('')}`;
+
+          $('sessionsList').innerHTML = html || `<div class="empty" style="padding:14px">
+            ${q ? 'Inga sessioner matchar sökningen.' : 'Inga sessioner ännu - klicka + för att skapa en.'}</div>`;
+
+          document.querySelectorAll('[data-session-open]').forEach(el => {
+            el.onclick = () => openSession(el.dataset.sessionOpen);
+          });
+          document.querySelectorAll('[data-session-pin]').forEach(btn => {
+            btn.onclick = () => toggleSessionPin(btn.dataset.sessionPin);
+          });
+          document.querySelectorAll('[data-session-delete]').forEach(btn => {
+            btn.onclick = () => deleteSession(btn.dataset.sessionDelete);
+          });
+        }
+
+        async function openSession(id) {
+          try {
+            const session = await fetchJson(`/api/sessions/${id}`);
+            state.activeSessionId = id;
+            state.activeSession = session;
+            state.sessionLiveMessages = [];
+            switchView('session');
+            renderSessions();
+            renderSessionView();
+          } catch (error) {
+            showGlobalNotice(error.message, true);
+          }
+        }
+
+        function renderSessionView() {
+          const s = state.activeSession;
+          if (!s) return;
+          $('sessionTitle').textContent = s.title;
+          $('sessionFolderPath').textContent = s.folderPath;
+          $('sessionPinBtn').textContent = s.pinned ? '📌' : '📍';
+          $('sessionPinBtn').title = s.pinned ? 'Ta bort nål' : 'Nåla';
+          const usage = s.totalUsage;
+          const totalTokens = usage ? (usage.inputTokens || 0) + (usage.outputTokens || 0) : 0;
+          $('sessionUsagePill').textContent = totalTokens ? `${totalTokens.toLocaleString('sv-SE')} tokens` : '';
+          renderSessionMessages();
+        }
+
+        function persistedSessionMessageHtml(m) {
+          if (m.role === 'user')
+            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div>${esc(m.content)}</div></article>`;
+          if (m.role === 'tool')
+            return `<article class="message assistant">
+              <div class="message-meta"><span class="pill">✓ ${esc(m.toolName ?? 'verktyg')}</span></div>
+              <div class="mono small" style="white-space:pre-wrap">${esc(trunc(m.content ?? '', 2000))}</div>
+            </article>`;
+          const toolLines = (m.toolCalls ?? []).map(tc => `🔧 ${tc.name}(${trunc(tc.argumentsJson ?? '', 160)})`).join('\n');
+          const body = [toolLines, m.content].filter(Boolean).join('\n');
+          return `<article class="message assistant">
+            <div class="message-meta"><strong>AiLocal</strong></div>
+            <div>${body ? esc(body) : '<span class="small">...</span>'}</div>
+          </article>`;
+        }
+
+        function liveSessionBubbleHtml(m) {
+          if (m.role === 'user')
+            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div>${esc(m.content)}</div></article>`;
+          return `<article class="message assistant">
+            <div class="message-meta"><strong>AiLocal</strong>${m.state ? `<span>${esc(m.state)}</span>` : ''}</div>
+            <div>${esc(m.content)}</div>
+          </article>`;
+        }
+
+        function renderSessionMessages() {
+          const box = $('sessionMessages');
+          const persisted = state.activeSession?.messages ?? [];
+          const all = [...persisted.map(m => persistedSessionMessageHtml(m)), ...state.sessionLiveMessages.map(m => liveSessionBubbleHtml(m))];
+          if (!all.length) {
+            box.innerHTML = `<div class="empty">Inga meddelanden ännu i den här sessionen.</div>`;
+            return;
+          }
+          const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+          const previousScrollTop = box.scrollTop;
+          box.innerHTML = all.join('');
+          box.scrollTop = wasNearBottom ? box.scrollHeight : previousScrollTop;
+        }
+
+        function showSessionNotice(message, isError = false) {
+          const box = $('sessionNotice');
+          box.textContent = message;
+          box.className = `notice show ${isError ? 'bad' : ''}`;
+        }
+
+        async function sendSessionMessage() {
+          const id = state.activeSessionId;
+          const text = $('sessionPrompt').value.trim();
+          if (!text || !id) return;
+          $('sessionPrompt').value = '';
+          $('sessionSendBtn').disabled = true;
+          $('sessionCancelBtn').style.display = 'inline-flex';
+          $('sessionRunningIndicator').textContent = 'Kör...';
+          $('sessionNotice').className = 'notice';
+
+          const liveAssistant = { role: 'assistant', content: '', state: 'Running' };
+          state.sessionLiveMessages = [{ role: 'user', content: text }, liveAssistant];
+          renderSessionMessages();
+
+          const lines = [];
+          const appendLine = line => {
+            lines.push(line);
+            liveAssistant.content = lines.join('\n');
+            renderSessionMessages();
+          };
+
+          try {
+            const headers = { 'content-type': 'application/json' };
+            if (state.authToken) headers[AUTH_HEADER] = state.authToken;
+            const response = await fetch(`/api/sessions/${id}/run`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ message: text })
+            });
+
+            if (!response.ok || !response.body) {
+              let detail = `HTTP ${response.status}`;
+              try {
+                const errBody = await response.json();
+                detail = errBody?.detail || errBody?.error || errBody?.title || detail;
+              } catch { /* body wasn't JSON - keep the status-code message */ }
+              throw new Error(detail);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let success = false;
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              let sepIndex;
+              while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+                const frame = buffer.slice(0, sepIndex);
+                buffer = buffer.slice(sepIndex + 2);
+                const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
+                if (!dataLine) continue;
+                const payload = JSON.parse(dataLine.slice(5).trim());
+                if (payload.step) {
+                  appendLine(stepLine(payload.step));
+                } else if (payload.final) {
+                  success = !!payload.final.Success;
+                  liveAssistant.state = success ? 'Completed' : 'Failed';
+                  if (!lines.length) {
+                    appendLine(payload.final.FinalAnswer || (success ? '(inget svar)' : '(misslyckades)'));
+                  } else {
+                    renderSessionMessages();
+                  }
+                }
+              }
+            }
+
+            if (success) {
+              // Only a successful run is persisted server-side (see
+              // SessionApi) - refetch rather than trust the client's own
+              // optimistic copy, same reasoning as the plan-subtask flow.
+              state.activeSession = await fetchJson(`/api/sessions/${id}`);
+              state.sessionLiveMessages = [];
+              renderSessionView();
+              await loadSessions();
+            } else {
+              showSessionNotice('Körningen misslyckades - se meddelandet ovan.', true);
+            }
+          } catch (error) {
+            liveAssistant.state = 'Failed';
+            appendLine(`❌ ${error.message}`);
+            showSessionNotice(error.message, true);
+          } finally {
+            $('sessionSendBtn').disabled = false;
+            $('sessionCancelBtn').style.display = 'none';
+            $('sessionRunningIndicator').textContent = '';
+          }
+        }
+
+        async function cancelSessionRun() {
+          if (!state.activeSessionId) return;
+          try {
+            await fetchJson(`/api/sessions/${state.activeSessionId}/cancel`, { method: 'POST' });
+          } catch (error) {
+            showSessionNotice(error.message, true);
+          }
+        }
+
+        async function toggleSessionPin(id) {
+          const s = state.sessions.find(x => x.id === id);
+          if (!s) return;
+          try {
+            await fetchJson(`/api/sessions/${id}`, {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ pinned: !s.pinned })
+            });
+            await loadSessions();
+            if (state.activeSessionId === id) {
+              state.activeSession = await fetchJson(`/api/sessions/${id}`);
+              renderSessionView();
+            }
+          } catch (error) {
+            showGlobalNotice(error.message, true);
+          }
+        }
+
+        async function deleteSession(id) {
+          const s = state.sessions.find(x => x.id === id);
+          if (!window.confirm(`Ta bort sessionen "${s ? s.title : id}"? Historiken går inte att återställa (mappen och dess filer påverkas inte).`))
+            return;
+          try {
+            await fetchJson(`/api/sessions/${id}`, { method: 'DELETE' });
+            if (state.activeSessionId === id) {
+              state.activeSessionId = null;
+              state.activeSession = null;
+              switchView('work');
+            }
+            await loadSessions();
+          } catch (error) {
+            showGlobalNotice(error.message, true);
+          }
+        }
+
+        function toggleNewSessionForm(show) {
+          state.newSessionFormOpen = show ?? !state.newSessionFormOpen;
+          $('newSessionForm').classList.toggle('hidden', !state.newSessionFormOpen);
+          $('newSessionNotice').className = 'notice';
+          if (state.newSessionFormOpen) $('newSessionFolderPath').focus();
+        }
+
+        async function createSession() {
+          const folderPath = $('newSessionFolderPath').value.trim();
+          const title = $('newSessionTitle').value.trim();
+          if (!folderPath) {
+            $('newSessionNotice').textContent = 'Ange en mappsökväg.';
+            $('newSessionNotice').className = 'notice show bad';
+            return;
+          }
+          $('newSessionCreateBtn').disabled = true;
+          try {
+            const session = await fetchJson('/api/sessions', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ folderPath, title: title || null })
+            });
+            $('newSessionFolderPath').value = '';
+            $('newSessionTitle').value = '';
+            toggleNewSessionForm(false);
+            state.activeSessionId = session.id;
+            state.activeSession = session;
+            state.sessionLiveMessages = [];
+            switchView('session');
+            await loadSessions();
+            renderSessionView();
+          } catch (error) {
+            $('newSessionNotice').textContent = error.message;
+            $('newSessionNotice').className = 'notice show bad';
+          } finally {
+            $('newSessionCreateBtn').disabled = false;
+          }
+        }
+
+        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session'];
         function switchView(view) {
-          state.activeView = view === 'network' ? 'network' : view === 'schedules' ? 'schedules' : 'work';
+          state.activeView = knownViews.includes(view) ? view : 'work';
           $('workView').classList.toggle('hidden', state.activeView !== 'work');
           $('networkView').classList.toggle('hidden', state.activeView !== 'network');
           $('schedulesView').classList.toggle('hidden', state.activeView !== 'schedules');
+          $('delegateView').classList.toggle('hidden', state.activeView !== 'delegate');
+          $('sessionView').classList.toggle('hidden', state.activeView !== 'session');
           document.querySelectorAll('[data-view]').forEach(button => {
             button.classList.toggle('active', button.dataset.view === state.activeView);
           });
@@ -2170,7 +2652,7 @@ internal static class Dashboard
               renderHost();
             }
 
-            const [nodesResult, topologyResult, tasksResult, messagesResult, schedulesResult] =
+            const [nodesResult, topologyResult, tasksResult, messagesResult, schedulesResult, sessionsResult] =
               await Promise.allSettled([
                 fetchJson('/api/nodes'),
                 fetchJson('/api/topology'),
@@ -2179,7 +2661,11 @@ internal static class Dashboard
                 // Fetched here too (not just loadSchedules(), which only runs
                 // once the Schema tab is opened) so the status bar's cron
                 // count is accurate even if that tab is never visited.
-                fetchJson('/api/schedules')
+                fetchJson('/api/schedules'),
+                // Same reasoning as schedules above - the sidebar list (and
+                // the pin/lastActive state of whichever item is active) needs
+                // to stay live regardless of which view is open.
+                fetchJson('/api/sessions')
               ]);
 
             if (nodesResult.status === 'fulfilled')
@@ -2201,6 +2687,15 @@ internal static class Dashboard
 
             if (schedulesResult.status === 'fulfilled')
               state.schedules = schedulesResult.value ?? [];
+
+            if (sessionsResult.status === 'fulfilled')
+              state.sessions = sessionsResult.value ?? [];
+            renderSessions();
+
+            try {
+              const active = await fetchJson('/api/sessions/active-count');
+              state.activeSessionRuns = active?.count ?? 0;
+            } catch { state.activeSessionRuns = 0; }
 
             if (state.selectedNodeId) await loadWorkerTasks(state.selectedNodeId);
 
@@ -2995,6 +3490,27 @@ internal static class Dashboard
         });
         window.addEventListener('resize', () => {
           if (state.activeView === 'network') renderTopology();
+        });
+
+        $('newSessionToggleBtn').onclick = () => toggleNewSessionForm();
+        $('newSessionCancelBtn').onclick = () => toggleNewSessionForm(false);
+        $('newSessionCreateBtn').onclick = createSession;
+        $('newSessionFolderPath').addEventListener('keydown', event => {
+          if (event.key === 'Enter') createSession();
+        });
+        $('newSessionTitle').addEventListener('keydown', event => {
+          if (event.key === 'Enter') createSession();
+        });
+        $('sessionSearchInput').addEventListener('input', event => {
+          state.sessionSearch = event.target.value;
+          renderSessions();
+        });
+        $('sessionSendBtn').onclick = sendSessionMessage;
+        $('sessionCancelBtn').onclick = cancelSessionRun;
+        $('sessionPinBtn').onclick = () => { if (state.activeSessionId) toggleSessionPin(state.activeSessionId); };
+        $('sessionDeleteBtn').onclick = () => { if (state.activeSessionId) deleteSession(state.activeSessionId); };
+        $('sessionPrompt').addEventListener('keydown', event => {
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') sendSessionMessage();
         });
 
         function applyTheme(theme) {

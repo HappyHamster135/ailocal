@@ -28,6 +28,16 @@ public static class SessionApi
         app.MapGet("/api/sessions", (SessionStore store) =>
             Results.Ok(store.All().Select(SessionSummary)));
 
+        // A literal segment always wins over "{id}" at the same position in
+        // ASP.NET Core's routing regardless of registration order, so this
+        // never gets swallowed by GET /api/sessions/{id} below - but it's
+        // listed first for readability anyway. Polled by the dashboard's
+        // status bar (see renderStatusBar) for the real cross-tab/scheduled
+        // "active agents" count - SessionRunRegistry is in-memory-only and
+        // otherwise invisible to the client.
+        app.MapGet("/api/sessions/active-count", (SessionRunRegistry runs) =>
+            Results.Ok(new { count = runs.ActiveCount }));
+
         app.MapPost("/api/sessions", (SessionCreateRequest req, SessionStore store) =>
         {
             if (string.IsNullOrWhiteSpace(req.FolderPath))
