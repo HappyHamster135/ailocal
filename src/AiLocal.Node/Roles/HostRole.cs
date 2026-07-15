@@ -19,6 +19,20 @@ public sealed record SubmitTaskRequest(
     string? ModelHint = null,
     List<string>? ProviderOrder = null);
 
+/// <summary>A goal queued because no worker was free when it arrived. The Host
+/// drains the backlog automatically as workers become available, so a busy
+/// cluster still runs everything you throw at it - it just sequences the work
+/// instead of dropping it. This is what lets the "company" keep working without
+/// you babysitting every submission.</summary>
+public sealed record BacklogItem(
+    string Id,
+    string Prompt,
+    string? System = null,
+    int? Parallelism = null,
+    string? ModelHint = null,
+    List<string>? ProviderOrder = null,
+    DateTimeOffset SubmittedAt = default);
+
 public sealed record NotesRequest(string Note, string? Author = null);
 
 public sealed record PlannedWorkItem(
@@ -197,6 +211,7 @@ public sealed class WorkerRegistry
 public sealed class TaskBoard
 {
     private readonly ConcurrentDictionary<string, AgentTask> _tasks = new();
+    private readonly ConcurrentQueue<BacklogItem> _backlog = new();
     private readonly HostStateStore _store;
     private readonly NodeSettings _settings;
 
@@ -206,13 +221,11 @@ public sealed class TaskBoard
         _settings = settings;
         foreach (var task in store.ReadTasks())
         {
-            // An in-flight task at shutdown is NOT a failure - it was simply
-            // interrupted. Mark it Paused so it can be resumed (see
-            // ResumeInterruptedAsync), so the "company" keeps its week's work
-            // across a reboot instead of losing everything to Failed.
             CoerceRestartState(task);
             _tasks[task.Id] = task;
         }
+        foreach (var item in store.ReadBacklog())
+            _backlog.Enqueue(item);
         Prune();
         Save();
     }
@@ -274,10 +287,35 @@ public sealed class TaskBoard
     public IReadOnlyCollection<AgentTask> All =>
         _tasks.Values.OrderByDescending(t => t.CreatedAt).ToList();
 
+    public void EnqueueBacklog(BacklogItem item)
+    {
+        _backlog.Enqueue(item);
+        Save();
+    }
+
+    public IReadOnlyList<BacklogItem> BacklogSnapshot() => [.. _backlog];
+
+    public bool TryDequeueBacklog(out BacklogItem item) => _backlog.TryDequeue(out item!);
+
+    public bool RemoveBacklog(string id)
+    {
+        var remaining = new List<BacklogItem>();
+        var found = false;
+        while (_backlog.TryDequeue(out var it))
+        {
+            if (it.Id == id) { found = true; continue; }
+            remaining.Add(it);
+        }
+        foreach (var it in remaining) _backlog.Enqueue(it);
+        if (found) Save();
+        return found;
+    }
+
     public void Save()
     {
         Prune();
         _store.SaveTasks(_tasks.Values.OrderByDescending(task => task.CreatedAt));
+        _store.SaveBacklog(_backlog);
     }
 
     /// <summary>
@@ -534,7 +572,7 @@ public static class SimpleTaskPlanner
         values.Any(text.Contains);
 }
 
-internal sealed record GoalSubmission(AgentTask Root, int Subtasks, IReadOnlyList<string> WorkerNames);
+internal sealed record GoalSubmission(AgentTask Root, int Subtasks, IReadOnlyList<string> WorkerNames, string? BacklogId = null);
 
 internal sealed class WorkerCallFailedException(string message) : Exception(message);
 
@@ -651,6 +689,28 @@ public static class HostRole
         {
             NoticeBoard.Clear();
             return Results.Ok(new { cleared = true });
+        });
+
+        // Goal backlog: queued goals waiting for a free worker. The Host drains
+        // these automatically, but the operator can also start/remove one.
+        app.MapGet("/api/backlog", (TaskBoard board) => Results.Ok(board.BacklogSnapshot().OrderBy(i => i.SubmittedAt)));
+        app.MapPost("/api/backlog/{id}/start", (string id, TaskBoard board, WorkerRegistry reg,
+            IHttpClientFactory httpFactory, FallbackChatProvider providers, WorkerSlotBroker broker,
+            TaskStreamHub streamHub, TaskCancellationRegistry cancellationRegistry, NodeSettings settings, ILoggerFactory loggerFactory) =>
+        {
+            var item = board.BacklogSnapshot().FirstOrDefault(i => i.Id == id);
+            if (item is null) return Results.NotFound(new { error = "not in backlog" });
+            board.RemoveBacklog(id);
+            var req = new SubmitTaskRequest(item.Prompt, item.System, item.Parallelism, item.ModelHint, item.ProviderOrder);
+            var log = loggerFactory.CreateLogger("host");
+            var submission = SubmitGoal(req, null, board, reg, httpFactory, providers, broker, streamHub,
+                cancellationRegistry, settings, log);
+            return Results.Ok(new { taskId = submission.Root.Id, state = submission.Root.State.ToString() });
+        });
+        app.MapDelete("/api/backlog/{id}", (string id, TaskBoard board) =>
+        {
+            var removed = board.RemoveBacklog(id);
+            return removed ? Results.Ok(new { removed = true }) : Results.NotFound(new { error = "not in backlog" });
         });
 
         // "Office view": what every agent is doing right now. Built from the
@@ -963,6 +1023,29 @@ public static class HostRole
         // static dispatch methods can fire events (goal done / worker down) that
         // survive a restart.
         NoticeBoard.Bind(app.Services.GetRequiredService<HostStateStore>());
+
+        // Autonomy loop: keep draining the goal backlog as workers free up, so
+        // a busy cluster still completes everything it was given without the
+        // operator re-submitting. Runs until the Host stops.
+        _ = Task.Run(async () =>
+        {
+            var board = app.Services.GetRequiredService<TaskBoard>();
+            var reg = app.Services.GetRequiredService<WorkerRegistry>();
+            var httpFactory = app.Services.GetRequiredService<IHttpClientFactory>();
+            var providers = app.Services.GetRequiredService<FallbackChatProvider>();
+            var broker = app.Services.GetRequiredService<WorkerSlotBroker>();
+            var hub = app.Services.GetRequiredService<TaskStreamHub>();
+            var cancellationRegistry = app.Services.GetRequiredService<TaskCancellationRegistry>();
+            var settings = app.Services.GetRequiredService<NodeSettings>();
+            var log = app.Services.GetRequiredService<ILogger<TaskBoard>>();
+            var stop = app.Lifetime.ApplicationStopping;
+            while (!stop.IsCancellationRequested)
+            {
+                try { DrainBacklog(board, reg, httpFactory, providers, broker, hub, cancellationRegistry, settings, log); }
+                catch { /* best effort */ }
+                await Task.Delay(TimeSpan.FromSeconds(10), stop);
+            }
+        });
 
         // Resume in-flight goals interrupted by a Host restart. They were
         // marked Paused (not Failed) in the TaskBoard constructor, so the
@@ -1328,18 +1411,29 @@ public static class HostRole
         TaskStreamHub streamHub, TaskCancellationRegistry cancellationRegistry, NodeSettings settings, ILogger log)
     {
         var workers = reg.AvailableWorkers();
-        var root = board.Create(req.Prompt, req.System, "Goal");
-        root.Parallelism = req.Parallelism;
 
         if (workers.Count == 0)
         {
-            root.State = TaskState.Failed;
-            root.Error = "no workers available";
-            root.CompletedAt = DateTimeOffset.UtcNow;
-            board.Save();
-            return new GoalSubmission(root, 0, []);
+            // No worker free right now - don't fail the goal, queue it so the
+            // Host runs it the moment a worker shows up (DrainBacklog). This is
+            // what makes the cluster feel like a company that keeps working
+            // instead of a tool that 400s when you're not watching it.
+            var item = new BacklogItem(
+                Guid.NewGuid().ToString("n")[..8], req.Prompt, req.System, req.Parallelism,
+                req.ModelHint, req.ProviderOrder, DateTimeOffset.UtcNow);
+            board.EnqueueBacklog(item);
+            var stub = new AgentTask
+            {
+                Id = item.Id,
+                Prompt = req.Prompt,
+                State = TaskState.Queued,
+                Error = "Köad - inga workers tillgängliga än. Startar automatiskt när en worker ansluter."
+            };
+            return new GoalSubmission(stub, 0, [], item.Id);
         }
 
+        var root = board.Create(req.Prompt, req.System, "Goal");
+        root.Parallelism = req.Parallelism;
         // The Host acts as a manager: plan + delegate happen off the request
         // thread so the caller gets an immediate ack and the workers do the work.
         root.State = TaskState.Running;
@@ -1348,6 +1442,22 @@ public static class HostRole
         _ = Task.Run(() => PlanAndDispatchAsync(root, req, contextMessages, board, reg, httpFactory, providers,
             broker, streamHub, cancellationRegistry, settings, rootCts.Token, log));
         return new GoalSubmission(root, 0, workers.Select(w => w.Name).Distinct().ToList());
+    }
+
+    /// <summary>Pulls queued goals off the backlog and submits each as a real
+    /// goal, as long as a worker is free to run it. Called on a timer (see
+    /// MapEndpoints) and whenever workers become available, so the cluster
+    /// keeps working through its queue without operator intervention.</summary>
+    internal static void DrainBacklog(
+        TaskBoard board, WorkerRegistry reg, IHttpClientFactory httpFactory, FallbackChatProvider providers,
+        WorkerSlotBroker broker, TaskStreamHub streamHub, TaskCancellationRegistry cancellationRegistry,
+        NodeSettings settings, ILogger log)
+    {
+        while (reg.AvailableWorkers().Count > 0 && board.TryDequeueBacklog(out var item))
+        {
+            var req = new SubmitTaskRequest(item.Prompt, item.System, item.Parallelism, item.ModelHint, item.ProviderOrder);
+            SubmitGoal(req, null, board, reg, httpFactory, providers, broker, streamHub, cancellationRegistry, settings, log);
+        }
     }
 
     /// <summary>

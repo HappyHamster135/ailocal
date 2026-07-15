@@ -13,6 +13,7 @@ internal sealed class PersistedHostState
     public List<AgentTask> Tasks { get; set; } = [];
     public List<ConversationEntry> Messages { get; set; } = [];
     public List<HostNotice> Notices { get; set; } = [];
+    public List<BacklogItem> Backlog { get; set; } = [];
     public DateTimeOffset SavedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -104,6 +105,21 @@ public sealed class HostStateStore
         lock (_gate)
         {
             _state.Notices = [.. notices];
+            SaveLocked();
+        }
+    }
+
+    public IReadOnlyList<BacklogItem> ReadBacklog()
+    {
+        lock (_gate)
+            return [.. _state.Backlog];
+    }
+
+    public void SaveBacklog(IEnumerable<BacklogItem> backlog)
+    {
+        lock (_gate)
+        {
+            _state.Backlog = [.. backlog];
             SaveLocked();
         }
     }

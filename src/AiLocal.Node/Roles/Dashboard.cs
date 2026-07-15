@@ -1487,6 +1487,13 @@ internal static class Dashboard
                   </div>
                   <div class="task-list" id="noticesList"><div class="small" style="opacity:.6">Inga notiser.</div></div>
                 </section>
+                <section class="panel inspector-card">
+                  <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+                    <span>Kö (backlog) <span class="small" id="backlogCount" style="opacity:.6"></span></span>
+                    <span class="small" style="opacity:.6">startar automatiskt när en worker är ledig</span>
+                  </div>
+                  <div class="task-list" id="backlogList"><div class="small" style="opacity:.6">Inga köade mål.</div></div>
+                </section>
               </div>
             </div>
           </aside>
@@ -3571,6 +3578,32 @@ internal static class Dashboard
           } catch { /* audio is best-effort */ }
         }
 
+        async function renderBacklog() {
+          try {
+            const items = await fetchJson('/api/backlog');
+            const el = $('backlogList');
+            if (!el) return;
+            $('backlogCount').textContent = items.length ? '(' + items.length + ')' : '';
+            if (!items.length) { el.innerHTML = '<div class="small" style="opacity:.6">Inga köade mål.</div>'; return; }
+            el.innerHTML = items.map(it => `<div class="node">
+              <div class="node-main"><span class="mono">${esc(trunc(it.prompt, 70))}</span></div>
+              <div class="small" style="opacity:.6">köad ${new Date(it.submittedAt).toLocaleTimeString()}</div>
+              <div style="display:flex;gap:6px;margin-top:4px">
+                <button class="btn ghost sm" data-start="${esc(it.id)}">Starta nu</button>
+                <button class="btn ghost sm" data-remove="${esc(it.id)}">Ta bort</button>
+              </div>
+            </div>`).join('');
+            el.querySelectorAll('[data-start]').forEach(b => b.onclick = async () => {
+              await fetch('/api/backlog/' + b.dataset.start + '/start', { method: 'POST', headers: authHeaders() });
+              await renderBacklog();
+            });
+            el.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {
+              await fetch('/api/backlog/' + b.dataset.remove, { method: 'DELETE', headers: authHeaders() });
+              await renderBacklog();
+            });
+          } catch { /* backlog panel is best-effort */ }
+        }
+
         async function renderOffice() {
           try {
             const data = await fetchJson('/api/office');
@@ -5183,7 +5216,9 @@ internal static class Dashboard
         refreshIsolation();
         renderRoles();
         renderNotices();
+        renderBacklog();
         setInterval(renderNotices, 5000);
+        setInterval(renderBacklog, 5000);
       </script>
     </body>
     </html>
