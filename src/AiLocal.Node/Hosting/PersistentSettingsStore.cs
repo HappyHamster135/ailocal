@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using AiLocal.Core.Agent;
 using AiLocal.Core.Configuration;
+using AiLocal.Core.Contracts;
 using AiLocal.Core.Roles;
 using Microsoft.AspNetCore.DataProtection;
 
@@ -35,6 +36,7 @@ public sealed record SettingsUpdate(
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
     ModelTiers? ModelTiers = null,
+    List<AgentRole>? Roles = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
@@ -274,6 +276,9 @@ public sealed class PersistentSettingsStore
 
             if (update.ModelTiers is not null)
                 _settings.Worker.ModelTiers = update.ModelTiers;
+
+            if (update.Roles is not null)
+                _settings.Host.Roles = update.Roles;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());

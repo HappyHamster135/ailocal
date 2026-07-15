@@ -1,4 +1,5 @@
 using AiLocal.Core.Agent;
+using AiLocal.Core.Contracts;
 using AiLocal.Core.Roles;
 
 namespace AiLocal.Core.Configuration;
@@ -237,6 +238,23 @@ public sealed class HostSettings
 
     /// <summary>How many prior chat turns to include as context on a new chat message.</summary>
     public int ChatHistoryWindow { get; set; } = 12;
+
+    /// <summary>The roles the Host uses to turn "workers" into a team of
+    /// employees (Architect / Developer / Tester / Reviewer). Defaults to the
+    /// four standard roles; an operator can rename, re-prompt, or re-skill
+    /// them. If empty, the Host falls back to AgentRoles.Defaults().</summary>
+    public List<AgentRole> Roles { get; set; } = AgentRoles.Defaults().ToList();
+
+    /// <summary>Resolve a role by id from the configured set, falling back to
+    /// the built-in defaults so a partially-edited config still works.</summary>
+    public AgentRole? ResolveRole(string? roleId)
+    {
+        if (string.IsNullOrWhiteSpace(roleId)) return null;
+        return Roles.FirstOrDefault(r =>
+                r.Id.Equals(roleId, StringComparison.OrdinalIgnoreCase))
+            ?? AgentRoles.Defaults().FirstOrDefault(r =>
+                r.Id.Equals(roleId, StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public sealed class TlsSettings

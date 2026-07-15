@@ -1467,6 +1467,11 @@ internal static class Dashboard
                   <div class="small" style="margin-bottom:6px">Varje agent-uppgift med Git-isolering får en egen branch. Granska diffen, merga eller kasta (ångra).</div>
                   <div class="task-list" id="isolationList"><div class="small" style="opacity:.6">Inga aktiva isolerade uppgifter.</div></div>
                 </section>
+                <section class="detail-section">
+                  <div class="panel-title" style="margin-bottom:8px">Team (roller)</div>
+                  <div class="small" style="margin-bottom:6px">Varje uppgift körs som en roll: systemprompt + modellval. "Anställda" lämnar över kontext på en delad anteckningsyta.</div>
+                  <div class="task-list" id="rolesList"><div class="small" style="opacity:.6">Laddar roller...</div></div>
+                </section>
               </div>
             </div>
           </aside>
@@ -2000,6 +2005,8 @@ internal static class Dashboard
         const roleName = ['Launcher','Host','Worker','Overseer'];
         const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled','Paused'];
         const cancellableStates = ['Pending','Dispatched','Running','Queued','Paused'];
+        const roleNames = {}; // id -> display name, loaded from /api/roles
+        const roleName = id => roleNames[id] || id;
         const fmtUsd = value => (value == null) ? '' : (value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`);
         const fmtTokens = n => (n == null ? '0' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
         function renderCostBreakdown(stats) {
@@ -3431,6 +3438,7 @@ internal static class Dashboard
           $('taskCount').textContent = state.tasks.length;
           const tasksHtml = state.tasks.length ? state.tasks.slice(0, 8).map(t => {
             const status = typeof t.state === 'number' ? stateName[t.state] : t.state;
+            const roleBadge = t.roleId ? `<span class="pill role">${esc(roleName(t.roleId))}</span>` : '';
             const delegation = [
               t.workerName ? '-> ' + t.workerName : '',
               t.workerTier ? t.workerTier : '',
@@ -3438,11 +3446,13 @@ internal static class Dashboard
             ].filter(Boolean).join(' | ');
             const cost = fmtUsd(t.estimatedCostUsd);
             const cancellable = cancellableStates.includes(status);
+            const notes = (!t.parentId && t.notes) ? `<pre class="iso-diff" style="max-height:160px;overflow:auto;margin-top:4px">${esc(t.notes)}</pre>` : '';
             return `<div class="node">
-              <div class="node-main"><span class="mono">${esc(t.id)}</span><span class="pill">${esc(status)}</span></div>
+              <div class="node-main"><span class="mono">${esc(t.id)}</span><span class="pill">${esc(status)}</span>${roleBadge}</div>
               <div class="small">${esc(trunc(t.title || t.prompt, 64))}</div>
               <div class="small">${esc(delegation)}</div>
               <div class="small">${esc(t.provider ? `${t.provider}/${t.model ?? ''}` : '')}${cost ? ' | ' + esc(cost) : ''}</div>
+              ${notes}
               ${cancellable ? `<div class="detail-actions"><button class="icon" title="Avbryt" data-cancel-task="${esc(t.id)}">${icon('x', 14)}</button></div>` : ''}
             </div>`;
           }).join('') : '<div class="empty">Inga jobb ännu.</div>';
@@ -3459,8 +3469,18 @@ internal static class Dashboard
           }
         }
 
-        function renderTasks() {
-          $('taskCount').textContent = state.tasks.length;
+        async function renderRoles() {
+          try {
+            const roles = await fetchJson('/api/roles');
+            for (const r of roles) roleNames[r.id] = r.name;
+            const el = $('rolesList');
+            if (!el) return;
+            el.innerHTML = roles.map(r => `<div class="node">
+              <div class="node-main"><span class="mono">${esc(r.name)}</span><span class="pill">${esc(r.requiredSkill)}</span>${r.complexityBias ? `<span class="pill">+${r.complexityBias} modell</span>` : ''}</div>
+              <div class="small">${esc(trunc(r.systemPrompt, 90))}</div>
+            </div>`).join('');
+          } catch { /* roles panel is best-effort */ }
+        }
 
         async function cancelTask(id) {
           if (!window.confirm('Avbryt den här uppgiften?')) return;
@@ -5030,6 +5050,7 @@ internal static class Dashboard
         refresh();
         setInterval(refresh, 3000);
         refreshIsolation();
+        renderRoles();
       </script>
     </body>
     </html>

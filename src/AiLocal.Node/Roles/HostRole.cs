@@ -19,6 +19,8 @@ public sealed record SubmitTaskRequest(
     string? ModelHint = null,
     List<string>? ProviderOrder = null);
 
+public sealed record NotesRequest(string Note, string? Author = null);
+
 public sealed record PlannedWorkItem(
     string Title,
     string Prompt,
@@ -608,6 +610,40 @@ public static class HostRole
 
         app.MapGet("/tasks", (TaskBoard board) => Results.Ok(board.All));
         app.MapGet("/api/tasks", (TaskBoard board) => Results.Ok(board.All));
+
+        // Shared notes board per goal: the "employees" hand off context here.
+        app.MapGet("/api/goal/{id}/notes", (string id, TaskBoard board) =>
+        {
+            var root = board.Get(id);
+            if (root is null) return Results.NotFound(new { error = "goal not found" });
+            return Results.Ok(new { notes = root.Notes ?? "" });
+        });
+
+        app.MapPost("/api/goal/{id}/notes", async (string id, HttpContext ctx, TaskBoard board, CancellationToken ct) =>
+        {
+            var root = board.Get(id);
+            if (root is null) return Results.NotFound(new { error = "goal not found" });
+            var body = await ctx.Request.ReadFromJsonAsync<NotesRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.Note))
+                return Results.Problem(detail: "note krävs", statusCode: StatusCodes.Status400BadRequest);
+            var entry = $"### {body.Author ?? "operatör"}\n{body.Note}\n";
+            root.Notes = string.IsNullOrWhiteSpace(root.Notes) ? entry : $"{root.Notes}\n{entry}";
+            board.Save();
+            return Results.Ok(new { notes = root.Notes });
+        });
+
+        // Roles: the team the Host uses. GET returns the resolved set (configured
+        // or defaults); PUT replaces them so an operator can re-prompt/re-skill
+        // (and persists them via the normal settings store).
+        app.MapGet("/api/roles", (NodeSettings settings) =>
+            Results.Ok(settings.Host.Roles.Count > 0 ? settings.Host.Roles : AgentRoles.Defaults()));
+        app.MapPost("/api/roles", (List<AgentRole> roles, PersistentSettingsStore store, HostLocator locator) =>
+        {
+            if (roles is null || roles.Count == 0)
+                return Results.Problem(detail: "minst en roll krävs", statusCode: StatusCodes.Status400BadRequest);
+            store.Update(new SettingsUpdate(Roles: roles), locator);
+            return Results.Ok(roles);
+        });
 
         app.MapGet("/tasks/{id}", (string id, TaskBoard board) =>
             board.Get(id) is { } task ? Results.Ok(task) : Results.NotFound());
@@ -1332,20 +1368,41 @@ public static class HostRole
             var children = new List<AgentTask>();
             foreach (var item in ordered)
             {
-                var child = board.Create(item.Prompt, CombineSystem(req.System, objectiveBriefing), item.Title, root.Id);
-                child.Complexity = item.Complexity;
-                child.OriginalComplexity = item.Complexity;
-                child.RequiredSkill = item.Skill;
+                var roleId = AgentRoles.RoleForSkill(item.Skill);
+                var role = hostSettings.ResolveRole(roleId);
+                var routedSkill = role is not null && !string.Equals(role.RequiredSkill, "architecture", StringComparison.OrdinalIgnoreCase)
+                    ? role.RequiredSkill
+                    : item.Skill;
+                var effectiveComplexity = EffectiveComplexity(item.Complexity, role);
+
+                var child = board.Create(item.Prompt,
+                    BuildChildSystem(req.System, objectiveBriefing, role, root.Notes), item.Title, root.Id);
+                child.Complexity = effectiveComplexity;
+                child.OriginalComplexity = effectiveComplexity;
+                child.RequiredSkill = routedSkill;
+                child.RoleId = roleId;
                 child.State = TaskState.Queued;
                 board.Save();
                 children.Add(child);
 
-                var requirement = new WorkRequirement(item.Skill, item.Complexity);
-                var match = await TryClaimAsync(child, broker, requirement, board, log, ct);
-                if (match is null) continue;
+                var requirement = new WorkRequirement(routedSkill, effectiveComplexity);
 
-                _ = Task.Run(() => DispatchWithRetryAsync(child, match, req.ModelHint, req.ProviderOrder, board,
-                    broker, httpFactory, streamHub, hostSettings, requirement, cancellationRegistry, log));
+                // Coding subtasks run as a sequential role pipeline
+                // (developer -> tester -> reviewer) so each role inherits the
+                // previous one's actual output via the shared notes board,
+                // rather than guessing in parallel. Other skills fan out freely.
+                if (string.Equals(item.Skill, "coding", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = Task.Run(() => RunCodingPipelineAsync(root, child, objectiveBriefing, req, board, reg,
+                        broker, httpFactory, streamHub, hostSettings, cancellationRegistry, log, ct));
+                }
+                else
+                {
+                    var match = await TryClaimAsync(child, broker, requirement, board, log, ct);
+                    if (match is null) continue;
+                    _ = Task.Run(() => DispatchWithRetryAsync(child, match, req.ModelHint, req.ProviderOrder, board,
+                        broker, httpFactory, streamHub, hostSettings, requirement, cancellationRegistry, log));
+                }
             }
 
             await CompleteParentAsync(root, children, board, reg, req, httpFactory, broker, streamHub,
@@ -1359,6 +1416,94 @@ public static class HostRole
             board.Save();
             log.LogWarning("planning failed: {Message}", ex.Message);
         }
+    }
+
+    /// <summary>Runs one coding subtask as a sequential role pipeline:
+    /// Developer implements, then Tester writes tests, then Reviewer checks the
+    /// result - each step inherits the previous one's output through the goal's
+    /// shared notes board, so the "employees" hand off real context instead of a
+    /// one-line summary. Each step escalates/retries like any other task.</summary>
+    private static async Task RunCodingPipelineAsync(
+        AgentTask root, AgentTask developer, string objectiveBriefing, SubmitTaskRequest req,
+        TaskBoard board, WorkerRegistry reg, WorkerSlotBroker broker, IHttpClientFactory httpFactory,
+        TaskStreamHub streamHub, HostSettings hostSettings, TaskCancellationRegistry cancellationRegistry, ILogger log, CancellationToken ct)
+    {
+        if (!await RunRoleStepAsync(root, developer, objectiveBriefing, req, board, reg, broker,
+                httpFactory, streamHub, hostSettings, cancellationRegistry, log, ct, "Utvecklare"))
+            return;
+
+        var tester = SpawnRoleTask(root, developer, "tester",
+            "Skriv tester för implementationen ovan. Kör dem och rapportera resultatet.",
+            objectiveBriefing, req, board, hostSettings);
+        if (!await RunRoleStepAsync(root, tester, objectiveBriefing, req, board, reg, broker,
+                httpFactory, streamHub, hostSettings, cancellationRegistry, log, ct, "Testare"))
+            return;
+
+        var reviewer = SpawnRoleTask(root, developer, "reviewer",
+            "Granska implementationen och eventuella tester ovan. Svara GODKÄNN eller lista problem.",
+            objectiveBriefing, req, board, hostSettings);
+        await RunRoleStepAsync(root, reviewer, objectiveBriefing, req, board, reg, broker,
+            httpFactory, streamHub, hostSettings, cancellationRegistry, log, ct, "Granskare");
+    }
+
+    /// <summary>Dispatches one role step, appends its result to the goal's shared
+    /// notes board on success, and returns whether the step completed (so the
+    /// pipeline can stop if a step fails).</summary>
+    private static async Task<bool> RunRoleStepAsync(
+        AgentTask root, AgentTask task, string objectiveBriefing, SubmitTaskRequest req,
+        TaskBoard board, WorkerRegistry reg, WorkerSlotBroker broker, IHttpClientFactory httpFactory,
+        TaskStreamHub streamHub, HostSettings hostSettings, TaskCancellationRegistry cancellationRegistry, ILogger log, CancellationToken ct,
+        string roleLabel)
+    {
+        var role = hostSettings.ResolveRole(task.RoleId);
+        var requirement = new WorkRequirement(task.RequiredSkill ?? "general", task.Complexity ?? 3);
+        var match = await TryClaimAsync(task, broker, requirement, board, log, ct);
+        if (match is null) return false;
+
+        await DispatchWithRetryAsync(task, match, req.ModelHint, req.ProviderOrder, board,
+            broker, httpFactory, streamHub, hostSettings, requirement, cancellationRegistry, log);
+
+        if (task.State == TaskState.Completed && !string.IsNullOrWhiteSpace(task.Result))
+        {
+            AppendNote(root, task, roleLabel, board);
+            return true;
+        }
+        // A failed step ends the pipeline for this subtask (the parent's
+        // partial-success logic still delivers whatever succeeded).
+        return false;
+    }
+
+    /// <summary>Creates a child task owned by <paramref name="roleId"/> that
+    /// inherits the parent developer's output and the shared notes board.</summary>
+    private static AgentTask SpawnRoleTask(
+        AgentTask root, AgentTask parent, string roleId, string prompt, string objectiveBriefing,
+        SubmitTaskRequest req, TaskBoard board, HostSettings hostSettings)
+    {
+        var role = hostSettings.ResolveRole(roleId);
+        var context = string.IsNullOrWhiteSpace(parent.Result)
+            ? parent.Prompt
+            : $"{parent.Prompt}\n\nUtleverans från föregående steg:\n{parent.Result}";
+
+        var task = board.Create(
+            $"{prompt}\n\n{context}",
+            BuildChildSystem(req.System, objectiveBriefing, role, parent.Notes),
+            $"{role?.Name ?? roleId}: {parent.Title}", root.Id);
+        task.Complexity = parent.Complexity;
+        task.OriginalComplexity = parent.Complexity;
+        task.RequiredSkill = role?.RequiredSkill ?? "general";
+        task.RoleId = roleId;
+        task.State = TaskState.Queued;
+        board.Save();
+        return task;
+    }
+
+    /// <summary>Appends a completed step's hand-off to the goal's shared notes
+    /// board (thread-safe; the board is the single owner of root.Notes).</summary>
+    private static void AppendNote(AgentTask root, AgentTask step, string roleLabel, TaskBoard board)
+    {
+        var entry = $"### {roleLabel}: {step.Title}\n{step.Result}\n";
+        root.Notes = string.IsNullOrWhiteSpace(root.Notes) ? entry : $"{root.Notes}\n{entry}";
+        board.Save();
     }
 
     private static async Task<WorkerMatch?> TryClaimAsync(
@@ -1850,4 +1995,26 @@ public static class HostRole
         string.IsNullOrWhiteSpace(system)
             ? briefing
             : $"{briefing}{Environment.NewLine}{Environment.NewLine}{system}";
+
+    /// <summary>Builds a child's system prompt for a role: the role's behaviour
+    /// prompt, then the shared objective briefing, then the live shared notes
+    /// board (so the worker inherits sibling context, not just a summary).
+    /// Falls back to the plain objective briefing when no role is assigned.</summary>
+    private static string BuildChildSystem(
+        string? operatorSystem, string objectiveBriefing, AgentRole? role, string? notes)
+    {
+        var parts = new List<string>();
+        if (role is not null && !string.IsNullOrWhiteSpace(role.SystemPrompt))
+            parts.Add(role.SystemPrompt);
+        parts.Add(objectiveBriefing);
+        if (!string.IsNullOrWhiteSpace(notes))
+            parts.Add($"Delad anteckningsyta för det här målet (kontext från de andra i teamet):\n{notes}");
+        var briefing = string.Join(Environment.NewLine + Environment.NewLine, parts);
+        return CombineSystem(operatorSystem, briefing);
+    }
+
+    /// <summary>Effective complexity for model selection: the planner's
+    /// complexity plus the role's bias, clamped to 1..5.</summary>
+    private static int EffectiveComplexity(int? baseComplexity, AgentRole? role) =>
+        Math.Clamp((baseComplexity ?? 3) + (role?.ComplexityBias ?? 0), 1, 5);
 }

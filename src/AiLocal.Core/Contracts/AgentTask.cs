@@ -58,6 +58,17 @@ public sealed class AgentTask
     /// fan-out it was originally given.</summary>
     public int? Parallelism { get; set; }
 
+    /// <summary>The role that owns this task (architect/developer/tester/reviewer),
+    /// if assigned. Drives the system prompt and model bias. Null for
+    /// non-role work (e.g. plain chat).</summary>
+    public string? RoleId { get; set; }
+
+    /// <summary>Shared notes board for the goal this task belongs to. The Host
+    /// appends each worker's hand-off context here so "employees" inherit
+    /// sibling context instead of just a short summary. Injected into every
+    /// child's system prompt at dispatch time.</summary>
+    public string? Notes { get; set; }
+
     /// <summary>Prior conversation turns to prepend before Prompt when dispatching
     /// (only set for a chat-originated, single-worker goal).</summary>
     public List<ChatMessage>? ContextMessages { get; set; }
