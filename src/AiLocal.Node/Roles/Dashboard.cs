@@ -1756,6 +1756,21 @@ internal static class Dashboard
                   Varje assignment får sin egen git-worktree + branch i Arbetsmappen (kräver att den är ett git-repo). Flera "anställda" skriver inte över varandra,
                   och när agenten är klar granskas diffen som en PR innan merge. Kräver att Arbetsmapp är ett git-repo - annars körs det vanligt.
                 </span>
+                <div class="field wide" style="margin-top:8px">
+                  <span class="small">Kommando-skydd (run_command)</span>
+                  <select id="settingCommandGuard" class="input">
+                    <option value="Block">Blockera farliga (rm -rf-klassen)</option>
+                    <option value="Warn">Varna men kör ändå</option>
+                    <option value="Off">Av (ingen filtrering)</option>
+                  </select>
+                  <span class="small" style="display:block;margin-top:2px">
+                    Små/instabila modeller kan lockas till "rm -rf" av prompt-injektion - skyddet är på (Blockera) som standard, även i fullt filåtkomstläge.
+                  </span>
+                </div>
+                <div class="field wide" style="margin-top:4px">
+                  <span class="small">Extra blockerade mönster (regex, nyrad per mönster)</span>
+                  <textarea id="settingBlockedCommands" class="input" rows="2" placeholder="t.ex. node reset-db&#10;drop table"></textarea>
+                </div>
                 <div class="field wide" style="margin-top:4px">
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
                   <div class="model-tier-grid">
@@ -4118,6 +4133,8 @@ internal static class Dashboard
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
+          $('settingCommandGuard').value = data.commandGuard ?? 'Block';
+          $('settingBlockedCommands').value = (data.blockedCommands ?? []).join('\n');
           $('settingTierSimple').value = data.modelTiers?.simple ?? '';
           $('settingTierMedium').value = data.modelTiers?.medium ?? '';
           $('settingTierComplex').value = data.modelTiers?.complex ?? '';
@@ -4443,6 +4460,8 @@ internal static class Dashboard
             aiReviewWrites: $('settingAiReviewWrites').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
+            commandGuard: $('settingCommandGuard').value,
+            blockedCommands: $('settingBlockedCommands').value.split('\n').map(value => value.trim()).filter(Boolean),
             modelTiers: {
               simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
               medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',

@@ -37,6 +37,8 @@ public sealed record SettingsUpdate(
     bool? UseGitIsolation = null,
     ModelTiers? ModelTiers = null,
     List<AgentRole>? Roles = null,
+    CommandGuardLevel? CommandGuard = null,
+    List<string>? BlockedCommands = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
@@ -180,6 +182,8 @@ public sealed class PersistentSettingsStore
                 aiReviewWrites = _settings.Worker.AiReviewWrites,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
+                commandGuard = _settings.Worker.CommandGuard.ToString(),
+                blockedCommands = _settings.Worker.BlockedCommands,
                 modelTiers = new
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
@@ -279,6 +283,11 @@ public sealed class PersistentSettingsStore
 
             if (update.Roles is not null)
                 _settings.Host.Roles = update.Roles;
+
+            if (update.CommandGuard.HasValue)
+                _settings.Worker.CommandGuard = update.CommandGuard.Value;
+            if (update.BlockedCommands is not null)
+                _settings.Worker.BlockedCommands = update.BlockedCommands;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());

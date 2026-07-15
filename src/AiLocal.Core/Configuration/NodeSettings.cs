@@ -80,6 +80,17 @@ public sealed class WorkerProfileSettings
     /// extraction) so it can look things up on the internet. Independent of
     /// AgentAccess - network reach, not filesystem reach.</summary>
     public bool AllowInternet { get; set; }
+
+    /// <summary>Shell-command safety net for agent mode (run_command). Small/local
+    /// models can be talked into "rm -rf" by prompt injection, so the guard is
+    /// on by default even in Full access mode. Block refuses destructive
+    /// commands; Warn runs them but flags it; Off removes the screen entirely.</summary>
+    public CommandGuardLevel CommandGuard { get; set; } = CommandGuardLevel.Block;
+
+    /// <summary>Extra case-insensitive regex patterns (besides the built-in
+    /// destructive defaults) the command guard should refuse. Operator-specific
+    /// bans, e.g. a project's own risky script.</summary>
+    public List<string> BlockedCommands { get; set; } = [];
 }
 
 /// <summary>Which (provider, model) to use for a task of a given skill+complexity.

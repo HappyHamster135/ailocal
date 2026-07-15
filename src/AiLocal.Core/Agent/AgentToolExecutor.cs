@@ -50,17 +50,20 @@ public sealed class AgentToolExecutor
     private readonly string _workspaceRoot;
     private readonly bool _allowInternet;
     private readonly Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? _approvalGate;
+    private readonly CommandGuard _commandGuard;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
         string workspaceRoot,
         Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? approvalGate = null,
-        bool allowInternet = false)
+        bool allowInternet = false,
+        CommandGuard? commandGuard = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _approvalGate = approvalGate;
         _allowInternet = allowInternet;
+        _commandGuard = commandGuard ?? new CommandGuard(CommandGuardLevel.Off);
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -417,20 +420,17 @@ public sealed class AgentToolExecutor
     private async Task<ToolResult> RunCommandAsync(ToolCall call, JsonElement args, CancellationToken ct)
     {
         var command = RequireString(args, "command");
+        var screen = _commandGuard.Screen(command);
+        if (screen is not null && _commandGuard.IsBlocked(command))
+            return Error(call, screen);
         var requestedDirectory = args.TryGetProperty("workingDirectory", out var wd) && wd.ValueKind == JsonValueKind.String
             ? wd.GetString()!
             : ".";
-        // Same resolution as ResolvePath's Full branch: relative resolves
-        // against _workspaceRoot (an explicit absolute path still passes
-        // through unconfined - Full stays unrestricted, this only fixes what
-        // a RELATIVE path/the omitted-argument default means). Used to
-        // default straight to Environment.CurrentDirectory - wherever this
-        // node process's own exe happened to launch from, unrelated to the
-        // folder the agent is actually meant to be working in.
         var workingDirectory = Path.GetFullPath(requestedDirectory, _workspaceRoot);
 
         var (exitCode, output) = await RunCommandCoreAsync(command, workingDirectory, ct);
-        return new ToolResult(call.Id, call.Name, output, IsError: exitCode != 0);
+        var warn = screen is not null ? screen + "\n" : "";
+        return new ToolResult(call.Id, call.Name, warn + output, IsError: exitCode != 0);
     }
 
     /// <summary>Runs a shell command in <paramref name="workingDirectory"/>

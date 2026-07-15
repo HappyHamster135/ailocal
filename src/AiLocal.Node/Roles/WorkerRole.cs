@@ -156,7 +156,8 @@ public static class WorkerRole
                 };
             }
 
-            var executor = new AgentToolExecutor(accessLevel, workspaceRoot, gate, settings.Worker.AllowInternet);
+            var executor = new AgentToolExecutor(accessLevel, workspaceRoot, gate, settings.Worker.AllowInternet,
+                new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands));
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
             var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>
