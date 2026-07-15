@@ -1195,6 +1195,12 @@ public static class HostRole
 
             log.LogInformation("planned {Count} subtasks across {Workers} workers", plan.Count, workers.Count);
 
+            // Shared objective state: every child is told the overall goal and
+            // the full plan (all subtask titles) so the models pull toward the
+            // same objective and each knows how its piece fits the whole -
+            // collaboration on one goal instead of N blind parallel chats.
+            var objectiveBriefing = BuildObjectiveBriefing(req.Prompt, plan);
+
             // Claim hardest work first so it gets first pick of the best-suited
             // worker; claiming is fast in-memory bookkeeping (not network I/O),
             // so doing it sequentially here doesn't serialize the actual dispatch
@@ -1203,7 +1209,7 @@ public static class HostRole
             var children = new List<AgentTask>();
             foreach (var item in ordered)
             {
-                var child = board.Create(item.Prompt, req.System, item.Title, root.Id);
+                var child = board.Create(item.Prompt, CombineSystem(req.System, objectiveBriefing), item.Title, root.Id);
                 child.Complexity = item.Complexity;
                 child.RequiredSkill = item.Skill;
                 child.State = TaskState.Queued;
@@ -1305,6 +1311,15 @@ public static class HostRole
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(hostSettings.DispatchTimeoutSeconds));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(taskCt, timeoutCts.Token);
 
+        // Set when the failure means the Worker machine itself is unreachable
+        // (connection refused/reset - the home-lab box was shut down or dropped
+        // off the network), as opposed to an app-level error the Worker reported.
+        // An unreachable node is flagged Offline immediately in the finally so
+        // the retry loop fails over to a live Worker at once, instead of being
+        // able to re-pick this dead node until MarkStale notices ~45s later. Its
+        // next heartbeat clears the flag automatically once it's back.
+        var nodeUnreachable = false;
+
         try
         {
             await RunStreamingDispatchAsync(task, worker, modelHint, providerOrder, httpFactory, streamHub, linked.Token);
@@ -1333,15 +1348,19 @@ public static class HostRole
         {
             task.State = TaskState.Failed;
             task.Error = ex.Message;
+            nodeUnreachable = IsNodeUnreachable(ex);
             RecordHealth(worker, success: false, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
-            log.LogWarning("dispatch failed: {Message}", ex.Message);
+            log.LogWarning("dispatch failed: {Message}{Unreachable}", ex.Message,
+                nodeUnreachable ? $" (worker {worker.Name} unreachable - flagged offline)" : "");
         }
         finally
         {
             streamHub.Complete(task.Id);
             task.CompletedAt = DateTimeOffset.UtcNow;
             if (worker.ActiveTasks > 0) worker.ActiveTasks--;
-            worker.Status = worker.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
+            worker.Status = nodeUnreachable
+                ? NodeStatus.Offline
+                : worker.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
             board.Save();
             broker.Release();
         }
@@ -1459,6 +1478,23 @@ public static class HostRole
         // Exponential moving average so recent behavior dominates without one
         // slow/fast sample swinging the average wildly.
         worker.AvgLatencyMs = worker.AvgLatencyMs <= 0 ? latencyMs : worker.AvgLatencyMs * 0.7 + latencyMs * 0.3;
+    }
+
+    /// <summary>True when the exception means the Worker machine is unreachable
+    /// (connection refused/reset/timeout at the socket level, or a stream that
+    /// dropped mid-response) rather than an application error the Worker sent
+    /// back. Used to flag a dead home-lab node Offline immediately so failover
+    /// doesn't keep re-picking it. Walks the inner-exception chain because
+    /// HttpClient wraps the real SocketException a couple of layers down.</summary>
+    private static bool IsNodeUnreachable(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.Net.Sockets.SocketException) return true;
+            if (e is System.Net.Http.HttpRequestException) return true;
+            if (e is IOException) return true;
+        }
+        return false;
     }
 
     private static string SummarizeWorkerError(System.Net.HttpStatusCode statusCode, string body)
@@ -1612,4 +1648,33 @@ public static class HostRole
         the internal worker process unless the user explicitly asked for it.
         """;
     }
+
+    /// <summary>Shared objective state handed to every subtask so the models
+    /// collaborate on one goal: the overall goal plus the full plan (all sibling
+    /// subtask titles), with a nudge to stay consistent with the shared
+    /// objective and not duplicate a sibling's job.</summary>
+    private static string BuildObjectiveBriefing(string goal, IReadOnlyList<PlannedWorkItem> plan)
+    {
+        var steps = string.Join(Environment.NewLine, plan.Select((p, i) => $"  {i + 1}. {p.Title}"));
+        return $"""
+        You are one worker in a cluster of AI models collaborating on a single shared goal.
+
+        Overall goal:
+        {goal}
+
+        The full plan (each step handled by a worker, possibly a different model):
+        {steps}
+
+        Focus on your own assigned task below, but keep your output consistent with
+        the overall goal and don't redo another step's work. Your result will be
+        merged with the others into one final answer.
+        """;
+    }
+
+    /// <summary>Prepends the shared objective briefing to any caller-supplied
+    /// system prompt so both survive into the child's request.</summary>
+    private static string CombineSystem(string? system, string briefing) =>
+        string.IsNullOrWhiteSpace(system)
+            ? briefing
+            : $"{briefing}{Environment.NewLine}{Environment.NewLine}{system}";
 }
