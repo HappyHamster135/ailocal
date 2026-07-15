@@ -21,6 +21,13 @@ public sealed record UpdateCheckResult(
 
 public sealed record UpdateApplyResult(bool Started, string? Error);
 
+/// <summary>Live progress of an in-flight self-update, polled by the dashboard
+/// so the operator sees the 100+ MB download move instead of a frozen screen.</summary>
+public sealed record UpdateProgress(string Phase, long Downloaded, long Total, string? Error = null)
+{
+    public double Fraction => Total > 0 ? Math.Min(1.0, (double)Downloaded / Total) : 0.0;
+}
+
 /// <summary>
 /// Checks GitHub Releases for a newer version of this exact repo, and - only
 /// when the operator explicitly clicks "Uppdatera" in Settings, never on its
@@ -42,6 +49,9 @@ public static class SelfUpdater
 {
     private const string Repo = "HappyHamster135/ailocal";
     private const long MinPlausibleExeBytes = 1_000_000;
+
+    /// <summary>Current update state, or idle. Read by /api/update-progress.</summary>
+    public static UpdateProgress Current { get; private set; } = new("idle", 0, 0);
 
     private static readonly JsonSerializerOptions GitHubJson = new(JsonSerializerDefaults.Web)
     {
@@ -90,18 +100,34 @@ public static class SelfUpdater
         var exeDir = Path.GetDirectoryName(exePath)!;
         var newPath = Path.Combine(exeDir, exeName + ".new");
 
+        long totalBytes = 0;
         try
         {
             var client = httpFactory.CreateClient("github");
             using var response = await client.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
+            totalBytes = response.Content.Headers.ContentLength ?? 0;
+            Current = new UpdateProgress("downloading", 0, totalBytes);
+
+            const int BufferSize = 64 * 1024;
+            var buffer = new byte[BufferSize];
             await using (var fileStream = File.Create(newPath))
             await using (var httpStream = await response.Content.ReadAsStreamAsync(ct))
-                await httpStream.CopyToAsync(fileStream, ct);
+            {
+                long downloadedBytes = 0;
+                int read;
+                while ((read = await httpStream.ReadAsync(buffer, ct)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                    downloadedBytes += read;
+                    Current = new UpdateProgress("downloading", downloadedBytes, totalBytes);
+                }
+            }
         }
         catch (Exception ex)
         {
             TryDelete(newPath);
+            Current = new UpdateProgress("error", 0, 0, ex.Message);
             return new UpdateApplyResult(false, $"Nedladdning misslyckades: {ex.Message}");
         }
 
@@ -109,8 +135,11 @@ public static class SelfUpdater
         if (!downloaded.Exists || downloaded.Length < MinPlausibleExeBytes)
         {
             TryDelete(newPath);
+            Current = new UpdateProgress("error", 0, 0, "Den nedladdade filen ser inte korrekt ut (för liten).");
             return new UpdateApplyResult(false, "Den nedladdade filen ser inte korrekt ut (för liten).");
         }
+
+        Current = new UpdateProgress("installing", totalBytes, totalBytes);
 
         string scriptPath;
         try
@@ -120,6 +149,7 @@ public static class SelfUpdater
         catch (Exception ex)
         {
             TryDelete(newPath);
+            Current = new UpdateProgress("error", 0, 0, ex.Message);
             return new UpdateApplyResult(false, $"Kunde inte förbereda omstarten: {ex.Message}");
         }
 
@@ -143,8 +173,10 @@ public static class SelfUpdater
             catch (Exception ex)
             {
                 log.LogError(ex, "self-update: could not launch the swap script");
+                Current = new UpdateProgress("error", 0, 0, "Kunde inte starta omstarter-skriptet.");
                 return;
             }
+            Current = new UpdateProgress("restarting", totalBytes, totalBytes);
             lifetime.StopApplication();
         });
 

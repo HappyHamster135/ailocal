@@ -305,6 +305,10 @@ public static class NodeWebHost
         app.MapGet("/api/update-check", async (IHttpClientFactory hf, CancellationToken ct) =>
             Results.Ok(await SelfUpdater.CheckAsync(hf, ct)));
 
+        // Polled by the dashboard while an update is downloading so the operator
+        // sees real progress (the 100+ MB download takes a while on a slow link).
+        app.MapGet("/api/update-progress", () => Results.Ok(SelfUpdater.Current));
+
         // Explicit, operator-clicked only (see the button in Settings) - this
         // never runs on its own. Downloads the matching exe from this repo's
         // latest GitHub release, hands off to an external script to swap it

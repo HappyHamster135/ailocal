@@ -817,6 +817,11 @@ internal static class Dashboard
           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
           white-space: pre; line-height: 1.5; background: var(--surface-2); }
         .diff-view .add, .diff-view .del { display: block; }
+
+        .update-progress { margin-top: 8px; height: 8px; background: var(--surface-2);
+          border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+        .update-progress-bar { height: 100%; width: 0%; background: var(--accent);
+          transition: width .25s ease; }
       </style>
     </head>
     <body>
@@ -1273,6 +1278,9 @@ internal static class Dashboard
                     <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
                     <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
                     <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
+                  </div>
+                  <div class="update-progress" id="updateProgress" style="display:none">
+                    <div class="update-progress-bar" id="updateProgressBar"></div>
                   </div>
                 </div>
               </div>
@@ -3395,21 +3403,56 @@ internal static class Dashboard
           const applyBtn = $('applyUpdateBtn');
           const checkBtn = $('checkUpdateBtn');
           const status = $('updateStatus');
+          const progress = $('updateProgress');
+          const bar = $('updateProgressBar');
+          const manualLink = $('updateManualLink');
           applyBtn.disabled = true;
           checkBtn.disabled = true;
-          status.textContent = 'Laddar ner och installerar - det här kan ta en stund beroende på anslutningen...';
+          manualLink.style.display = 'none';
+          progress.style.display = 'block';
+          bar.style.width = '0%';
+          status.textContent = 'Söker efter uppdatering...';
+
+          // Poll progress while the server downloads + swaps the exe in place.
+          let done = false;
+          const poll = setInterval(async () => {
+            try {
+              const p = await fetchJson('/api/update-progress');
+              if (p.phase === 'downloading') {
+                const pct = Math.round((p.fraction ?? 0) * 100);
+                bar.style.width = pct + '%';
+                const mb = n => (n / 1048576).toFixed(1);
+                status.textContent = `Laddar ner ${mb(p.downloaded)} / ${mb(p.total)} MB (${pct}%)...`;
+              } else if (p.phase === 'installing') {
+                bar.style.width = '100%';
+                status.textContent = 'Installerar...';
+              } else if (p.phase === 'restarting') {
+                status.textContent = 'Startar om...';
+                done = true;
+              } else if (p.phase === 'error') {
+                status.textContent = `Uppdateringen misslyckades: ${p.error ?? 'okänt fel'}`;
+                clearInterval(poll);
+                applyBtn.disabled = false;
+                checkBtn.disabled = false;
+                progress.style.display = 'none';
+              }
+            } catch { /* ignore transient poll errors */ }
+          }, 500);
+
           try {
             await fetchJson('/api/update-apply', { method: 'POST' });
-            status.textContent = 'Nedladdningen är klar. Startar om...';
-            waitForRestart();
+            // Wait for the process to come back up as the new version, then reload.
+            waitForRestart(() => { clearInterval(poll); });
           } catch (error) {
+            clearInterval(poll);
             status.textContent = `Uppdateringen misslyckades: ${error.message}`;
             applyBtn.disabled = false;
             checkBtn.disabled = false;
+            progress.style.display = 'none';
           }
         }
 
-        async function waitForRestart() {
+        async function waitForRestart(onDone) {
           // The process that just answered /api/update-apply is about to
           // exit and come back up as the new version on the same port -
           // poll until something answers again, then reload to pick it up.
@@ -3417,10 +3460,12 @@ internal static class Dashboard
             await new Promise(resolve => setTimeout(resolve, 2000));
             try {
               await fetchJson('/api/version');
+              if (onDone) onDone();
               location.reload();
               return;
             } catch { /* still restarting */ }
           }
+          if (onDone) onDone();
           $('updateStatus').textContent = 'Startade om men svarar inte än - ladda om sidan manuellt om det dröjer längre.';
         }
 
