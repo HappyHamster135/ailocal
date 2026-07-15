@@ -1616,7 +1616,12 @@ internal static class Dashboard
           if (state.selectedNodeId && !state.nodes.some(n => n.id === state.selectedNodeId))
             state.selectedNodeId = null;
 
-          $('nodes').innerHTML = state.nodes.length ? state.nodes.map(n => {
+          // Diff guard: the node list only changes shape/contents on refresh
+          // when the data actually changed. Rebuilding innerHTML every 3s (and
+          // rebinding every onclick) causes flicker and clobbers any in-flight
+          // hover state, so skip the rewrite when the serialized markup is
+          // identical. Selection highlight is handled separately below.
+          const listHtml = state.nodes.length ? state.nodes.map(n => {
             const role = roleName[n.role] ?? n.role;
             const status = statusText(n.status);
             const hardware = n.hardware ? (n.hardware.gpu || n.hardware.cpu) : 'Okänd hårdvara';
@@ -1634,15 +1639,26 @@ internal static class Dashboard
             </div>`;
           }).join('') : '<div class="empty">Inga Workers har registrerats ännu.</div>';
 
-          document.querySelectorAll('[data-node-id]').forEach(card => {
-            card.onclick = () => {
-              state.selectedNodeId = card.dataset.nodeId;
-              state.workerTasks = [];
-              renderNodes();
-              renderInspector();
-              loadWorkerTasks(card.dataset.nodeId);
-            };
-          });
+          const listEl = $('nodes');
+          if (listEl._html !== listHtml) {
+            listEl.innerHTML = listHtml;
+            listEl._html = listHtml;
+            document.querySelectorAll('[data-node-id]').forEach(card => {
+              card.onclick = () => {
+                state.selectedNodeId = card.dataset.nodeId;
+                state.workerTasks = [];
+                renderNodes();
+                renderInspector();
+                loadWorkerTasks(card.dataset.nodeId);
+              };
+            });
+          } else {
+            // Only the selection highlight may have changed - toggle it without
+            // a full rebuild.
+            document.querySelectorAll('[data-node-id]').forEach(card => {
+              card.classList.toggle('selected', card.dataset.nodeId === state.selectedNodeId);
+            });
+          }
           renderInspector();
         }
 
@@ -2637,7 +2653,7 @@ internal static class Dashboard
 
         function renderTasks() {
           $('taskCount').textContent = state.tasks.length;
-          $('tasks').innerHTML = state.tasks.length ? state.tasks.slice(0, 8).map(t => {
+          const tasksHtml = state.tasks.length ? state.tasks.slice(0, 8).map(t => {
             const status = typeof t.state === 'number' ? stateName[t.state] : t.state;
             const delegation = [
               t.workerName ? '-> ' + t.workerName : '',
@@ -2655,9 +2671,16 @@ internal static class Dashboard
             </div>`;
           }).join('') : '<div class="empty">Inga jobb ännu.</div>';
 
-          document.querySelectorAll('[data-cancel-task]').forEach(button => {
-            button.onclick = () => cancelTask(button.dataset.cancelTask);
-          });
+          // Diff guard: only rewrite when the task list actually changed, so the
+          // 3s refresh doesn't rebuild the DOM (flicker) or drop in-flight hover.
+          const tasksEl = $('tasks');
+          if (tasksEl._html !== tasksHtml) {
+            tasksEl.innerHTML = tasksHtml;
+            tasksEl._html = tasksHtml;
+            document.querySelectorAll('[data-cancel-task]').forEach(button => {
+              button.onclick = () => cancelTask(button.dataset.cancelTask);
+            });
+          }
         }
 
         async function cancelTask(id) {
