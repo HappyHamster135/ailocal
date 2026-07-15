@@ -39,6 +39,7 @@ public sealed record SettingsUpdate(
     List<AgentRole>? Roles = null,
     CommandGuardLevel? CommandGuard = null,
     List<string>? BlockedCommands = null,
+    bool? ProjectMemoryEnabled = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
@@ -184,6 +185,7 @@ public sealed class PersistentSettingsStore
                 useGitIsolation = _settings.Worker.UseGitIsolation,
                 commandGuard = _settings.Worker.CommandGuard.ToString(),
                 blockedCommands = _settings.Worker.BlockedCommands,
+                projectMemoryEnabled = _settings.Worker.ProjectMemoryEnabled,
                 modelTiers = new
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
@@ -288,6 +290,8 @@ public sealed class PersistentSettingsStore
                 _settings.Worker.CommandGuard = update.CommandGuard.Value;
             if (update.BlockedCommands is not null)
                 _settings.Worker.BlockedCommands = update.BlockedCommands;
+            if (update.ProjectMemoryEnabled.HasValue)
+                _settings.Worker.ProjectMemoryEnabled = update.ProjectMemoryEnabled.Value;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());

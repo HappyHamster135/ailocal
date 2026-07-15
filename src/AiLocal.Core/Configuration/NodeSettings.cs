@@ -91,6 +91,11 @@ public sealed class WorkerProfileSettings
     /// destructive defaults) the command guard should refuse. Operator-specific
     /// bans, e.g. a project's own risky script.</summary>
     public List<string> BlockedCommands { get; set; } = [];
+
+    /// <summary>When on, the agent gets <c>recall</c>/<c>remember</c> tools backed
+    /// by a per-project code index + memory file in the workspace, so the
+    /// "employees" build up and reuse project knowledge across sessions.</summary>
+    public bool ProjectMemoryEnabled { get; set; }
 }
 
 /// <summary>Which (provider, model) to use for a task of a given skill+complexity.

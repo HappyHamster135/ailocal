@@ -51,19 +51,25 @@ public sealed class AgentToolExecutor
     private readonly bool _allowInternet;
     private readonly Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? _approvalGate;
     private readonly CommandGuard _commandGuard;
+    private readonly CodebaseIndex? _codeIndex;
+    private readonly ProjectMemory? _memory;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
         string workspaceRoot,
         Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? approvalGate = null,
         bool allowInternet = false,
-        CommandGuard? commandGuard = null)
+        CommandGuard? commandGuard = null,
+        CodebaseIndex? codeIndex = null,
+        ProjectMemory? memory = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _approvalGate = approvalGate;
         _allowInternet = allowInternet;
         _commandGuard = commandGuard ?? new CommandGuard(CommandGuardLevel.Off);
+        _codeIndex = codeIndex;
+        _memory = memory;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -73,9 +79,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -115,6 +121,18 @@ public sealed class AgentToolExecutor
                 "Fetch a web page over http/https and return its readable text content (HTML tags stripped). Use for looking things up on the internet.",
                 """{"type":"object","properties":{"url":{"type":"string","description":"Absolute http:// or https:// URL to fetch."}},"required":["url"]}"""));
 
+        // Project memory/index: the agent's accumulated, growing knowledge of
+        // THIS workspace. Off by default - the operator opts in per Worker.
+        if (projectMemory)
+        {
+            tools.Add(new("recall",
+                "Look up this project's accumulated memory and code index for context relevant to a question or task. Returns remembered notes (decisions, gotchas, conventions) plus the files most relevant to your query. Use it before exploring blindly so you build on what's already known.",
+                """{"type":"object","properties":{"query":{"type":"string","description":"What you're looking for, e.g. 'how auth works' or 'where is the retry logic'."}},"required":["query"]}"""));
+            tools.Add(new("remember",
+                "Save a durable note to this project's memory (decisions, gotchas, conventions, non-obvious findings) so future sessions build on it. Keep it concise and reusable. Don't store secrets.",
+                """{"type":"object","properties":{"note":{"type":"string","description":"The note to remember."}},"required":["note"]}"""));
+        }
+
         return tools;
     }
 
@@ -135,6 +153,10 @@ public sealed class AgentToolExecutor
                 "list_files" => ListFiles(call, root),
                 "run_command" when _level == AgentAccessLevel.Full => await RunCommandAsync(call, root, ct),
                 "verify" when _level == AgentAccessLevel.Full => await VerifyAsync(call, root, ct),
+                "recall" when _memory is not null => await RecallAsync(call, root, ct),
+                "remember" when _memory is not null => await RememberAsync(call, root, ct),
+                "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
+                "remember" => Error(call, "remember is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
                 "run_command" => Error(call, "run_command is not available at this Worker's current access level (Sandboxed allows file access only)."),
                 "fetch_url" when _allowInternet => await FetchUrlAsync(call, root, ct),
                 "fetch_url" => Error(call, "fetch_url is not available - internet access is disabled on this Worker (Inställningar -> Agent & arbetsyta)."),
@@ -622,6 +644,42 @@ public sealed class AgentToolExecutor
                 $"path '{requestedPath}' resolves outside this Worker's sandboxed workspace");
 
         return combined;
+    }
+
+    private async Task<ToolResult> RecallAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var query = RequireString(args, "query");
+        _codeIndex?.Build(_workspaceRoot);
+        var memory = _memory?.Read() ?? "";
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(memory))
+        {
+            sb.AppendLine("## Projektminne");
+            sb.AppendLine(memory);
+            sb.AppendLine();
+        }
+        if (_codeIndex is not null)
+        {
+            var hits = _codeIndex.Recall(query, limit: 8);
+            if (hits.Count > 0)
+            {
+                sb.AppendLine("## Mest relevanta filer");
+                foreach (var (path, score) in hits)
+                    sb.AppendLine($"- ({score}) {path}");
+            }
+            else
+            {
+                sb.AppendLine("## Mest relevanta filer\n(inget träffade indexet för den frågan)");
+            }
+        }
+        return new ToolResult(call.Id, call.Name, sb.ToString().Trim(), IsError: false);
+    }
+
+    private async Task<ToolResult> RememberAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var note = RequireString(args, "note");
+        _memory?.Remember(note);
+        return new ToolResult(call.Id, call.Name, "Sparat i projektminnet.", IsError: false);
     }
 
     private static string RequireString(JsonElement args, string property) =>
