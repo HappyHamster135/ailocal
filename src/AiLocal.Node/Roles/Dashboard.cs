@@ -37,7 +37,7 @@ internal static class Dashboard
           --bad-bg: #fff5f5;
           --bad-border: #efc3c3;
           --radius: 8px;
-          --shadow: 0 14px 40px rgba(23,32,41,.08);
+          --shadow: 0 1px 2px rgba(23,32,41,.05);
         }
         :root[data-theme="dark"] {
           color-scheme: dark;
@@ -65,7 +65,7 @@ internal static class Dashboard
           --bad-bg: #2a1418;
           --bad-border: #5c2530;
           --radius: 8px;
-          --shadow: 0 18px 48px rgba(0,0,0,.55);
+          --shadow: 0 1px 2px rgba(0,0,0,.3);
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; }
@@ -88,6 +88,12 @@ internal static class Dashboard
           line-height: 1.4;
         }
         button, input, textarea, select { font: inherit; }
+        /* Exactly one transition rule existed anywhere in this stylesheet
+           before this (.node:hover) - every hover/focus/active state below
+           was instant. This one shared rule covers the rest. */
+        button, input, textarea, select, .session-item, .view-tab, .node, .icon-mini {
+          transition: background-color .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease, transform .08s ease;
+        }
         button {
           border: 1px solid var(--line);
           background: var(--surface);
@@ -98,9 +104,11 @@ internal static class Dashboard
           cursor: pointer;
         }
         button:hover { border-color: var(--line-strong); background: var(--surface-soft); }
+        button:active { transform: scale(.97); }
         button.primary { background: var(--accent); border-color: var(--accent); color: white; }
         button.ghost { background: transparent; }
-        button.icon { width: 30px; min-height: 30px; padding: 0; }
+        button.icon { width: 30px; min-height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+        .icon-svg { display: block; flex: 0 0 auto; }
         button.active { border-color: var(--accent); color: var(--accent); background: var(--surface-active); }
         input, textarea, select {
           border: 1px solid var(--line);
@@ -136,7 +144,7 @@ internal static class Dashboard
           overflow: hidden;
           white-space: nowrap;
         }
-        .statusbar-sep { color: var(--line-strong); }
+        .statusbar-sep { display: inline-block; width: 1px; height: 12px; background: var(--line-strong); }
         @media (max-width: 980px) {
           .statusbar-left span:not(:first-child):not(:nth-child(2)) { display: none; }
         }
@@ -198,17 +206,26 @@ internal static class Dashboard
           font-size: 13px;
           background: transparent;
           border-color: transparent;
+          border-radius: 6px;
+          color: var(--muted);
           display: flex;
           align-items: center;
           justify-content: flex-start;
           gap: 8px;
           width: 100%;
+          box-shadow: inset 3px 0 0 transparent;
         }
+        .view-tab:hover { background: var(--surface-soft); border-color: transparent; color: var(--text); }
+        .view-tab .icon-svg { color: var(--muted); }
+        /* Activity-bar style active state (accent rail, no boxed border) -
+           closer to the Hermes/Claude-Code sidebar than a bordered button. */
         .view-tab.active {
           color: var(--accent);
           background: var(--surface-active);
-          border-color: var(--line);
+          border-color: transparent;
+          box-shadow: inset 3px 0 0 var(--accent);
         }
+        .view-tab.active .icon-svg { color: var(--accent); }
         .hidden { display: none !important; }
         .shell {
           display: grid;
@@ -286,10 +303,31 @@ internal static class Dashboard
           background: transparent;
           font-size: 12px;
           border-radius: 5px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           flex: 0 0 auto;
+          /* Hidden until the row is hovered/focused (see .session-item:hover
+             below) - showing 2 icon buttons on every single row at all times
+             was a real contributor to the "blocky/busy" look. */
+          opacity: 0;
+        }
+        .session-item:hover .icon-mini,
+        .session-item:focus-within .icon-mini {
+          opacity: 1;
         }
         .icon-mini:hover { background: var(--surface-2); }
+        .icon-mini:focus-visible { opacity: 1; }
         .views { min-height: 0; overflow: hidden; display: grid; }
+        /* :not(.hidden) re-matches (and so replays) every time a view
+           becomes the visible one via switchView()'s classList.toggle -
+           no JS-side class juggling needed, animations restart on their own
+           whenever the selector newly applies to a now-rendered element. */
+        .views > main:not(.hidden) { animation: viewFadeIn .16s ease; }
+        @keyframes viewFadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         .chat-only-workspace {
           display: flex;
           justify-content: center;
@@ -440,7 +478,6 @@ internal static class Dashboard
           display: grid;
           gap: 6px;
           cursor: pointer;
-          transition: border-color .15s, background .15s;
         }
         .node:hover { border-color: var(--line-strong); background: var(--surface-soft); }
         .node.selected { border-color: var(--accent); background: var(--surface-selected); }
@@ -643,16 +680,33 @@ internal static class Dashboard
         .notice.bad { display: block; border-color: var(--bad-border); background: var(--bad-bg); color: var(--bad); }
         .notice.show { display: block; }
         dialog {
-          width: min(760px, calc(100vw - 28px));
-          max-height: calc(100vh - 32px);
+          width: clamp(320px, 86vw, 1080px);
+          height: clamp(420px, 82vh, 820px);
           border: 1px solid var(--line-strong);
           border-radius: 8px;
           padding: 0;
           color: var(--text);
           background: var(--surface);
           box-shadow: 0 28px 80px rgba(23,32,41,.25);
+          display: grid;
+          grid-template-rows: auto 1fr auto;
+          /* allow-discrete lets the [open]/no-[open] jump (display:none <->
+             block, which can't normally be transitioned) participate in
+             this transition instead of skipping it - paired with
+             @starting-style below for a real fade+scale open. */
+          transition: opacity .16s ease, transform .16s ease, overlay .16s ease allow-discrete, display .16s ease allow-discrete;
         }
-        dialog::backdrop { background: rgba(23,32,41,.42); }
+        dialog[open] { opacity: 1; transform: scale(1); }
+        @starting-style {
+          dialog[open] { opacity: 0; transform: scale(.97); }
+        }
+        dialog::backdrop {
+          background: rgba(23,32,41,.42);
+          transition: background-color .16s ease, overlay .16s ease allow-discrete, display .16s ease allow-discrete;
+        }
+        @starting-style {
+          dialog[open]::backdrop { background: rgba(23,32,41,0); }
+        }
         .dialog-head, .dialog-foot {
           min-height: 58px;
           padding: 10px 16px;
@@ -663,9 +717,26 @@ internal static class Dashboard
           border-bottom: 1px solid var(--line);
         }
         .dialog-foot { border-top: 1px solid var(--line); border-bottom: 0; justify-content: flex-end; }
-        .dialog-body { padding: 16px; overflow: auto; max-height: calc(100vh - 170px); }
-        .form-section { margin-bottom: 20px; }
-        .form-title { font-weight: 740; margin-bottom: 10px; }
+        .dialog-body { padding: 16px; overflow: auto; min-height: 0; }
+        .settings-body {
+          display: grid;
+          grid-template-columns: 190px 1fr;
+          grid-template-rows: auto 1fr;
+          padding: 0;
+          overflow: hidden;
+        }
+        .settings-nav {
+          grid-row: 2;
+          padding: 12px 10px;
+          display: grid;
+          gap: 3px;
+          align-content: start;
+          border-right: 1px solid var(--line);
+          overflow-y: auto;
+          min-height: 0;
+        }
+        .settings-content { grid-row: 2; padding: 18px; overflow-y: auto; min-height: 0; }
+        .settings-pane .form-subtitle:first-child { margin-top: 0; border-top: none; padding-top: 0; }
         .form-subtitle { font-weight: 640; font-size: 13px; margin: 14px 0 8px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
         .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .field { display: grid; gap: 5px; min-width: 0; }
@@ -730,7 +801,7 @@ internal static class Dashboard
           <div class="status-line">
             <span class="dot" id="hostDot"></span>
             <span id="hostStatus">checking host</span>
-            <button class="icon" id="authBtn" title="Anslutningsnyckel (för fjärråtkomst utanför den här datorn)">🔑</button>
+            <button class="icon" id="authBtn" data-icon="key" title="Anslutningsnyckel (för fjärråtkomst utanför den här datorn)"></button>
             <button class="icon" id="themeBtn" title="Ljust / mörkt läge"></button>
             <button id="settingsBtn">Inställningar</button>
           </div>
@@ -747,19 +818,22 @@ internal static class Dashboard
         <div class="shell">
           <aside class="sidebar" id="appSidebar">
             <nav class="sidebar-nav" aria-label="Vyer">
-              <button class="view-tab active" data-view="work">🖥 Kluster</button>
-              <button class="view-tab" data-view="network">🌐 Nätverk</button>
-              <button class="view-tab" data-view="schedules">🕒 Schema</button>
-              <button class="view-tab" data-view="delegate" id="delegateNavBtn">🚀 Delegera till kluster</button>
+              <button class="view-tab active" data-view="work"><span data-icon="monitor"></span> Kluster</button>
+              <button class="view-tab" data-view="network"><span data-icon="globe"></span> Nätverk</button>
+              <button class="view-tab" data-view="schedules"><span data-icon="clock"></span> Schema</button>
+              <button class="view-tab" data-view="delegate" id="delegateNavBtn"><span data-icon="send"></span> Delegera till kluster</button>
             </nav>
             <div class="sidebar-section">
               <div class="sidebar-section-head">
                 <div class="panel-title">Sessioner</div>
-                <button class="icon" id="newSessionToggleBtn" title="Ny session">+</button>
+                <button class="icon" id="newSessionToggleBtn" data-icon="plus" title="Ny session"></button>
               </div>
               <div class="new-session-form hidden" id="newSessionForm">
                 <div class="notice" id="newSessionNotice"></div>
-                <input id="newSessionFolderPath" placeholder="Mappsökväg, t.ex. C:\projekt\mitt-projekt">
+                <div class="token-row">
+                  <input id="newSessionFolderPath" placeholder="Mappsökväg, t.ex. C:\projekt\mitt-projekt">
+                  <button id="browseNewSessionFolder" type="button" data-icon="folder" title="Bläddra..."></button>
+                </div>
                 <input id="newSessionTitle" placeholder="Namn (valfritt)">
                 <div class="composer-actions">
                   <button id="newSessionCancelBtn">Avbryt</button>
@@ -780,7 +854,7 @@ internal static class Dashboard
                 <div class="panel-title">Cluster</div>
                 <div class="small" id="nodeCount">0 nodes</div>
               </div>
-              <button class="icon" id="refreshBtn" title="Refresh">R</button>
+              <button class="icon" id="refreshBtn" data-icon="refresh" title="Refresh"></button>
             </div>
             <div class="content">
               <div class="cluster-summary">
@@ -882,8 +956,8 @@ internal static class Dashboard
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span class="pill" id="sessionUsagePill"></span>
-                <button class="icon" id="sessionPinBtn" title="Nåla">📍</button>
-                <button class="icon" id="sessionDeleteBtn" title="Ta bort session">🗑</button>
+                <button class="icon" id="sessionPinBtn" data-icon="pin" title="Nåla"></button>
+                <button class="icon" id="sessionDeleteBtn" data-icon="trash" title="Ta bort session"></button>
               </div>
             </div>
             <div class="messages" id="sessionMessages"></div>
@@ -981,17 +1055,18 @@ internal static class Dashboard
           <div class="statusbar-left">
             <span class="dot" id="statusGatewayDot"></span>
             <span id="statusGatewayText">Ansluter...</span>
-            <span class="statusbar-sep">|</span>
+            <span class="statusbar-sep"></span>
             <span id="statusProjectName" class="small"></span>
-            <span class="statusbar-sep">|</span>
+            <span class="statusbar-sep"></span>
             <span id="statusAgentsCount"></span>
-            <span class="statusbar-sep">|</span>
+            <span class="statusbar-sep"></span>
             <span id="statusCronCount"></span>
           </div>
           <div class="statusbar-right">
             <span id="statusSessionTokens" class="mono"></span>
+            <span id="statusSessionTokensSep" class="statusbar-sep"></span>
             <span id="statusCost" class="mono"></span>
-            <span class="statusbar-sep">|</span>
+            <span class="statusbar-sep"></span>
             <span id="statusVersion" class="mono"></span>
           </div>
         </footer>
@@ -1003,100 +1078,144 @@ internal static class Dashboard
             <div class="chat-title" id="settingsTitle">Nodinställningar</div>
             <div class="small" id="settingsSubtitle"></div>
           </div>
-          <button class="icon" id="closeSettings" title="Stäng">X</button>
+          <button class="icon" id="closeSettings" data-icon="x" title="Stäng"></button>
         </div>
-        <div class="dialog-body">
-          <div class="notice" id="settingsNotice"></div>
-          <section class="form-section">
-            <div class="form-title">Nod och nätverk</div>
-            <div class="form-grid">
-              <label class="field"><span class="small">Namn</span><input id="settingNodeName" maxlength="80"></label>
-              <label class="field"><span class="small">Host endpoint</span><input id="settingHostEndpoint" placeholder="http://192.168.1.10:5080"></label>
-              <label class="check-field"><input id="settingDiscovery" type="checkbox"> Automatisk LAN-upptäckt</label>
-              <label class="check-field" id="settingAutoStartRow"><input id="settingAutoStart" type="checkbox"> Starta automatiskt vid inloggning</label>
-            </div>
-          </section>
-          <section class="form-section">
-            <div class="form-title">Worker-profil</div>
-            <div class="form-grid">
-              <label class="field wide">
-                <span class="small">Specialiteter</span>
-                <input id="settingSkills" placeholder="coding, research, writing, data, vision">
-              </label>
-              <label class="field">
-                <span class="small">Max samtidiga jobb</span>
-                <input id="settingMaxConcurrentTasks" type="number" min="1" max="32">
-              </label>
-              <label class="field wide">
-                <span class="small">Agentläge (fil- och kommandoåtkomst för "assignment"-uppgifter)</span>
-                <select id="settingAgentAccess">
-                  <option value="Off">Av (standard) - den här Workern kör bara vanliga chatt-/målsvar, ingen fil- eller kommandoåtkomst</option>
-                  <option value="Sandboxed">Begränsad arbetsyta - läser/skriver filer i en egen mapp på den här datorn, inga terminalkommandon</option>
-                  <option value="Full">Full åtkomst - som Claude Code: läser/skriver filer och kör kommandon var som helst på den här datorn</option>
-                </select>
-                <span class="small" style="display:block;margin-top:4px">
-                  Avgör bara vad den här datorn tillåter - måste sättas här, en Host kan inte slå på det åt dig.
-                </span>
-              </label>
-              <label class="field wide">
-                <span class="small">Arbetsmapp (var agenten jobbar)</span>
-                <input id="settingWorkspacePath" placeholder="Lämna tom = AgentLocal/agent-workspace">
-                <span class="small" style="display:block;margin-top:4px">
-                  Sandbox: agenten kan bara läsa/skriva här. Full: även kommandons startmapp. Endast den här datorns ägare sätter detta.
-                </span>
-              </label>
-              <div class="field wide" style="margin-top:4px">
-                <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
-                <div class="model-tier-grid">
-                  <label class="tier-field"><span class="small">Enkel (1-2)</span>
-                    <input id="settingTierSimple" placeholder="claude-haiku-4-5"></label>
-                  <label class="tier-field"><span class="small">Medel (3-4)</span>
-                    <input id="settingTierMedium" placeholder="claude-sonnet-5"></label>
-                  <label class="tier-field"><span class="small">Komplex (5)</span>
-                    <input id="settingTierComplex" placeholder="claude-opus-4-8"></label>
+        <div class="dialog-body settings-body">
+          <div class="notice" id="settingsNotice" style="grid-column:1 / -1"></div>
+          <nav class="settings-nav" aria-label="Inställningskategorier">
+            <button class="view-tab active" data-settings-cat="general"><span data-icon="monitor"></span> Allmänt</button>
+            <button class="view-tab" data-settings-cat="agent"><span data-icon="folder"></span> Agent &amp; arbetsyta</button>
+            <button class="view-tab" data-settings-cat="models"><span data-icon="globe"></span> Modeller &amp; providers</button>
+            <button class="view-tab" data-settings-cat="security"><span data-icon="key"></span> Säkerhet</button>
+            <button class="view-tab" data-settings-cat="update"><span data-icon="refresh"></span> Uppdatering</button>
+          </nav>
+          <div class="settings-content">
+            <section class="settings-pane" data-settings-pane="general">
+              <div class="form-grid">
+                <label class="field"><span class="small">Namn</span><input id="settingNodeName" maxlength="80"></label>
+                <label class="field"><span class="small">Host endpoint</span><input id="settingHostEndpoint" placeholder="http://192.168.1.10:5080"></label>
+                <label class="check-field"><input id="settingDiscovery" type="checkbox"> Automatisk LAN-upptäckt</label>
+                <label class="check-field" id="settingAutoStartRow"><input id="settingAutoStart" type="checkbox"> Starta automatiskt vid inloggning</label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="agent">
+              <div class="form-grid">
+                <label class="field wide">
+                  <span class="small">Specialiteter</span>
+                  <input id="settingSkills" placeholder="coding, research, writing, data, vision">
+                </label>
+                <label class="field">
+                  <span class="small">Max samtidiga jobb</span>
+                  <input id="settingMaxConcurrentTasks" type="number" min="1" max="32">
+                </label>
+                <label class="field wide">
+                  <span class="small">Agentläge (fil- och kommandoåtkomst för "assignment"-uppgifter)</span>
+                  <select id="settingAgentAccess">
+                    <option value="Off">Av (standard) - den här Workern kör bara vanliga chatt-/målsvar, ingen fil- eller kommandoåtkomst</option>
+                    <option value="Sandboxed">Begränsad arbetsyta - läser/skriver filer i en egen mapp på den här datorn, inga terminalkommandon</option>
+                    <option value="Full">Full åtkomst - som Claude Code: läser/skriver filer och kör kommandon var som helst på den här datorn</option>
+                  </select>
+                  <span class="small" style="display:block;margin-top:4px">
+                    Avgör bara vad den här datorn tillåter - måste sättas här, en Host kan inte slå på det åt dig.
+                  </span>
+                </label>
+                <label class="field wide">
+                  <span class="small">Arbetsmapp (var agenten jobbar)</span>
+                  <div class="token-row">
+                    <input id="settingWorkspacePath" placeholder="Lämna tom = AgentLocal/agent-workspace">
+                    <button id="browseWorkspacePath" type="button" data-icon="folder" title="Bläddra..."></button>
+                  </div>
+                  <span class="small" style="display:block;margin-top:4px">
+                    Sandbox: agenten kan bara läsa/skriva här. Full: även kommandons startmapp. Endast den här datorns ägare sätter detta.
+                  </span>
+                </label>
+                <div class="field wide" style="margin-top:4px">
+                  <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
+                  <div class="model-tier-grid">
+                    <label class="tier-field"><span class="small">Enkel (1-2)</span>
+                      <input id="settingTierSimple" placeholder="claude-haiku-4-5"></label>
+                    <label class="tier-field"><span class="small">Medel (3-4)</span>
+                      <input id="settingTierMedium" placeholder="claude-sonnet-5"></label>
+                    <label class="tier-field"><span class="small">Komplex (5)</span>
+                      <input id="settingTierComplex" placeholder="claude-opus-4-8"></label>
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
-          <section class="form-section">
-            <div class="form-title">Säkerhet &amp; system</div>
-            <div class="form-grid">
-              <div class="field wide">
-                <span class="small">Nuvarande klusternyckel</span>
-                <div class="token-row">
-                  <input id="currentClusterToken" class="mono" type="password" readonly>
-                  <button class="icon" id="toggleTokenVisibility" type="button" title="Visa/dölj">👁</button>
-                  <button id="copyClusterToken" type="button">Kopiera</button>
-                  <button id="regenerateClusterToken" type="button">Generera ny</button>
-                </div>
-                <div class="token-hint">
-                  Workers och Overseers måste ha samma nyckel för att gå med i klustret.
-                  Kopiera den härifrån och klistra in den i deras inställningar (fältet nedan),
-                  eller i fältet "Klusternyckel" när du startar en nod manuellt.
-                </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="models">
+              <div class="form-grid">
+                <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
+                <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
+                <label class="field"><span class="small">OpenRouter-modell</span><input id="settingOpenRouterModel" placeholder="t.ex. anthropic/claude-sonnet-4.5"></label>
+                <label class="field"><span class="small">Lokal Ollama-modell</span><input id="settingOllamaModel" placeholder="Använd rekommenderad"></label>
+                <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
+                <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
+                <label class="check-field wide"><input id="settingAutoPull" type="checkbox"> Hämta vald lokal modell automatiskt</label>
               </div>
-              <label class="field wide">
-                <span class="small">Klistra in en nyckel för att para ihop den här noden</span>
-                <input id="settingClusterToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
-                <span class="key-state" id="clusterTokenState"></span>
-              </label>
-              <label class="check-field wide"><input id="clearClusterToken" type="checkbox"> Ta bort klusternyckel (öppnar klustret för hela LAN:et)</label>
-              <div class="field wide">
-                <span class="small">Operatörsnyckel (begränsad åtkomst: mål, chatt, avbryt - ej nodhantering/inställningar)</span>
-                <div class="token-row">
-                  <input id="currentOperatorToken" class="mono" type="password" readonly>
-                  <button class="icon" id="toggleOperatorTokenVisibility" type="button" title="Visa/dölj">👁</button>
-                  <button id="copyOperatorToken" type="button">Kopiera</button>
-                  <button id="regenerateOperatorToken" type="button">Generera ny</button>
-                </div>
+              <div class="form-subtitle">API-nycklar</div>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="small">Claude API-nyckel</span>
+                  <input id="settingAnthropicKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                  <span class="key-state" id="anthropicKeyState"></span>
+                </label>
+                <label class="field">
+                  <span class="small">Gemini API-nyckel</span>
+                  <input id="settingGeminiKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                  <span class="key-state" id="geminiKeyState"></span>
+                </label>
+                <label class="field">
+                  <span class="small">OpenRouter API-nyckel</span>
+                  <input id="settingOpenRouterKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                  <span class="key-state" id="openRouterKeyState"></span>
+                </label>
+                <label class="check-field"><input id="clearAnthropicKey" type="checkbox"> Ta bort Claude-nyckel</label>
+                <label class="check-field"><input id="clearGeminiKey" type="checkbox"> Ta bort Gemini-nyckel</label>
+                <label class="check-field"><input id="clearOpenRouterKey" type="checkbox"> Ta bort OpenRouter-nyckel</label>
               </div>
-              <label class="field wide">
-                <span class="small">Klistra in en operatörsnyckel</span>
-                <input id="settingOperatorToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
-              </label>
-              <label class="check-field wide"><input id="clearOperatorToken" type="checkbox"> Ta bort operatörsnyckel</label>
+              <div class="form-subtitle">Providerordning (fallback-kedja)</div>
+              <div class="settings-provider-list" id="settingsProviders"></div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="security">
+              <div class="form-grid">
+                <div class="field wide">
+                  <span class="small">Nuvarande klusternyckel</span>
+                  <div class="token-row">
+                    <input id="currentClusterToken" class="mono" type="password" readonly>
+                    <button class="icon" id="toggleTokenVisibility" data-icon="eye" type="button" title="Visa/dölj"></button>
+                    <button id="copyClusterToken" type="button">Kopiera</button>
+                    <button id="regenerateClusterToken" type="button">Generera ny</button>
+                  </div>
+                  <div class="token-hint">
+                    Workers och Overseers måste ha samma nyckel för att gå med i klustret.
+                    Kopiera den härifrån och klistra in den i deras inställningar (fältet nedan),
+                    eller i fältet "Klusternyckel" när du startar en nod manuellt.
+                  </div>
+                </div>
+                <label class="field wide">
+                  <span class="small">Klistra in en nyckel för att para ihop den här noden</span>
+                  <input id="settingClusterToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                  <span class="key-state" id="clusterTokenState"></span>
+                </label>
+                <label class="check-field wide"><input id="clearClusterToken" type="checkbox"> Ta bort klusternyckel (öppnar klustret för hela LAN:et)</label>
+                <div class="field wide">
+                  <span class="small">Operatörsnyckel (begränsad åtkomst: mål, chatt, avbryt - ej nodhantering/inställningar)</span>
+                  <div class="token-row">
+                    <input id="currentOperatorToken" class="mono" type="password" readonly>
+                    <button class="icon" id="toggleOperatorTokenVisibility" data-icon="eye" type="button" title="Visa/dölj"></button>
+                    <button id="copyOperatorToken" type="button">Kopiera</button>
+                    <button id="regenerateOperatorToken" type="button">Generera ny</button>
+                  </div>
+                </div>
+                <label class="field wide">
+                  <span class="small">Klistra in en operatörsnyckel</span>
+                  <input id="settingOperatorToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                </label>
+                <label class="check-field wide"><input id="clearOperatorToken" type="checkbox"> Ta bort operatörsnyckel</label>
+              </div>
+            </section>
+            <section class="settings-pane hidden" data-settings-pane="update">
               <div id="updateSection">
-                <div class="form-subtitle">Uppdatering</div>
                 <div class="field wide">
                   <span class="small" id="updateStatus">Nuvarande version: ...</span>
                   <div class="token-row">
@@ -1106,43 +1225,8 @@ internal static class Dashboard
                   </div>
                 </div>
               </div>
-            </div>
-          </section>
-          <section class="form-section">
-            <div class="form-title">Modeller &amp; provider</div>
-            <div class="form-grid">
-              <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
-              <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
-              <label class="field"><span class="small">OpenRouter-modell</span><input id="settingOpenRouterModel" placeholder="t.ex. anthropic/claude-sonnet-4.5"></label>
-              <label class="field"><span class="small">Lokal Ollama-modell</span><input id="settingOllamaModel" placeholder="Använd rekommenderad"></label>
-              <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
-              <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
-              <label class="check-field wide"><input id="settingAutoPull" type="checkbox"> Hämta vald lokal modell automatiskt</label>
-            </div>
-            <div class="form-subtitle">API-nycklar</div>
-            <div class="form-grid">
-              <label class="field">
-                <span class="small">Claude API-nyckel</span>
-                <input id="settingAnthropicKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
-                <span class="key-state" id="anthropicKeyState"></span>
-              </label>
-              <label class="field">
-                <span class="small">Gemini API-nyckel</span>
-                <input id="settingGeminiKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
-                <span class="key-state" id="geminiKeyState"></span>
-              </label>
-              <label class="field">
-                <span class="small">OpenRouter API-nyckel</span>
-                <input id="settingOpenRouterKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
-                <span class="key-state" id="openRouterKeyState"></span>
-              </label>
-              <label class="check-field"><input id="clearAnthropicKey" type="checkbox"> Ta bort Claude-nyckel</label>
-              <label class="check-field"><input id="clearGeminiKey" type="checkbox"> Ta bort Gemini-nyckel</label>
-              <label class="check-field"><input id="clearOpenRouterKey" type="checkbox"> Ta bort OpenRouter-nyckel</label>
-            </div>
-            <div class="form-subtitle">Providerordning (fallback-kedja)</div>
-            <div class="settings-provider-list" id="settingsProviders"></div>
-          </section>
+            </section>
+          </div>
         </div>
         <div class="dialog-foot">
           <button id="cancelSettings">Avbryt</button>
@@ -1216,6 +1300,46 @@ internal static class Dashboard
         };
 
         const $ = id => document.getElementById(id);
+        // Single hand-authored stroke-icon set (no external font/CDN - the
+        // app is offline-first, single-file) replacing every emoji in the
+        // UI. Every shape uses only safe SVG primitives (line/circle/rect/
+        // ellipse/polyline/polygon, at most a single relative arc for
+        // "refresh") - no hand-rolled bezier paths that could silently fail
+        // to render. currentColor means every icon inherits the button/text
+        // color automatically, light or dark theme, no separate icon
+        // palette to maintain.
+        const ICONS = {
+          key: '<circle cx="7" cy="7" r="4"/><line x1="10" y1="10" x2="21" y2="21"/><line x1="14" y1="14" x2="17" y2="11"/><line x1="17" y1="17" x2="20" y2="14"/>',
+          monitor: '<rect x="2" y="4" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="18" x2="12" y2="21"/>',
+          globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><line x1="3" y1="12" x2="21" y2="12"/>',
+          clock: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="15"/>',
+          send: '<polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+          pin: '<circle cx="12" cy="9" r="6"/><polygon points="7.5 13.5 16.5 13.5 12 21"/>',
+          'pin-filled': '<circle cx="12" cy="9" r="6" fill="currentColor"/><polygon points="7.5 13.5 16.5 13.5 12 21" fill="currentColor"/>',
+          trash: '<line x1="4" y1="7" x2="20" y2="7"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><rect x="6" y="7" width="12" height="14" rx="1"/><rect x="9" y="3" width="6" height="4" rx="1"/>',
+          eye: '<ellipse cx="12" cy="12" rx="10" ry="6"/><circle cx="12" cy="12" r="3"/>',
+          'eye-off': '<ellipse cx="12" cy="12" rx="10" ry="6"/><circle cx="12" cy="12" r="3"/><line x1="2" y1="2" x2="22" y2="22"/>',
+          x: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+          wrench: '<line x1="5" y1="19" x2="19" y2="5"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/>',
+          check: '<polyline points="4 12 9 17 20 6"/>',
+          'check-circle': '<circle cx="12" cy="12" r="9"/><polyline points="7.5 12.5 10.5 15.5 16.5 9"/>',
+          'alert-triangle': '<polygon points="12 3 22 21 2 21"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>',
+          'x-circle': '<circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>',
+          sun: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>',
+          moon: '<circle cx="12" cy="13" r="7" fill="currentColor" stroke="none"/><circle cx="17" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="20" cy="10" r="0.7" fill="currentColor" stroke="none"/>',
+          folder: '<polygon points="3 6 9 6 11 8 21 8 21 19 3 19"/>',
+          refresh: '<path d="M4 12a8 8 0 1 1 2.5 5.8"/><polyline points="4 17 4 12 9 12"/>',
+          plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+          'chevron-up': '<polyline points="6 15 12 9 18 15"/>',
+          'chevron-down': '<polyline points="6 9 12 15 18 9"/>'
+        };
+        const icon = (name, size = 16) =>
+          `<svg class="icon-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
+        function initIcons() {
+          document.querySelectorAll('[data-icon]').forEach(el => {
+            el.innerHTML = icon(el.dataset.icon, Number(el.dataset.iconSize) || 16);
+          });
+        }
         // Must cover quotes too, not just <>& - every call site below embeds
         // this inside double-quoted HTML attributes (data-node-id="${esc(...)}"
         // etc), fed by network input nobody has authenticated yet (a raw LAN
@@ -1280,8 +1404,8 @@ internal static class Dashboard
                 <div class="provider-name">${providerLabels[id] ?? id}</div>
                 <div class="provider-id">${id}</div>
               </div>
-              <button class="icon" title="Move up" data-provider-up="${id}" ${index === 0 ? 'disabled' : ''}>^</button>
-              <button class="icon" title="Move down" data-provider-down="${id}" ${index === order.length - 1 ? 'disabled' : ''}>v</button>
+              <button class="icon" title="Move up" data-provider-up="${id}" ${index === 0 ? 'disabled' : ''}>${icon('chevron-up', 14)}</button>
+              <button class="icon" title="Move down" data-provider-down="${id}" ${index === order.length - 1 ? 'disabled' : ''}>${icon('chevron-down', 14)}</button>
             </div>`).join('');
 
           $('providerSummary').textContent = activeProviderOrder().map(id => providerLabels[id] ?? id).join(' -> ') || 'Local';
@@ -1390,7 +1514,8 @@ internal static class Dashboard
           const activeTokens = state.activeSession?.totalUsage
             ? (state.activeSession.totalUsage.inputTokens || 0) + (state.activeSession.totalUsage.outputTokens || 0)
             : 0;
-          $('statusSessionTokens').textContent = activeTokens ? `${activeTokens.toLocaleString('sv-SE')} tok |` : '';
+          $('statusSessionTokens').textContent = activeTokens ? `${activeTokens.toLocaleString('sv-SE')} tok` : '';
+          $('statusSessionTokensSep').style.display = activeTokens ? 'inline-block' : 'none';
           $('statusCost').textContent = state.stats ? (fmtUsd(state.stats.today.costUsd) || '$0.00') : '';
           $('statusVersion').textContent = state.updateInfo?.currentVersion ? `v${state.updateInfo.currentVersion}` : '';
         }
@@ -1597,9 +1722,9 @@ internal static class Dashboard
           return `
           <div class="session-item ${active}">
             <div class="session-item-row">
-              <button class="icon-mini" data-session-pin="${esc(s.id)}" title="${s.pinned ? 'Ta bort nål' : 'Nåla'}">${s.pinned ? '📌' : '📍'}</button>
+              <button class="icon-mini" data-session-pin="${esc(s.id)}" title="${s.pinned ? 'Ta bort nål' : 'Nåla'}">${icon(s.pinned ? 'pin-filled' : 'pin', 13)}</button>
               <div class="session-item-title" data-session-open="${esc(s.id)}" title="${esc(s.title)}">${esc(s.title)}</div>
-              <button class="icon-mini" data-session-delete="${esc(s.id)}" title="Ta bort">✕</button>
+              <button class="icon-mini" data-session-delete="${esc(s.id)}" title="Ta bort">${icon('x', 13)}</button>
             </div>
             <div class="session-item-meta" data-session-open="${esc(s.id)}">${esc(folderBaseName(s.folderPath))} · ${ago(s.lastActiveAt)}</div>
           </div>`;
@@ -1657,7 +1782,7 @@ internal static class Dashboard
           if (!s) return;
           $('sessionTitle').textContent = s.title;
           $('sessionFolderPath').textContent = s.folderPath;
-          $('sessionPinBtn').textContent = s.pinned ? '📌' : '📍';
+          $('sessionPinBtn').innerHTML = icon(s.pinned ? 'pin-filled' : 'pin');
           $('sessionPinBtn').title = s.pinned ? 'Ta bort nål' : 'Nåla';
           const usage = s.totalUsage;
           const totalTokens = usage ? (usage.inputTokens || 0) + (usage.outputTokens || 0) : 0;
@@ -1673,7 +1798,7 @@ internal static class Dashboard
               <div class="message-meta"><span class="pill">✓ ${esc(m.toolName ?? 'verktyg')}</span></div>
               <div class="mono small" style="white-space:pre-wrap">${esc(trunc(m.content ?? '', 2000))}</div>
             </article>`;
-          const toolLines = (m.toolCalls ?? []).map(tc => `🔧 ${tc.name}(${trunc(tc.argumentsJson ?? '', 160)})`).join('\n');
+          const toolLines = (m.toolCalls ?? []).map(tc => `> ${tc.name}(${trunc(tc.argumentsJson ?? '', 160)})`).join('\n');
           const body = [toolLines, m.content].filter(Boolean).join('\n');
           return `<article class="message assistant">
             <div class="message-meta"><strong>AiLocal</strong></div>
@@ -1791,7 +1916,7 @@ internal static class Dashboard
             }
           } catch (error) {
             liveAssistant.state = 'Failed';
-            appendLine(`❌ ${error.message}`);
+            appendLine(`✗ ${error.message}`);
             showSessionNotice(error.message, true);
           } finally {
             $('sessionSendBtn').disabled = false;
@@ -1842,6 +1967,28 @@ internal static class Dashboard
             await loadSessions();
           } catch (error) {
             showGlobalNotice(error.message, true);
+          }
+        }
+
+        // Native Windows folder picker (see DialogsApi/NativeDialogs) - falls
+        // back to the plain text input with no error dialog on non-Windows
+        // or an older WebView2 runtime, since typing a path always still
+        // works regardless of whether this endpoint is available.
+        async function pickFolder(inputId, noticeElId) {
+          const input = $(inputId);
+          try {
+            const result = await fetchJson('/api/dialogs/pick-folder', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initialDirectory: input.value.trim() || null })
+            });
+            if (result?.path) input.value = result.path;
+          } catch (error) {
+            const box = noticeElId ? $(noticeElId) : null;
+            if (box) {
+              box.textContent = error.message;
+              box.className = 'notice show bad';
+            }
           }
         }
 
@@ -2320,7 +2467,7 @@ internal static class Dashboard
               <div class="small">${esc(trunc(t.title || t.prompt, 64))}</div>
               <div class="small">${esc(delegation)}</div>
               <div class="small">${esc(t.provider ? `${t.provider}/${t.model ?? ''}` : '')}${cost ? ' | ' + esc(cost) : ''}</div>
-              ${cancellable ? `<div class="detail-actions"><button class="icon" title="Avbryt" data-cancel-task="${esc(t.id)}">✕</button></div>` : ''}
+              ${cancellable ? `<div class="detail-actions"><button class="icon" title="Avbryt" data-cancel-task="${esc(t.id)}">${icon('x', 14)}</button></div>` : ''}
             </div>`;
           }).join('') : '<div class="empty">Inga jobb ännu.</div>';
 
@@ -2379,7 +2526,7 @@ internal static class Dashboard
                 ${m.workerName ? `<span class="small">${esc(m.workerName)}</span>` : ''}
                 ${m.state ? `<span>${esc(m.state)}</span>` : ''}
                 ${m.provider ? `<span>${esc(m.provider)}/${esc(m.model ?? '')}</span>` : ''}
-                ${inFlight ? `<button class="icon" title="Avbryt" data-cancel-task="${esc(m.taskId)}">✕</button>` : ''}
+                ${inFlight ? `<button class="icon" title="Avbryt" data-cancel-task="${esc(m.taskId)}">${icon('x', 14)}</button>` : ''}
               </div>
               <div>${esc(content)}</div>
             </article>`;
@@ -2411,7 +2558,7 @@ internal static class Dashboard
             return `
             <article class="message assistant">
               <div class="message-meta"><strong>AiLocal</strong><span class="pill">${esc(statusLabel)}</span></div>
-              <div>${m.planState === 'failed' ? `❌ ${esc(m.error)}` : 'Bryter ner målet i deluppgifter...'}</div>
+              <div>${m.planState === 'failed' ? `✗ ${esc(m.error)}` : 'Bryter ner målet i deluppgifter...'}</div>
             </article>`;
           }
 
@@ -2757,7 +2904,7 @@ internal static class Dashboard
             box.innerHTML =
               'Nytt kluster? Klicka <strong>"Starta kluster (Host + Worker)"</strong> till vänster för att komma igång på den här datorn, ' +
               'eller välj Host/Worker/Overseer ovan. Kopiera klusternyckeln från Host-inställningarna till andra datorer som ska gå med. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">✕</button>';
+              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
             box.className = 'notice show';
             const dismiss = $('dismissFirstRun');
             if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
@@ -2766,7 +2913,7 @@ internal static class Dashboard
               'Ingen Worker ansluten ännu. Starta en Worker på den här eller en annan dator på samma nätverk - den dyker upp under ' +
               '"Upptäckta enheter" här nedanför, redo att anslutas med ett klick. Ser du den inte? Klistra in klusternyckeln ' +
               '(Inställningar -> Klustersäkerhet) på Worker-datorn istället. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">✕</button>';
+              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
             box.className = 'notice show';
             const dismiss = $('dismissFirstRun');
             if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
@@ -2775,7 +2922,7 @@ internal static class Dashboard
               'Den här Workern är inte ansluten till någon Host än. Öppna Host-datorns instrumentpanel - den ser den här ' +
               'datorn automatiskt under "Upptäckta enheter" och kan ansluta med ett klick. Väntar du på en bekräftelse ' +
               'istället? Kolla om det ligger en väntande förfrågan högst upp på den här sidan. ' +
-              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">✕</button>';
+              '<button class="icon" id="dismissFirstRun" title="Stäng" style="float:right">' + icon('x') + '</button>';
             box.className = 'notice show';
             const dismiss = $('dismissFirstRun');
             if (dismiss) dismiss.onclick = () => { state.firstRunDismissed = true; renderFirstRunBanner(); };
@@ -2844,8 +2991,8 @@ internal static class Dashboard
             <div class="settings-provider">
               <input type="checkbox" ${state.settingsEnabled[id] ? 'checked' : ''} data-settings-toggle="${id}">
               <div><strong>${providerLabels[id] ?? id}</strong><div class="small">${id}</div></div>
-              <button class="icon" title="Flytta upp" data-settings-up="${id}" ${index === 0 ? 'disabled' : ''}>^</button>
-              <button class="icon" title="Flytta ner" data-settings-down="${id}" ${index === order.length - 1 ? 'disabled' : ''}>v</button>
+              <button class="icon" title="Flytta upp" data-settings-up="${id}" ${index === 0 ? 'disabled' : ''}>${icon('chevron-up', 14)}</button>
+              <button class="icon" title="Flytta ner" data-settings-down="${id}" ${index === order.length - 1 ? 'disabled' : ''}>${icon('chevron-down', 14)}</button>
             </div>`).join('');
 
           document.querySelectorAll('[data-settings-toggle]').forEach(input => {
@@ -2889,12 +3036,12 @@ internal static class Dashboard
             : 'Ingen klusternyckel';
           $('currentClusterToken').value = data.clusterToken ?? '';
           $('currentClusterToken').type = 'password';
-          $('toggleTokenVisibility').textContent = '👁';
+          $('toggleTokenVisibility').innerHTML = icon('eye');
           $('settingOperatorToken').value = '';
           $('clearOperatorToken').checked = false;
           $('currentOperatorToken').value = data.operatorToken ?? '';
           $('currentOperatorToken').type = 'password';
-          $('toggleOperatorTokenVisibility').textContent = '👁';
+          $('toggleOperatorTokenVisibility').innerHTML = icon('eye');
           $('settingAutoStartRow').style.display = data.startWithWindowsSupported === false ? 'none' : 'flex';
           $('settingAutoStart').checked = data.startWithWindows ?? false;
           $('settingAnthropicModel').value = data.anthropicModel ?? '';
@@ -2924,14 +3071,14 @@ internal static class Dashboard
           const field = $('currentClusterToken');
           const hidden = field.type === 'password';
           field.type = hidden ? 'text' : 'password';
-          $('toggleTokenVisibility').textContent = hidden ? '🙈' : '👁';
+          $('toggleTokenVisibility').innerHTML = icon(hidden ? 'eye-off' : 'eye');
         }
 
         function toggleOperatorTokenVisibility() {
           const field = $('currentOperatorToken');
           const hidden = field.type === 'password';
           field.type = hidden ? 'text' : 'password';
-          $('toggleOperatorTokenVisibility').textContent = hidden ? '🙈' : '👁';
+          $('toggleOperatorTokenVisibility').innerHTML = icon(hidden ? 'eye-off' : 'eye');
         }
 
         async function copyOperatorToken() {
@@ -2966,7 +3113,7 @@ internal static class Dashboard
             });
             applySettingsData(data);
             $('currentOperatorToken').type = 'text';
-            $('toggleOperatorTokenVisibility').textContent = '🙈';
+            $('toggleOperatorTokenVisibility').innerHTML = icon('eye-off');
             showSettingsNotice('Ny operatörsnyckel genererad.');
           } catch (error) {
             showSettingsNotice(error.message, true);
@@ -3007,7 +3154,7 @@ internal static class Dashboard
             });
             applySettingsData(data);
             $('currentClusterToken').type = 'text';
-            $('toggleTokenVisibility').textContent = '🙈';
+            $('toggleTokenVisibility').innerHTML = icon('eye-off');
             showSettingsNotice('Ny klusternyckel genererad. Uppdatera övriga noder med den.');
           } catch (error) {
             showSettingsNotice(error.message, true);
@@ -3022,8 +3169,18 @@ internal static class Dashboard
           box.className = `notice show ${isError ? 'bad' : ''}`;
         }
 
+        function switchSettingsCategory(category) {
+          document.querySelectorAll('[data-settings-pane]').forEach(pane => {
+            pane.classList.toggle('hidden', pane.dataset.settingsPane !== category);
+          });
+          document.querySelectorAll('[data-settings-cat]').forEach(button => {
+            button.classList.toggle('active', button.dataset.settingsCat === category);
+          });
+        }
+
         async function openSettings(targetId = null) {
           state.settingsTarget = targetId;
+          switchSettingsCategory('general');
           $('settingsNotice').className = 'notice';
           $('saveSettings').disabled = true;
           $('settingsTitle').textContent = targetId ? 'Konfigurera Worker' : 'Nodinställningar';
@@ -3232,17 +3389,21 @@ internal static class Dashboard
         // entities (e.g. turn a literal "&amp;" from a tool's file contents
         // into "&amp;amp;").
         function stepLine(step) {
-          const icons = {
-            thinking: '💭',
-            tool_call: '🔧',
+          // Plain-text symbols, not the SVG icon() helper - this returns
+          // plain text (see the doc comment above), not HTML, so it can't
+          // embed markup without breaking the single esc() pass renderMessages()
+          // already does over the whole message body.
+          const stepMarkers = {
+            thinking: '…',
+            tool_call: '>',
             tool_result: '✓',
-            tool_error: '⚠',
-            done: '✅',
-            error: '❌',
-            cancelled: '⏹'
+            tool_error: '!',
+            done: '✓',
+            error: '✗',
+            cancelled: '×'
           };
-          const icon = icons[step.Kind] ?? '•';
-          return `${icon} ${step.Detail}`;
+          const marker = stepMarkers[step.Kind] ?? '·';
+          return `${marker} ${step.Detail}`;
         }
 
         // Assignment mode plans before it runs: the goal gets broken into a
@@ -3406,7 +3567,7 @@ internal static class Dashboard
             }
           } catch (error) {
             stepMsg.state = 'Failed';
-            appendLine(`❌ ${error.message}`);
+            appendLine(`✗ ${error.message}`);
             summary = error.message;
           }
 
@@ -3481,6 +3642,9 @@ internal static class Dashboard
         $('cancelSettings').onclick = closeSettingsDialog;
         $('checkUpdateBtn').onclick = checkUpdateInSettings;
         $('applyUpdateBtn').onclick = applyUpdate;
+        document.querySelectorAll('[data-settings-cat]').forEach(button => {
+          button.onclick = () => switchSettingsCategory(button.dataset.settingsCat);
+        });
         $('settingsDialog').addEventListener('click', event => {
           if (event.target === $('settingsDialog')) closeSettingsDialog();
         });
@@ -3495,6 +3659,8 @@ internal static class Dashboard
         $('newSessionToggleBtn').onclick = () => toggleNewSessionForm();
         $('newSessionCancelBtn').onclick = () => toggleNewSessionForm(false);
         $('newSessionCreateBtn').onclick = createSession;
+        $('browseNewSessionFolder').onclick = () => pickFolder('newSessionFolderPath', 'newSessionNotice');
+        $('browseWorkspacePath').onclick = () => pickFolder('settingWorkspacePath', 'settingsNotice');
         $('newSessionFolderPath').addEventListener('keydown', event => {
           if (event.key === 'Enter') createSession();
         });
@@ -3517,7 +3683,7 @@ internal static class Dashboard
           document.documentElement.setAttribute('data-theme', theme);
           try { localStorage.setItem('ailocal-theme', theme); } catch {}
           const btn = $('themeBtn');
-          if (btn) btn.textContent = theme === 'dark' ? '☀' : '\u{1F319}';
+          if (btn) btn.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
         }
         function initTheme() {
           const requested = new URLSearchParams(window.location.search).get('theme');
@@ -3562,6 +3728,7 @@ internal static class Dashboard
           refresh();
         };
         initAuth();
+        initIcons();
 
         loadProviders();
         refresh();

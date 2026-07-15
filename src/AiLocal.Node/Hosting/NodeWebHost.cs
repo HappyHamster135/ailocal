@@ -323,6 +323,7 @@ public static class NodeWebHost
         // role, not just Host/Worker - same tier as everything else mapped
         // in this method, which runs unconditionally before the per-role switch.
         SessionApi.MapEndpoints(app);
+        DialogsApi.MapEndpoints(app);
     }
 
     private static string CurrentVersion => SelfUpdater.CurrentVersion;
