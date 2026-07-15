@@ -221,6 +221,13 @@ public sealed class HostSettings
     /// <summary>Automatic retries per (sub)task after a non-cancelled failure.</summary>
     public int MaxRetries { get; set; } = 2;
 
+    /// <summary>After MaxRetries failures on the selected (cheaper) model, the
+    /// Host escalates the task to a stronger model by bumping its complexity
+    /// one notch (capped at 5). MaxEscalations bounds how many times it will
+    /// do this before giving up - so a subtask that keeps failing advances to a
+    /// bigger model instead of just being dropped.</summary>
+    public int MaxEscalations { get; set; } = 2;
+
     /// <summary>Keep at most this many completed/failed/cancelled top-level goals
     /// (plus their children) in memory and in host-state.json.</summary>
     public int MaxCompletedTasks { get; set; } = 500;

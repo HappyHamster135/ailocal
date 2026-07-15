@@ -43,6 +43,21 @@ public sealed class AgentTask
     /// <summary>How many times this task has been automatically retried after a failure.</summary>
     public int RetryCount { get; set; }
 
+    /// <summary>How many times the Host has escalated this task to a stronger
+    /// model after repeated failures on a cheaper one (see DispatchWithRetryAsync).
+    /// Each escalation bumps Complexity by one, up to 5.</summary>
+    public int EscalationCount { get; set; }
+
+    /// <summary>Complexity this task was planned with. Escalation raises
+    /// <see cref="AgentTask.Complexity"/> above this; keeping the original lets
+    /// us detect/cap how far we've escalated.</summary>
+    public int? OriginalComplexity { get; set; }
+
+    /// <summary>Parallelism requested for this goal (how many workers to fan
+    /// out across). Stored so an interrupted goal can be resumed with the same
+    /// fan-out it was originally given.</summary>
+    public int? Parallelism { get; set; }
+
     /// <summary>Prior conversation turns to prepend before Prompt when dispatching
     /// (only set for a chat-originated, single-worker goal).</summary>
     public List<ChatMessage>? ContextMessages { get; set; }

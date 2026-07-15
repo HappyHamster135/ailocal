@@ -1998,8 +1998,8 @@ internal static class Dashboard
       <script>
         const AUTH_HEADER = 'X-AiLocal-Token';
         const roleName = ['Launcher','Host','Worker','Overseer'];
-        const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled'];
-        const cancellableStates = ['Pending','Dispatched','Running','Queued'];
+        const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled','Paused'];
+        const cancellableStates = ['Pending','Dispatched','Running','Queued','Paused'];
         const fmtUsd = value => (value == null) ? '' : (value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`);
         const fmtTokens = n => (n == null ? '0' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
         function renderCostBreakdown(stats) {
@@ -3702,7 +3702,7 @@ internal static class Dashboard
             let payload;
             try { payload = JSON.parse(event.data); } catch { return; }
             if (payload.done) {
-              const terminal = ['Completed', 'Failed', 'Cancelled'].includes(payload.state);
+              const terminal = ['Completed', 'Failed', 'Cancelled', 'Paused'].includes(payload.state);
               const hadDeltas = (state.streamBuffer?.text?.length ?? 0) > 0;
               stopStreaming();
               if (!terminal) state.streamUnavailable.add(taskId);

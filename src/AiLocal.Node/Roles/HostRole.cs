@@ -204,17 +204,40 @@ public sealed class TaskBoard
         _settings = settings;
         foreach (var task in store.ReadTasks())
         {
-            if (task.State is TaskState.Pending or TaskState.Queued or TaskState.Dispatched or TaskState.Running)
-            {
-                task.State = TaskState.Failed;
-                task.Error = "Host restarted before this task completed.";
-                task.CompletedAt = DateTimeOffset.UtcNow;
-            }
+            // An in-flight task at shutdown is NOT a failure - it was simply
+            // interrupted. Mark it Paused so it can be resumed (see
+            // ResumeInterruptedAsync), so the "company" keeps its week's work
+            // across a reboot instead of losing everything to Failed.
+            CoerceRestartState(task);
             _tasks[task.Id] = task;
         }
         Prune();
         Save();
     }
+
+    /// <summary>On Host restart, in-flight tasks (Pending/Queued/Dispatched/
+    /// Running) were only interrupted, not failed - coerce them to Paused so
+    /// they can be resumed. Terminal states (Completed/Failed/Cancelled) and
+    /// already-Paused tasks are left alone. Extracted so the rule is unit-
+    /// testable without standing up the whole dispatch pipeline.</summary>
+    internal static void CoerceRestartState(AgentTask task)
+    {
+        if (task.State is TaskState.Pending or TaskState.Queued or TaskState.Dispatched or TaskState.Running)
+        {
+            task.State = TaskState.Paused;
+            task.Error = "Host startades om innan målet hann klaras av.";
+            task.CompletedAt = null;
+        }
+    }
+
+    /// <summary>Root tasks that were in flight when the Host last stopped and
+    /// should be picked back up on startup. Children are resumed implicitly
+    /// when their parent re-plans.</summary>
+    public IReadOnlyList<AgentTask> InterruptedTasks() =>
+        _tasks.Values
+            .Where(t => t.ParentId is null && t.State == TaskState.Paused)
+            .OrderBy(t => t.CreatedAt)
+            .ToList();
 
     public AgentTask Create(string prompt, string? system, string? title = null, string? parentId = null)
     {
@@ -861,6 +884,42 @@ public static class HostRole
         });
 
         ScheduleApi.MapEndpoints(app);
+
+        // Resume in-flight goals interrupted by a Host restart. They were
+        // marked Paused (not Failed) in the TaskBoard constructor, so the
+        // company keeps its work - we just re-plan and re-dispatch them.
+        app.Lifetime.ApplicationStarted.Register(async () =>
+        {
+            try
+            {
+                var board = app.Services.GetRequiredService<TaskBoard>();
+                var interrupted = board.InterruptedTasks();
+                if (interrupted.Count == 0) return;
+
+                var reg = app.Services.GetRequiredService<WorkerRegistry>();
+                var httpFactory = app.Services.GetRequiredService<IHttpClientFactory>();
+                var providers = app.Services.GetRequiredService<FallbackChatProvider>();
+                var broker = app.Services.GetRequiredService<WorkerSlotBroker>();
+                var hub = app.Services.GetRequiredService<TaskStreamHub>();
+                var cancellationRegistry = app.Services.GetRequiredService<TaskCancellationRegistry>();
+                var settings = app.Services.GetRequiredService<NodeSettings>();
+                var log = app.Services.GetRequiredService<ILogger<TaskBoard>>();
+
+                foreach (var root in interrupted)
+                {
+                    root.State = TaskState.Running;
+                    board.Save();
+                    var req = new SubmitTaskRequest(root.Prompt, root.System, root.Parallelism);
+                    _ = Task.Run(() => PlanAndDispatchAsync(root, req, root.ContextMessages, board, reg,
+                        httpFactory, providers, broker, hub, cancellationRegistry, settings,
+                        CancellationToken.None, log));
+                }
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogWarning(ex, "could not auto-resume interrupted goals");
+            }
+        });
     }
 
     private static object BuildStats(TaskBoard board)
@@ -1179,6 +1238,7 @@ public static class HostRole
     {
         var workers = reg.AvailableWorkers();
         var root = board.Create(req.Prompt, req.System, "Goal");
+        root.Parallelism = req.Parallelism;
 
         if (workers.Count == 0)
         {
@@ -1241,6 +1301,7 @@ public static class HostRole
             {
                 var item = plan.Count == 1 ? plan[0] : new PlannedWorkItem("Task", req.Prompt);
                 root.Complexity = item.Complexity;
+                root.OriginalComplexity = item.Complexity;
                 root.RequiredSkill = item.Skill;
                 root.ContextMessages = contextMessages?.Count > 0 ? contextMessages.ToList() : null;
                 root.State = TaskState.Queued;
@@ -1273,6 +1334,7 @@ public static class HostRole
             {
                 var child = board.Create(item.Prompt, CombineSystem(req.System, objectiveBriefing), item.Title, root.Id);
                 child.Complexity = item.Complexity;
+                child.OriginalComplexity = item.Complexity;
                 child.RequiredSkill = item.Skill;
                 child.State = TaskState.Queued;
                 board.Save();
@@ -1334,15 +1396,30 @@ public static class HostRole
                 await DispatchOnceAsync(task, match, modelHint, providerOrder, board, broker, httpFactory, streamHub,
                     hostSettings, cts.Token, log);
 
-                if (task.State != TaskState.Failed || task.RetryCount >= hostSettings.MaxRetries)
+                if (task.State != TaskState.Failed)
                     return;
 
-                task.RetryCount++;
-                task.State = TaskState.Queued;
-                task.Error = null;
-                board.Save();
-                log.LogInformation("retrying task {Id} (attempt {Attempt}/{Max})",
-                    task.Id, task.RetryCount, hostSettings.MaxRetries);
+                // Exhausted cheap-model retries. Before giving up, escalate to a
+                // stronger model: bump complexity one notch (capped at 5) so
+                // ForTask routes to a bigger model, then retry from scratch.
+                if (task.RetryCount >= hostSettings.MaxRetries)
+                {
+                    if (!TryEscalate(task, hostSettings, log))
+                        return;
+
+                    task.State = TaskState.Queued;
+                    task.Error = null;
+                    board.Save();
+                }
+                else
+                {
+                    task.RetryCount++;
+                    task.State = TaskState.Queued;
+                    task.Error = null;
+                    board.Save();
+                    log.LogInformation("retrying task {Id} (attempt {Attempt}/{Max})",
+                        task.Id, task.RetryCount, hostSettings.MaxRetries);
+                }
 
                 var retryMatch = await TryClaimAsync(task, broker, requirement, board, log, cts.Token);
                 if (retryMatch is null) return;
@@ -1353,6 +1430,27 @@ public static class HostRole
         {
             cancellationRegistry.Complete(task.Id);
         }
+    }
+
+    /// <summary>Escalate a failed task to a stronger model: bump its complexity
+    /// one notch (capped at 5, the strongest tier) and reset the retry budget so
+    /// the dispatch loop retries from scratch on the bigger model. Returns false
+    /// (and leaves the task untouched) once we've escalated MaxEscalations times
+    /// or already hit complexity 5 - then the caller gives up for real.</summary>
+    internal static bool TryEscalate(AgentTask task, HostSettings hostSettings, ILogger log)
+    {
+        var canEscalate = task.EscalationCount < hostSettings.MaxEscalations
+            && (task.Complexity ?? 3) < 5;
+        if (!canEscalate)
+            return false;
+
+        task.EscalationCount++;
+        task.Complexity = Math.Min(5, (task.Complexity ?? 3) + 1);
+        task.RetryCount = 0;
+        log.LogInformation(
+            "escalating task {Id} to stronger model (escalation {N}, complexity -> {C})",
+            task.Id, task.EscalationCount, task.Complexity);
+        return true;
     }
 
     private static async Task DispatchOnceAsync(
@@ -1613,12 +1711,25 @@ public static class HostRole
 
         if (children.Any(c => c.State == TaskState.Failed))
         {
-            parent.State = TaskState.Failed;
+            // If every child failed (even after escalation), the goal failed.
+            // But if some children succeeded, deliver what we have - a partial
+            // result beats losing the whole week's work. The operator sees
+            // which pieces failed and can re-run just those.
+            var anySucceeded = children.Any(c => c.State == TaskState.Completed && !string.IsNullOrWhiteSpace(c.Result));
+            if (!anySucceeded)
+            {
+                parent.State = TaskState.Failed;
+                parent.Error = string.Join(Environment.NewLine, children
+                    .Where(c => c.State is TaskState.Failed or TaskState.Cancelled)
+                    .Select(c => $"{c.Title ?? c.Id}: {c.Error ?? c.State.ToString()}"));
+                board.Save();
+                return;
+            }
+
             parent.Error = string.Join(Environment.NewLine, children
                 .Where(c => c.State is TaskState.Failed or TaskState.Cancelled)
                 .Select(c => $"{c.Title ?? c.Id}: {c.Error ?? c.State.ToString()}"));
-            board.Save();
-            return;
+            log.LogWarning("goal {TaskId} partially failed - delivering completed subtasks", parent.Id);
         }
 
         var usableChildren = children.Where(c => c.State != TaskState.Cancelled).ToList();
