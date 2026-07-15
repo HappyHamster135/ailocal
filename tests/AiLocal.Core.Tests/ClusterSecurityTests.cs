@@ -119,6 +119,7 @@ public class ClusterSecurityTests : IDisposable
     [InlineData("/api/nodes/abc123/settings", "PUT")]
     [InlineData("/api/nodes/abc123", "DELETE")]
     [InlineData("/api/hosts/abc123", "DELETE")]
+    [InlineData("/api/sessions/abc123", "DELETE")]
     public async Task Authorize_OperatorToken_OnAdminOnlyRoute_Rejects(string path, string method)
     {
         // Regression coverage for the two settings-leak fixes: GET on the
@@ -148,6 +149,45 @@ public class ClusterSecurityTests : IDisposable
         var passed = await InvokeAuthorize(ctx);
 
         Assert.True(passed);
+    }
+
+    /// <summary>Creating, messaging, and running a session are operator-safe -
+    /// only DELETE is admin-only (see the theory above). A session already
+    /// carries the exact same Full-mode power an operator token could already
+    /// reach via /api/assignment, so this doesn't widen what it could do.</summary>
+    [Theory]
+    [InlineData("/api/sessions", "POST")]
+    [InlineData("/api/sessions", "GET")]
+    [InlineData("/api/sessions/abc123", "GET")]
+    [InlineData("/api/sessions/abc123", "PUT")]
+    [InlineData("/api/sessions/abc123/run", "POST")]
+    [InlineData("/api/sessions/abc123/cancel", "POST")]
+    public async Task Authorize_OperatorToken_OnSessionRoute_Passes(string path, string method)
+    {
+        _store.Update(new SettingsUpdate(RegenerateClusterToken: true), _hostLocator);
+        _store.Update(new SettingsUpdate(RegenerateOperatorToken: true), _hostLocator);
+        var operatorToken = _store.GetOperatorToken()!;
+
+        var ctx = RemoteContext(operatorToken, path, method);
+        var passed = await InvokeAuthorize(ctx);
+
+        Assert.True(passed);
+        Assert.False(ClusterSecurity.IsAdminTier(ctx));
+    }
+
+    /// <summary>A session must be startable from a local browser tab with no
+    /// token at all - /api/sessions is NOT node-only (unlike /execute/*), so
+    /// it gets the same trusted-loopback bypass every other /api/* route does.</summary>
+    [Fact]
+    public async Task Authorize_Loopback_OnSessionRunRoute_PassesWithNoTokenAtAdminTier()
+    {
+        _store.Update(new SettingsUpdate(RegenerateClusterToken: true), _hostLocator);
+
+        var ctx = RemoteContext(token: null, path: "/api/sessions/abc123/run", method: "POST", ip: "127.0.0.1");
+        var passed = await InvokeAuthorize(ctx);
+
+        Assert.True(passed);
+        Assert.True(ClusterSecurity.IsAdminTier(ctx));
     }
 
     [Fact]

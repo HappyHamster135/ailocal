@@ -318,6 +318,11 @@ public static class NodeWebHost
                 ? Results.Ok(new { restarting = true })
                 : Results.Problem(detail: result.Error ?? "Uppdateringen misslyckades.", statusCode: StatusCodes.Status502BadGateway);
         });
+
+        // Sessions are local-only (see SessionStore) and available on every
+        // role, not just Host/Worker - same tier as everything else mapped
+        // in this method, which runs unconditionally before the per-role switch.
+        SessionApi.MapEndpoints(app);
     }
 
     private static string CurrentVersion => SelfUpdater.CurrentVersion;

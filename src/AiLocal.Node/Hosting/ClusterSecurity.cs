@@ -133,9 +133,13 @@ public static class ClusterSecurity
     /// worker - a GET here proxies straight to that worker's own /api/settings,
     /// which hands back the same shared cluster token /api/settings redacts
     /// for non-admin callers, see the redaction below), worker runtime
-    /// installs, and deleting a schedule. Everything else that passes the
-    /// security gate (goal/chat submission, task cancel, viewing
-    /// nodes/tasks/stats/schedules, creating/running a schedule) is operator-safe.
+    /// installs, deleting a schedule, and deleting a session. Everything else
+    /// that passes the security gate (goal/chat submission, task cancel,
+    /// viewing nodes/tasks/stats/schedules, creating/running a schedule,
+    /// creating/messaging/running a session) is operator-safe - a session
+    /// already carries the exact same Full-mode file/command power an
+    /// operator token could already reach via /api/assignment, so this
+    /// doesn't widen what an operator-tier caller could already do.
     /// </summary>
     private static bool RequiresAdminTier(string method, PathString path)
     {
@@ -170,6 +174,10 @@ public static class ClusterSecurity
             return true;
 
         if (path.StartsWithSegments("/api/hosts") &&
+            string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (path.StartsWithSegments("/api/sessions") &&
             string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase))
             return true;
 

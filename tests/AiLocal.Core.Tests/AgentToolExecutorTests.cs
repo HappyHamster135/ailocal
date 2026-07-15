@@ -11,6 +11,12 @@ public class AgentToolExecutorTests : IDisposable
     public AgentToolExecutorTests()
     {
         _workspace = Path.Combine(Path.GetTempPath(), "ailocal-agent-tests-" + Guid.NewGuid().ToString("n"));
+        // Sandboxed's own constructor already creates this; Full's doesn't
+        // (see AgentToolExecutor) - create it upfront so every test here
+        // reflects a real session's folder, which always exists by the time
+        // an executor is built (SessionStore validates that before allowing
+        // one to be created).
+        Directory.CreateDirectory(_workspace);
     }
 
     public void Dispose()
@@ -164,6 +170,73 @@ public class AgentToolExecutorTests : IDisposable
         Assert.False(result.IsError);
         Assert.Contains("hello-from-agent", result.Output);
         Assert.Contains("exit code: 0", result.Output);
+    }
+
+    /// <summary>Regression: run_command's default working directory used to
+    /// be Environment.CurrentDirectory (wherever this node's own exe happened
+    /// to launch from) - a session-bound agent must default to ITS folder.</summary>
+    [Fact]
+    public async Task Full_RunCommand_NoExplicitWorkingDirectory_DefaultsToWorkspaceRoot()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+        var command = OperatingSystem.IsWindows() ? "cd" : "pwd";
+
+        var result = await executor.ExecuteAsync(Call("run_command", new { command }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Contains(_workspace, result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Full_RunCommand_RelativeWorkingDirectory_ResolvesAgainstWorkspaceRoot()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+        Directory.CreateDirectory(Path.Combine(_workspace, "subfolder"));
+        var command = OperatingSystem.IsWindows() ? "cd" : "pwd";
+
+        var result = await executor.ExecuteAsync(
+            Call("run_command", new { command, workingDirectory = "subfolder" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Contains(Path.Combine(_workspace, "subfolder"), result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Regression: a relative read/write/list path in Full mode used
+    /// to resolve against Environment.CurrentDirectory, not the session's own
+    /// folder - the same class of bug as run_command's working directory.</summary>
+    [Fact]
+    public async Task Full_WriteFile_RelativePath_ResolvesAgainstWorkspaceRoot()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+
+        var result = await executor.ExecuteAsync(
+            Call("write_file", new { path = "relative.txt", content = "landed in the workspace" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.True(File.Exists(Path.Combine(_workspace, "relative.txt")));
+    }
+
+    /// <summary>Regression guard: Full access must stay completely unconfined
+    /// for absolute paths - the workspace-binding fix above must only change
+    /// what a RELATIVE path means, never add confinement Full never had.</summary>
+    [Fact]
+    public async Task Full_WriteFile_AbsolutePathOutsideWorkspace_StillWorksUnconfined()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+        var outsidePath = Path.Combine(Path.GetTempPath(), "ailocal-agent-tests-outside-" + Guid.NewGuid().ToString("n") + ".txt");
+
+        try
+        {
+            var result = await executor.ExecuteAsync(
+                Call("write_file", new { path = outsidePath, content = "full access reaches outside the workspace" }), CancellationToken.None);
+
+            Assert.False(result.IsError);
+            Assert.True(File.Exists(outsidePath));
+        }
+        finally
+        {
+            try { File.Delete(outsidePath); } catch { /* best effort */ }
+        }
     }
 
     [Fact]

@@ -18,6 +18,8 @@ public static class NodeComposition
         services.AddSingleton<RegistrationStatus>();
         services.AddSingleton<LocalRuntimeManager>();
         services.AddSingleton<PairingCoordinator>();
+        services.AddSingleton<SessionStore>();
+        services.AddSingleton<SessionRunRegistry>();
         services.AddTransient<ClusterTokenHandler>();
         services.AddHttpClient();
 

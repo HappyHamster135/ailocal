@@ -9,7 +9,19 @@ namespace AiLocal.Core.Agent;
 /// "done" is the final answer, "error"/"cancelled" are terminal failures.</summary>
 public sealed record AgentStep(string Kind, string Detail);
 
-public sealed record AgentRunResult(bool Success, string FinalAnswer, IReadOnlyList<AgentStep> Steps, int Iterations);
+/// <summary>Messages carries the full updated conversation (including every
+/// tool call/result turn) so a caller can persist it and pass it back in as
+/// the next call's `history` to resume - Steps is a lossy, display-only
+/// projection of the same run and is not sufficient for that by itself.
+/// TotalUsage sums every iteration's TokenUsage (each provider response
+/// reports its own turn's usage only).</summary>
+public sealed record AgentRunResult(
+    bool Success,
+    string FinalAnswer,
+    IReadOnlyList<AgentStep> Steps,
+    int Iterations,
+    IReadOnlyList<ChatMessage> Messages,
+    TokenUsage TotalUsage);
 
 /// <summary>
 /// Runs an assignment to completion: send the conversation (with tools) to
@@ -44,7 +56,9 @@ public sealed class AgentLoop
         AgentAccessLevel accessLevel,
         string? modelHint = null,
         Func<AgentStep, Task>? onStep = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IReadOnlyList<ChatMessage>? history = null,
+        string? system = null)
     {
         var steps = new List<AgentStep>();
         async Task Emit(AgentStep step)
@@ -53,26 +67,43 @@ public sealed class AgentLoop
             if (onStep is not null) await onStep(step);
         }
 
+        // Every provider response reports only that turn's own usage - sum
+        // as we go so a caller (SessionStore) can track a session's running
+        // total across many separate RunAsync calls, not just one.
+        var inputTokens = 0;
+        var outputTokens = 0;
+        void AddUsage(TokenUsage usage)
+        {
+            inputTokens += usage.InputTokens;
+            outputTokens += usage.OutputTokens;
+        }
+        TokenUsage Usage() => new(inputTokens, outputTokens);
+
         var toolDefs = AgentToolExecutor.ToolsFor(accessLevel);
+        // history is seeded from a prior run's own returned Messages (see
+        // AgentRunResult) - clone it so repeated resumes never share/mutate
+        // a list some earlier caller still holds a reference to.
+        var messages = history is { Count: > 0 } ? new List<ChatMessage>(history) : new List<ChatMessage>();
+        messages.Add(new ChatMessage("user", assignment));
+
         if (toolDefs.Count == 0)
         {
             const string message = "Agent mode is not enabled on this Worker (access level is Off) - nothing to run this assignment with.";
             await Emit(new AgentStep("error", message));
-            return new AgentRunResult(false, message, steps, 0);
+            return new AgentRunResult(false, message, steps, 0, messages, Usage());
         }
-
-        var messages = new List<ChatMessage> { new("user", assignment) };
 
         for (var iteration = 1; iteration <= MaxIterations; iteration++)
         {
             if (ct.IsCancellationRequested)
             {
                 await Emit(new AgentStep("cancelled", "Cancelled by operator."));
-                return new AgentRunResult(false, "Cancelled by operator.", steps, iteration);
+                return new AgentRunResult(false, "Cancelled by operator.", steps, iteration, messages, Usage());
             }
 
             var response = await _complete(new ChatRequest
             {
+                System = system,
                 Messages = messages,
                 ModelHint = modelHint,
                 Tools = toolDefs.ToList()
@@ -82,10 +113,11 @@ public sealed class AgentLoop
             {
                 var error = response.Error ?? "unknown provider error";
                 await Emit(new AgentStep("error", error));
-                return new AgentRunResult(false, error, steps, iteration);
+                return new AgentRunResult(false, error, steps, iteration, messages, Usage());
             }
 
             var chat = response.Response!;
+            AddUsage(chat.Usage);
             if (!string.IsNullOrWhiteSpace(chat.Content))
                 await Emit(new AgentStep("thinking", chat.Content));
 
@@ -95,7 +127,8 @@ public sealed class AgentLoop
                 // assignment complete (or is stuck without knowing it needs
                 // a tool it wasn't given, which reads the same from here).
                 await Emit(new AgentStep("done", chat.Content));
-                return new AgentRunResult(true, chat.Content, steps, iteration);
+                messages.Add(new ChatMessage("assistant", chat.Content));
+                return new AgentRunResult(true, chat.Content, steps, iteration, messages, Usage());
             }
 
             messages.Add(new ChatMessage("assistant", chat.Content, ToolCalls: calls));
@@ -105,7 +138,7 @@ public sealed class AgentLoop
                 if (ct.IsCancellationRequested)
                 {
                     await Emit(new AgentStep("cancelled", "Cancelled by operator."));
-                    return new AgentRunResult(false, "Cancelled by operator.", steps, iteration);
+                    return new AgentRunResult(false, "Cancelled by operator.", steps, iteration, messages, Usage());
                 }
 
                 await Emit(new AgentStep("tool_call", $"{call.Name}({call.ArgumentsJson})"));
@@ -117,6 +150,6 @@ public sealed class AgentLoop
 
         var timeoutMessage = $"Assignment did not complete within {MaxIterations} iterations - stopped to avoid a runaway loop.";
         await Emit(new AgentStep("error", timeoutMessage));
-        return new AgentRunResult(false, timeoutMessage, steps, MaxIterations);
+        return new AgentRunResult(false, timeoutMessage, steps, MaxIterations, messages, Usage());
     }
 }

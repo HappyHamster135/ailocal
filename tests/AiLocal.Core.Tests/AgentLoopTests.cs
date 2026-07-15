@@ -225,6 +225,135 @@ public class AgentLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_NoHistory_ReturnsJustTheNewUserAndAssistantTurns()
+    {
+        var provider = FakeChatProvider.Success("test", "42.");
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+
+        var result = await loop.RunAsync("what is the answer?", AgentAccessLevel.Sandboxed);
+
+        Assert.Equal(2, result.Messages.Count);
+        Assert.Equal("user", result.Messages[0].Role);
+        Assert.Equal("what is the answer?", result.Messages[0].Content);
+        Assert.Equal("assistant", result.Messages[1].Role);
+        Assert.Equal("42.", result.Messages[1].Content);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithHistory_SeedsConversationAndAppendsRatherThanReplacing()
+    {
+        var history = new List<ChatMessage>
+        {
+            new("user", "write hello.txt"),
+            new("assistant", "Done, I created hello.txt")
+        };
+        // Snapshot the count/content at request time, not the ChatRequest
+        // object itself - AgentLoop passes its live, still-mutating `messages`
+        // list by reference, so holding onto `request` and inspecting it
+        // after RunAsync returns would see the FINAL state (including turns
+        // added after this request was sent), not what was actually sent.
+        int? sentCount = null;
+        string? sentLastContent = null;
+        var provider = new FakeChatProvider("test", false, request =>
+        {
+            sentCount = request.Messages.Count;
+            sentLastContent = request.Messages[^1].Content;
+            return ProviderResponse.Ok(new ChatResponse { Content = "Added the second line.", Model = "m", Provider = "test" });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        var result = await loop.RunAsync("now add a second line", AgentAccessLevel.Sandboxed, history: history);
+
+        // The provider must have seen the full prior conversation plus the
+        // new turn - not just the new turn alone (that would mean resume
+        // isn't actually threading context through to the model).
+        Assert.Equal(3, sentCount);
+        Assert.Equal("now add a second line", sentLastContent);
+
+        // Resume is only coherent if the returned Messages includes BOTH the
+        // seeded history AND this run's own new turns, ready to be persisted
+        // and passed back in as `history` again for a third message.
+        Assert.Equal(4, result.Messages.Count);
+        Assert.Equal("write hello.txt", result.Messages[0].Content);
+        Assert.Equal("now add a second line", result.Messages[2].Content);
+        Assert.Equal("Added the second line.", result.Messages[3].Content);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithHistory_DoesNotMutateTheCallersOriginalList()
+    {
+        var history = new List<ChatMessage> { new("user", "first"), new("assistant", "ok") };
+        var originalCount = history.Count;
+        var provider = FakeChatProvider.Success("test", "second reply");
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+
+        await loop.RunAsync("second message", AgentAccessLevel.Sandboxed, history: history);
+
+        Assert.Equal(originalCount, history.Count);
+    }
+
+    [Fact]
+    public async Task RunAsync_SystemPrompt_ReachesTheProviderRequest()
+    {
+        ChatRequest? captured = null;
+        var provider = new FakeChatProvider("test", false, request =>
+        {
+            captured = request;
+            return ProviderResponse.Ok(new ChatResponse { Content = "ok", Model = "m", Provider = "test" });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        await loop.RunAsync("go", AgentAccessLevel.Sandboxed, system: "You work in /some/folder.");
+
+        Assert.Equal("You work in /some/folder.", captured?.System);
+    }
+
+    [Fact]
+    public async Task RunAsync_NoSystemGiven_LeavesItNull()
+    {
+        ChatRequest? captured = null;
+        var provider = new FakeChatProvider("test", false, request =>
+        {
+            captured = request;
+            return ProviderResponse.Ok(new ChatResponse { Content = "ok", Model = "m", Provider = "test" });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        await loop.RunAsync("go", AgentAccessLevel.Sandboxed);
+
+        Assert.Null(captured?.System);
+    }
+
+    [Fact]
+    public async Task RunAsync_TotalUsage_SumsAcrossEveryIteration()
+    {
+        var callCount = 0;
+        var provider = new FakeChatProvider("test", false, _ =>
+        {
+            callCount++;
+            if (callCount == 1)
+                return ProviderResponse.Ok(new ChatResponse
+                {
+                    Content = "checking",
+                    Model = "m", Provider = "test",
+                    Usage = new TokenUsage(100, 20),
+                    ToolCalls = [new ToolCall("call_1", "list_files", "{}")]
+                });
+            return ProviderResponse.Ok(new ChatResponse
+            {
+                Content = "done", Model = "m", Provider = "test",
+                Usage = new TokenUsage(150, 10)
+            });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        var result = await loop.RunAsync("go", AgentAccessLevel.Sandboxed);
+
+        Assert.Equal(250, result.TotalUsage.InputTokens);
+        Assert.Equal(30, result.TotalUsage.OutputTokens);
+    }
+
+    [Fact]
     public async Task RunAsync_EmitsStepsViaCallback_AsTheyHappen_NotOnlyAtTheEnd()
     {
         var provider = new FakeChatProvider("test", false, request =>

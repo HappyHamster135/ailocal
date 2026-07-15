@@ -136,14 +136,29 @@ public sealed class AgentToolExecutor
     private async Task<ToolResult> RunCommandAsync(ToolCall call, JsonElement args, CancellationToken ct)
     {
         var command = RequireString(args, "command");
-        var workingDirectory = args.TryGetProperty("workingDirectory", out var wd) && wd.ValueKind == JsonValueKind.String
+        var requestedDirectory = args.TryGetProperty("workingDirectory", out var wd) && wd.ValueKind == JsonValueKind.String
             ? wd.GetString()!
-            : Environment.CurrentDirectory;
+            : ".";
+        // Same resolution as ResolvePath's Full branch: relative resolves
+        // against _workspaceRoot (an explicit absolute path still passes
+        // through unconfined - Full stays unrestricted, this only fixes what
+        // a RELATIVE path/the omitted-argument default means). Used to
+        // default straight to Environment.CurrentDirectory - wherever this
+        // node process's own exe happened to launch from, unrelated to the
+        // folder the agent is actually meant to be working in.
+        var workingDirectory = Path.GetFullPath(requestedDirectory, _workspaceRoot);
 
         var psi = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? new ProcessStartInfo("cmd.exe", $"/c {command}")
             : new ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"");
-        psi.WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory : Environment.CurrentDirectory;
+        // Unlike Sandboxed, a Full-mode executor's _workspaceRoot is never
+        // auto-created (see the constructor) - Process.Start throws on a
+        // working directory that doesn't exist, so fall all the way back to
+        // this process's own cwd (guaranteed to exist) rather than risk that,
+        // if even _workspaceRoot itself turns out to be missing.
+        psi.WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory
+            : Directory.Exists(_workspaceRoot) ? _workspaceRoot
+            : Environment.CurrentDirectory;
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
         psi.UseShellExecute = false;
@@ -188,8 +203,17 @@ public sealed class AgentToolExecutor
 
     private string ResolvePath(string requestedPath)
     {
+        // Full is deliberately unconfined - not a security boundary, that's
+        // the whole point of Full ("exactly like Claude Code/Codex have on
+        // the machine they run on") - an absolute path still passes straight
+        // through here untouched. What changes: a RELATIVE path used to
+        // resolve against Environment.CurrentDirectory (wherever this node's
+        // own exe happened to launch from), which has nothing to do with the
+        // folder the agent is actually working in. Path.GetFullPath's two-arg
+        // overload resolves a relative path against _workspaceRoot instead,
+        // while still returning an absolute path as-is when one is given.
         if (_level == AgentAccessLevel.Full)
-            return Path.GetFullPath(requestedPath);
+            return Path.GetFullPath(requestedPath, _workspaceRoot);
 
         // Sandboxed: reject absolute paths outright rather than trying to
         // "combine" them - Path.Combine(root, absolutePath) on Windows
