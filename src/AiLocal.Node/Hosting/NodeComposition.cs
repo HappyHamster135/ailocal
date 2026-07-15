@@ -83,6 +83,11 @@ public static class NodeComposition
                     httpFactory.CreateClient("openrouter"),
                     () => credentials.GetApiKey("openrouter"),
                     ps),
+
+                ["openai"] = new OpenAIProvider(
+                    httpFactory.CreateClient("openai"),
+                    () => credentials.GetApiKey("openai"),
+                    ps),
             };
 
             return new FallbackChatProvider(byName.Values, ps, msg => logger.LogInformation("{Message}", msg));

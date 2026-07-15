@@ -1191,6 +1191,7 @@ internal static class Dashboard
                 <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
                 <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
                 <label class="field"><span class="small">OpenRouter-modell</span><input id="settingOpenRouterModel" placeholder="t.ex. anthropic/claude-sonnet-4.5"></label>
+                <label class="field"><span class="small">ChatGPT-modell (OpenAI)</span><input id="settingOpenAIModel" placeholder="t.ex. gpt-4o"></label>
                 <label class="field"><span class="small">Lokal Ollama-modell</span><input id="settingOllamaModel" placeholder="Använd rekommenderad"></label>
                 <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
                 <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
@@ -1213,9 +1214,15 @@ internal static class Dashboard
                   <input id="settingOpenRouterKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
                   <span class="key-state" id="openRouterKeyState"></span>
                 </label>
+                <label class="field">
+                  <span class="small">OpenAI API-nyckel (ChatGPT)</span>
+                  <input id="settingOpenAIKey" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                  <span class="key-state" id="openAIKeyState"></span>
+                </label>
                 <label class="check-field"><input id="clearAnthropicKey" type="checkbox"> Ta bort Claude-nyckel</label>
                 <label class="check-field"><input id="clearGeminiKey" type="checkbox"> Ta bort Gemini-nyckel</label>
                 <label class="check-field"><input id="clearOpenRouterKey" type="checkbox"> Ta bort OpenRouter-nyckel</label>
+                <label class="check-field"><input id="clearOpenAIKey" type="checkbox"> Ta bort OpenAI-nyckel</label>
               </div>
               <div class="form-subtitle">Providerordning (fallback-kedja)</div>
               <div class="settings-provider-list" id="settingsProviders"></div>
@@ -1284,8 +1291,8 @@ internal static class Dashboard
         const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled'];
         const cancellableStates = ['Pending','Dispatched','Running','Queued'];
         const fmtUsd = value => (value == null) ? '' : (value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`);
-        const providerLabels = { anthropic: 'Claude', gemini: 'Gemini', openrouter: 'OpenRouter', ollama: 'Local' };
-        const providerIds = ['anthropic', 'gemini', 'openrouter', 'ollama'];
+        const providerLabels = { anthropic: 'Claude', openai: 'ChatGPT', gemini: 'Gemini', openrouter: 'OpenRouter', ollama: 'Local' };
+        const providerIds = ['anthropic', 'openai', 'gemini', 'openrouter', 'ollama'];
         const state = {
           local: null,
           host: null,
@@ -3193,6 +3200,7 @@ internal static class Dashboard
           $('settingAnthropicModel').value = data.anthropicModel ?? '';
           $('settingGeminiModel').value = data.geminiModel ?? '';
           $('settingOpenRouterModel').value = data.openRouterModel ?? '';
+          $('settingOpenAIModel').value = data.openAIModel ?? '';
           $('settingOllamaModel').value = data.ollamaModel ?? '';
           $('settingOllamaEndpoint').value = data.ollamaEndpoint ?? 'http://localhost:11434';
           $('settingMaxTokens').value = data.maxTokens ?? 4096;
@@ -3200,12 +3208,15 @@ internal static class Dashboard
           $('settingAnthropicKey').value = '';
           $('settingGeminiKey').value = '';
           $('settingOpenRouterKey').value = '';
+          $('settingOpenAIKey').value = '';
           $('clearAnthropicKey').checked = false;
           $('clearGeminiKey').checked = false;
           $('clearOpenRouterKey').checked = false;
+          $('clearOpenAIKey').checked = false;
           $('anthropicKeyState').textContent = data.anthropicKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
           $('geminiKeyState').textContent = data.geminiKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
           $('openRouterKeyState').textContent = data.openRouterKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
+          $('openAIKeyState').textContent = data.openAIKeyConfigured ? 'Nyckel konfigurerad' : 'Ingen nyckel';
 
           const priority = data.providerPriority?.length ? data.providerPriority : ['ollama'];
           state.settingsOrder = [...priority, ...providerIds.filter(id => !priority.includes(id))];
@@ -3462,6 +3473,7 @@ internal static class Dashboard
             anthropicModel: $('settingAnthropicModel').value,
             geminiModel: $('settingGeminiModel').value,
             openRouterModel: $('settingOpenRouterModel').value,
+            openAIModel: $('settingOpenAIModel').value,
             ollamaModel: $('settingOllamaModel').value,
             ollamaEndpoint: $('settingOllamaEndpoint').value,
             maxTokens: Number($('settingMaxTokens').value),
@@ -3469,9 +3481,11 @@ internal static class Dashboard
             anthropicApiKey: $('settingAnthropicKey').value || null,
             geminiApiKey: $('settingGeminiKey').value || null,
             openRouterApiKey: $('settingOpenRouterKey').value || null,
+            openAIApiKey: $('settingOpenAIKey').value || null,
             clearAnthropicApiKey: $('clearAnthropicKey').checked,
             clearGeminiApiKey: $('clearGeminiKey').checked,
-            clearOpenRouterApiKey: $('clearOpenRouterKey').checked
+            clearOpenRouterApiKey: $('clearOpenRouterKey').checked,
+            clearOpenAIApiKey: $('clearOpenAIKey').checked,
           };
           try {
             const url = state.settingsTarget

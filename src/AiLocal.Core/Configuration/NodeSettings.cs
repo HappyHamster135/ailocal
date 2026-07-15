@@ -83,10 +83,12 @@ public sealed class ModelTiers
 public sealed class ProviderSettings
 {
     /// <summary>Order in which providers are tried before falling back.</summary>
-    public List<string> Priority { get; set; } = new() { "anthropic", "gemini", "openrouter", "ollama" };
+    public List<string> Priority { get; set; } = new() { "anthropic", "openai", "gemini", "openrouter", "ollama" };
 
     /// <summary>Default remote model when a task gives no hint.</summary>
     public string DefaultModel { get; set; } = "claude-opus-4-8";
+
+    public string OpenAIModel { get; set; } = "gpt-4o";
 
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
 

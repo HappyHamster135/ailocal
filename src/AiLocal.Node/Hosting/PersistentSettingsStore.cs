@@ -27,6 +27,7 @@ public sealed record SettingsUpdate(
     string? OllamaModel = null,
     string? OllamaEndpoint = null,
     string? OpenRouterModel = null,
+    string? OpenAIModel = null,
     int? MaxTokens = null,
     bool? AutoPullOllamaModel = null,
     string? WorkspacePath = null,
@@ -34,9 +35,11 @@ public sealed record SettingsUpdate(
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
+    string? OpenAIApiKey = null,
     bool ClearAnthropicApiKey = false,
     bool ClearGeminiApiKey = false,
-    bool ClearOpenRouterApiKey = false);
+    bool ClearOpenRouterApiKey = false,
+    bool ClearOpenAIApiKey = false);
 
 internal sealed class StoredNodeSettings
 {
@@ -58,11 +61,13 @@ internal sealed class StoredNodeSettings
     public string? OllamaModel { get; set; }
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
     public string OpenRouterModel { get; set; } = "anthropic/claude-sonnet-4.5";
+    public string OpenAIModel { get; set; } = "gpt-4o";
     public int MaxTokens { get; set; } = 4096;
     public bool AutoPullOllamaModel { get; set; }
     public string? ProtectedAnthropicApiKey { get; set; }
     public string? ProtectedGeminiApiKey { get; set; }
     public string? ProtectedOpenRouterApiKey { get; set; }
+    public string? ProtectedOpenAIApiKey { get; set; }
 }
 
 public static class SettingsPaths
@@ -134,6 +139,7 @@ public sealed class PersistentSettingsStore
         settings.Providers.OllamaModel = stored.OllamaModel;
         settings.Providers.OllamaEndpoint = stored.OllamaEndpoint;
         settings.Providers.OpenRouterModel = stored.OpenRouterModel;
+        settings.Providers.OpenAIModel = stored.OpenAIModel;
         settings.Providers.MaxTokens = stored.MaxTokens;
         settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
     }
@@ -178,11 +184,13 @@ public sealed class PersistentSettingsStore
                 ollamaModel = _settings.Providers.OllamaModel,
                 ollamaEndpoint = _settings.Providers.OllamaEndpoint,
                 openRouterModel = _settings.Providers.OpenRouterModel,
+                openAIModel = _settings.Providers.OpenAIModel,
                 maxTokens = _settings.Providers.MaxTokens,
                 autoPullOllamaModel = _settings.Installer.AutoPullOllamaModel,
                 anthropicKeyConfigured = HasKey("anthropic"),
                 geminiKeyConfigured = HasKey("gemini"),
                 openRouterKeyConfigured = HasKey("openrouter"),
+                openAIKeyConfigured = HasKey("openai"),
                 settingsPath = SettingsPaths.SettingsFile(_settings.Role)
             };
         }
@@ -286,6 +294,8 @@ public sealed class PersistentSettingsStore
                 _settings.Providers.OllamaEndpoint = RequiredEndpoint(update.OllamaEndpoint, "Ollama endpoint");
             if (update.OpenRouterModel is not null)
                 _settings.Providers.OpenRouterModel = Required(update.OpenRouterModel, "OpenRouter model");
+            if (update.OpenAIModel is not null)
+                _settings.Providers.OpenAIModel = Required(update.OpenAIModel, "OpenAI model");
 
             if (update.MaxTokens.HasValue)
             {
@@ -311,6 +321,11 @@ public sealed class PersistentSettingsStore
                 _stored.ProtectedOpenRouterApiKey = null;
             else if (!string.IsNullOrWhiteSpace(update.OpenRouterApiKey))
                 _stored.ProtectedOpenRouterApiKey = _protector.Protect(update.OpenRouterApiKey.Trim());
+
+            if (update.ClearOpenAIApiKey)
+                _stored.ProtectedOpenAIApiKey = null;
+            else if (!string.IsNullOrWhiteSpace(update.OpenAIApiKey))
+                _stored.ProtectedOpenAIApiKey = _protector.Protect(update.OpenAIApiKey.Trim());
 
             CopyCurrentIntoStored();
             Save();
@@ -346,6 +361,7 @@ public sealed class PersistentSettingsStore
                 "anthropic" => "ANTHROPIC_API_KEY",
                 "gemini" => "GEMINI_API_KEY",
                 "openrouter" => "OPENROUTER_API_KEY",
+                "openai" => "OPENAI_API_KEY",
                 _ => null
             };
 
@@ -358,6 +374,7 @@ public sealed class PersistentSettingsStore
                 "anthropic" => _stored.ProtectedAnthropicApiKey,
                 "gemini" => _stored.ProtectedGeminiApiKey,
                 "openrouter" => _stored.ProtectedOpenRouterApiKey,
+                "openai" => _stored.ProtectedOpenAIApiKey,
                 _ => null
             };
 
@@ -428,6 +445,7 @@ public sealed class PersistentSettingsStore
         _stored.OllamaModel = _settings.Providers.OllamaModel;
         _stored.OllamaEndpoint = _settings.Providers.OllamaEndpoint;
         _stored.OpenRouterModel = _settings.Providers.OpenRouterModel;
+        _stored.OpenAIModel = _settings.Providers.OpenAIModel;
         _stored.MaxTokens = _settings.Providers.MaxTokens;
         _stored.AutoPullOllamaModel = _settings.Installer.AutoPullOllamaModel;
     }

@@ -6,7 +6,7 @@ public sealed record ProviderOrderUpdate(List<string> Priority);
 
 public static class ProviderOrderApi
 {
-    private static readonly string[] KnownProviders = ["anthropic", "gemini", "openrouter", "ollama"];
+    private static readonly string[] KnownProviders = ["anthropic", "openai", "gemini", "openrouter", "ollama"];
 
     public static object Read(NodeSettings settings) => new
     {
@@ -14,6 +14,7 @@ public static class ProviderOrderApi
         options = new[]
         {
             new { id = "anthropic", label = "Claude", local = false },
+            new { id = "openai", label = "ChatGPT", local = false },
             new { id = "gemini", label = "Gemini", local = false },
             new { id = "openrouter", label = "OpenRouter", local = false },
             new { id = "ollama", label = "Local", local = true }
