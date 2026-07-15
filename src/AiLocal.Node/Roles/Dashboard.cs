@@ -822,6 +822,10 @@ internal static class Dashboard
           border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
         .update-progress-bar { height: 100%; width: 0%; background: var(--accent);
           transition: width .25s ease; }
+
+        .cost-providers { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+        .cost-provider-row { display: flex; justify-content: space-between; font-size: 12px;
+          color: var(--muted); padding: 2px 0; }
       </style>
     </head>
     <body>
@@ -943,6 +947,9 @@ internal static class Dashboard
                   <div class="kv-row"><span>Jobb</span><span id="taskCount">0</span></div>
                   <div class="kv-row" id="queueRow" style="display:none"><span>Kö / pågår</span><span id="queueLabel">0 / 0</span></div>
                   <div class="kv-row" id="costRow" style="display:none"><span>Kostnad idag</span><span id="costLabel">$0.00</span></div>
+                  <div class="kv-row" id="costTotalRow" style="display:none"><span>Kostnad totalt</span><span id="costTotalLabel">$0.00</span></div>
+                  <div class="kv-row" id="tokenRow" style="display:none"><span>Tokens idag (in/ut)</span><span class="mono" id="tokenLabel">0 / 0</span></div>
+                  <div id="costByProvider" class="cost-providers" style="display:none"></div>
                 </div>
                 </section>
                 <section class="detail-section">
@@ -1299,6 +1306,24 @@ internal static class Dashboard
         const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled'];
         const cancellableStates = ['Pending','Dispatched','Running','Queued'];
         const fmtUsd = value => (value == null) ? '' : (value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`);
+        const fmtTokens = n => (n == null ? '0' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+        function renderCostBreakdown(stats) {
+          if (!stats) return;
+          const today = stats.today || {};
+          const all = stats.allTime || {};
+          $('costTotalRow').style.display = 'flex';
+          $('costTotalLabel').textContent = fmtUsd(all.costUsd) || '$0.00';
+          $('tokenRow').style.display = 'flex';
+          $('tokenLabel').textContent = `${fmtTokens(today.inputTokens)} / ${fmtTokens(today.outputTokens)}`;
+          const rows = (all.byProvider || []).filter(p => (p.costUsd || 0) > 0 || p.tasks > 0);
+          const box = $('costByProvider');
+          if (rows.length === 0) { box.style.display = 'none'; return; }
+          box.style.display = 'block';
+          box.innerHTML = rows.map(p =>
+            `<div class="cost-provider-row"><span>${providerLabels[p.provider] || p.provider}</span>`
+            + `<span class="mono">${fmtUsd(p.costUsd) || '$0.00'} · ${p.tasks} jobb</span></div>`
+          ).join('');
+        }
         const providerLabels = { anthropic: 'Claude', openai: 'ChatGPT', gemini: 'Gemini', openrouter: 'OpenRouter', ollama: 'Local' };
         const providerIds = ['anthropic', 'openai', 'gemini', 'openrouter', 'ollama'];
         const state = {
@@ -3014,9 +3039,13 @@ internal static class Dashboard
               $('costRow').style.display = 'flex';
               $('queueLabel').textContent = `${state.queue.queued} / ${state.queue.inFlight}`;
               $('costLabel').textContent = fmtUsd(state.stats.today.costUsd) || '$0.00';
+              renderCostBreakdown(state.stats);
             } catch {
               $('queueRow').style.display = 'none';
               $('costRow').style.display = 'none';
+              $('costTotalRow').style.display = 'none';
+              $('tokenRow').style.display = 'none';
+              $('costByProvider').style.display = 'none';
             }
 
             if (state.local?.role === 'Host') {
