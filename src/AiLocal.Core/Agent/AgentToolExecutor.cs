@@ -94,9 +94,14 @@ public sealed class AgentToolExecutor
         };
 
         if (level == AgentAccessLevel.Full)
+        {
             tools.Add(new("run_command",
                 "Run a shell command on this Worker's machine and return its stdout/stderr. Times out after 5 minutes.",
                 """{"type":"object","properties":{"command":{"type":"string"},"workingDirectory":{"type":"string","description":"Optional; defaults to the current directory."}},"required":["command"]}"""));
+            tools.Add(new("verify",
+                "Verify the project actually builds/tests after your changes. Auto-detects the project type (.NET/Node/Rust/Go/Python) from the workspace, runs the appropriate build/test command, and returns the pass/fail result plus any compiler/test errors to fix. A task is only DONE when verify passes - run it after editing files, then fix what it reports and run again.",
+                """{"type":"object","properties":{"workingDirectory":{"type":"string","description":"Optional directory to verify (relative to workspace root). Defaults to the workspace root."}},"required":[]}"""));
+        }
 
         // Internet is a separate operator opt-in, not an access tier: it's
         // network reach, orthogonal to how much of the FILESYSTEM the agent
@@ -126,6 +131,7 @@ public sealed class AgentToolExecutor
                 "glob" => await GlobAsync(call, root, ct),
                 "list_files" => ListFiles(call, root),
                 "run_command" when _level == AgentAccessLevel.Full => await RunCommandAsync(call, root, ct),
+                "verify" when _level == AgentAccessLevel.Full => await VerifyAsync(call, root, ct),
                 "run_command" => Error(call, "run_command is not available at this Worker's current access level (Sandboxed allows file access only)."),
                 "fetch_url" when _allowInternet => await FetchUrlAsync(call, root, ct),
                 "fetch_url" => Error(call, "fetch_url is not available - internet access is disabled on this Worker (Inställningar -> Agent & arbetsyta)."),
@@ -192,7 +198,9 @@ public sealed class AgentToolExecutor
         }
 
         await File.WriteAllTextAsync(path, content, ct);
-        return new ToolResult(call.Id, call.Name, $"wrote {content.Length} characters to {path}");
+        var verifyNote = await AutoVerifyIfFullAsync(ct);
+        return new ToolResult(call.Id, call.Name,
+            $"wrote {content.Length} characters to {path}" + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
     }
 
     private async Task<ToolResult> EditFileAsync(ToolCall call, JsonElement args, CancellationToken ct)
@@ -225,8 +233,10 @@ public sealed class AgentToolExecutor
         }
 
         await File.WriteAllTextAsync(path, updated, ct);
+        var verifyNote = await AutoVerifyIfFullAsync(ct);
         return new ToolResult(call.Id, call.Name,
-            $"edited {path}: replaced {occurrences} occurrence(s) of {oldText.Length} chars with {newText.Length} chars.");
+            $"edited {path}: replaced {occurrences} occurrence(s) of {oldText.Length} chars with {newText.Length} chars."
+            + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
     }
 
     private ToolResult ListFiles(ToolCall call, JsonElement args)
@@ -419,14 +429,26 @@ public sealed class AgentToolExecutor
         // folder the agent is actually meant to be working in.
         var workingDirectory = Path.GetFullPath(requestedDirectory, _workspaceRoot);
 
+        var (exitCode, output) = await RunCommandCoreAsync(command, workingDirectory, ct);
+        return new ToolResult(call.Id, call.Name, output, IsError: exitCode != 0);
+    }
+
+    /// <summary>Runs a shell command in <paramref name="workingDirectory"/>
+    /// with the standard 5-minute timeout, returning (exitCode, combined
+    /// output). Shared by run_command AND the verify tool so both use the
+    /// exact same process plumbing; ProjectVerifier calls it via a delegate
+    /// to keep the filesystem/process logic in one place.</summary>
+    public async Task<(int ExitCode, string Output)> RunCommandCoreAsync(string command, string workingDirectory, CancellationToken ct)
+    {
+        // Full stays unrestricted, this only fixes what a RELATIVE path/the
+        // omitted-argument default means (see RunCommandAsync above).
         var psi = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? new ProcessStartInfo("cmd.exe", $"/c {command}")
             : new ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"");
-        // Unlike Sandboxed, a Full-mode executor's _workspaceRoot is never
-        // auto-created (see the constructor) - Process.Start throws on a
-        // working directory that doesn't exist, so fall all the way back to
-        // this process's own cwd (guaranteed to exist) rather than risk that,
-        // if even _workspaceRoot itself turns out to be missing.
+        // A Full-mode executor's _workspaceRoot is never auto-created (see the
+        // constructor) - Process.Start throws on a working directory that
+        // doesn't exist, so fall all the way back to this process's own cwd
+        // (guaranteed to exist) rather than risk that.
         psi.WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory
             : Directory.Exists(_workspaceRoot) ? _workspaceRoot
             : Environment.CurrentDirectory;
@@ -454,7 +476,7 @@ public sealed class AgentToolExecutor
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
         {
             TryKill(process);
-            return Error(call, $"command timed out after {CommandTimeout.TotalMinutes:0}m and was killed. Partial output:\n{Truncate(stdout.ToString())}");
+            return (137, $"command timed out after {CommandTimeout.TotalMinutes:0}m and was killed. Partial output:\n{Truncate(stdout.ToString())}");
         }
         catch (OperationCanceledException)
         {
@@ -463,7 +485,47 @@ public sealed class AgentToolExecutor
         }
 
         var output = $"exit code: {process.ExitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}";
-        return new ToolResult(call.Id, call.Name, Truncate(output), IsError: process.ExitCode != 0);
+        return (process.ExitCode, Truncate(output));
+    }
+
+    private async Task<ToolResult> VerifyAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var requested = args.TryGetProperty("workingDirectory", out var wd) && wd.ValueKind == JsonValueKind.String && wd.GetString() is { Length: > 0 } p
+            ? ResolveDir(p)
+            : _workspaceRoot;
+
+        var verifier = new ProjectVerifier();
+        var result = await verifier.VerifyAsync(requested,
+            (cmd, dir, c) => RunCommandCoreAsync(cmd, dir, c), ct);
+        return new ToolResult(call.Id, call.Name, result.Report, IsError: !result.Success);
+    }
+
+    /// <summary>After a file write/edit in Full mode, re-verify the project so
+    /// the model gets build/test errors back immediately rather than declaring
+    /// victory on a broken change. Returns null when there's nothing meaningful
+    /// to report (no project detected) so we don't spam the context with
+    /// "couldn't find a project" on every single-file edit in a non-code dir.</summary>
+    private async Task<string?> AutoVerifyIfFullAsync(CancellationToken ct)
+    {
+        if (_level != AgentAccessLevel.Full) return null;
+        var verifier = new ProjectVerifier();
+        if (verifier.Detect(_workspaceRoot) == ProjectVerifier.ProjectKind.Unknown) return null;
+
+        try
+        {
+            var result = await verifier.VerifyAsync(_workspaceRoot,
+                (cmd, dir, c) => RunCommandCoreAsync(cmd, dir, c), ct);
+            return result.Success
+                ? "VERIFY AFTER EDIT: project still builds/tests (PASS)."
+                : $"VERIFY AFTER EDIT (FAIL - fix before declaring done):\n{result.Report}";
+        }
+        catch (Exception ex)
+        {
+            // Verification is a bonus safety net, never a hard failure of the
+            // write itself - if the build toolchain isn't installed or errors
+            // out internally, the edit already landed; just don't crash.
+            return $"VERIFY AFTER EDIT: could not run verification ({ex.GetType().Name}).";
+        }
     }
 
     // Shared across calls/executors: sockets are pooled per handler, and a

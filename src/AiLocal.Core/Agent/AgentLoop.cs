@@ -107,7 +107,7 @@ public sealed class AgentLoop
 
             var response = await _complete(new ChatRequest
             {
-                System = system,
+                System = BuildSystemPrompt(system, toolDefs),
                 Messages = messages,
                 ModelHint = modelHint,
                 Tools = toolDefs.ToList()
@@ -155,5 +155,27 @@ public sealed class AgentLoop
         var timeoutMessage = $"Assignment did not complete within {MaxIterations} iterations - stopped to avoid a runaway loop.";
         await Emit(new AgentStep("error", timeoutMessage));
         return new AgentRunResult(false, timeoutMessage, steps, MaxIterations, messages, Usage());
+    }
+
+    /// <summary>Augments the caller's system prompt with the verify-loop
+    /// contract when the executor exposes the verify tool: the model must not
+    /// declare a coding task done until the project actually builds/tests.
+    /// Kept minimal and appended only when relevant, so it never overrides a
+    /// caller-supplied system prompt that already covers the workflow.</summary>
+    private static string? BuildSystemPrompt(string? system, IReadOnlyList<ToolDefinition> tools)
+    {
+        if (!tools.Any(t => t.Name == "verify"))
+            return system;
+
+        const string verifyNote = """
+
+        WORKFLOW: When editing or creating code, a task is only DONE once the
+        project verifies. After each file change, run verify and read its
+        output. If it reports failures, fix them and run verify again - do not
+        stop or report success while verify still fails. Treat a passing
+        verify as your definition of "finished", not "the model feels done".
+        """;
+
+        return system is { Length: > 0 } ? system + verifyNote : verifyNote.Trim();
     }
 }
