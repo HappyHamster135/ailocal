@@ -41,31 +41,31 @@ internal static class Dashboard
         }
         :root[data-theme="dark"] {
           color-scheme: dark;
-          --bg: #0e1116;
-          --surface: #161b22;
-          --surface-2: #1f2630;
-          --surface-soft: #1b222c;
-          --surface-active: #1b2b4a;
-          --surface-selected: #1d2c4d;
-          --topbar-bg: rgba(22,27,34,.86);
-          --line: #2a323d;
-          --line-strong: #3a4552;
-          --kv-line: #232b35;
-          --user-bubble-border: #274b86;
-          --text: #e6edf3;
-          --muted: #8b98a6;
-          --accent: #4f8bff;
-          --accent-2: #2bb6c4;
-          --ok: #4ade80;
-          --ok-bg: #12251a;
-          --ok-border: #1f4d33;
+          --bg: #0a0c10;
+          --surface: #14171c;
+          --surface-2: #1c2028;
+          --surface-soft: #10141a;
+          --surface-active: #1b2333;
+          --surface-selected: #182030;
+          --topbar-bg: rgba(16,19,24,.9);
+          --line: #22262e;
+          --line-strong: #333944;
+          --kv-line: #1c2028;
+          --user-bubble-border: #2c4a7c;
+          --text: #eef1f5;
+          --muted: #8992a1;
+          --accent: #5b8cff;
+          --accent-2: #22b8c8;
+          --ok: #3ddc84;
+          --ok-bg: #0f2116;
+          --ok-border: #1d4a30;
           --ok-text: #6ee7a0;
-          --warn: #f59e0b;
-          --bad: #f87171;
-          --bad-bg: #2a1516;
-          --bad-border: #5b2626;
+          --warn: #f0a020;
+          --bad: #ff6b6b;
+          --bad-bg: #2a1418;
+          --bad-border: #5c2530;
           --radius: 8px;
-          --shadow: 0 14px 40px rgba(0,0,0,.45);
+          --shadow: 0 18px 48px rgba(0,0,0,.55);
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; }
@@ -113,7 +113,32 @@ internal static class Dashboard
         .app {
           min-height: 100%;
           display: grid;
-          grid-template-rows: auto auto auto 1fr;
+          grid-template-rows: auto auto auto 1fr auto;
+        }
+        .statusbar {
+          height: 30px;
+          padding: 0 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          border-top: 1px solid var(--line);
+          background: var(--surface);
+          color: var(--muted);
+          font-size: 12px;
+          overflow: hidden;
+        }
+        .statusbar-left, .statusbar-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+        .statusbar-sep { color: var(--line-strong); }
+        @media (max-width: 980px) {
+          .statusbar-left span:not(:first-child):not(:nth-child(2)) { display: none; }
         }
         .topbar {
           height: 64px;
@@ -812,6 +837,23 @@ internal static class Dashboard
             </div>
           </aside>
         </main>
+        <footer class="statusbar">
+          <div class="statusbar-left">
+            <span class="dot" id="statusGatewayDot"></span>
+            <span id="statusGatewayText">Ansluter...</span>
+            <span class="statusbar-sep">|</span>
+            <span id="statusProjectName" class="small"></span>
+            <span class="statusbar-sep">|</span>
+            <span id="statusAgentsCount"></span>
+            <span class="statusbar-sep">|</span>
+            <span id="statusCronCount"></span>
+          </div>
+          <div class="statusbar-right">
+            <span id="statusCost" class="mono"></span>
+            <span class="statusbar-sep">|</span>
+            <span id="statusVersion" class="mono"></span>
+          </div>
+        </footer>
       </div>
 
       <dialog id="settingsDialog">
@@ -881,7 +923,7 @@ internal static class Dashboard
               <div class="field wide">
                 <span class="small">Nuvarande klusternyckel</span>
                 <div class="token-row">
-                  <input id="currentClusterToken" type="password" readonly>
+                  <input id="currentClusterToken" class="mono" type="password" readonly>
                   <button class="icon" id="toggleTokenVisibility" type="button" title="Visa/dölj">👁</button>
                   <button id="copyClusterToken" type="button">Kopiera</button>
                   <button id="regenerateClusterToken" type="button">Generera ny</button>
@@ -894,14 +936,14 @@ internal static class Dashboard
               </div>
               <label class="field wide">
                 <span class="small">Klistra in en nyckel för att para ihop den här noden</span>
-                <input id="settingClusterToken" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                <input id="settingClusterToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
                 <span class="key-state" id="clusterTokenState"></span>
               </label>
               <label class="check-field wide"><input id="clearClusterToken" type="checkbox"> Ta bort klusternyckel (öppnar klustret för hela LAN:et)</label>
               <div class="field wide">
                 <span class="small">Operatörsnyckel (begränsad åtkomst: mål, chatt, avbryt - ej nodhantering/inställningar)</span>
                 <div class="token-row">
-                  <input id="currentOperatorToken" type="password" readonly>
+                  <input id="currentOperatorToken" class="mono" type="password" readonly>
                   <button class="icon" id="toggleOperatorTokenVisibility" type="button" title="Visa/dölj">👁</button>
                   <button id="copyOperatorToken" type="button">Kopiera</button>
                   <button id="regenerateOperatorToken" type="button">Generera ny</button>
@@ -909,16 +951,18 @@ internal static class Dashboard
               </div>
               <label class="field wide">
                 <span class="small">Klistra in en operatörsnyckel</span>
-                <input id="settingOperatorToken" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
+                <input id="settingOperatorToken" class="mono" type="password" autocomplete="off" placeholder="Lämna tom för att behålla">
               </label>
               <label class="check-field wide"><input id="clearOperatorToken" type="checkbox"> Ta bort operatörsnyckel</label>
-              <div class="form-subtitle">Uppdatering</div>
-              <div class="field wide">
-                <span class="small" id="updateStatus">Nuvarande version: ...</span>
-                <div class="token-row">
-                  <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
-                  <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
-                  <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
+              <div id="updateSection">
+                <div class="form-subtitle">Uppdatering</div>
+                <div class="field wide">
+                  <span class="small" id="updateStatus">Nuvarande version: ...</span>
+                  <div class="token-row">
+                    <button id="checkUpdateBtn" type="button">Sök efter uppdatering</button>
+                    <button class="primary" id="applyUpdateBtn" type="button" style="display:none">Uppdatera och starta om</button>
+                    <a id="updateManualLink" href="#" target="_blank" rel="noopener" style="display:none">Hämta manuellt</a>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1159,6 +1203,30 @@ internal static class Dashboard
           $('hostDot').className = `dot ${hasHost ? 'ok' : 'bad'}`;
           $('hostStatus').textContent = hasHost ? state.host : 'host not connected';
           if (hasHost) $('hostInput').value = state.host;
+        }
+
+        // Mirrors the topbar's own connection dot (renderHost() already did
+        // the Worker-vs-Host branching) rather than recomputing it a second
+        // time here.
+        function renderStatusBar() {
+          const topDot = $('hostDot');
+          const ok = topDot?.classList.contains('ok');
+          $('statusGatewayDot').className = `dot ${ok ? 'ok' : 'bad'}`;
+          $('statusGatewayText').textContent = ok ? 'Gateway ready' : ($('hostStatus')?.textContent || 'connecting...');
+
+          $('statusProjectName').textContent = state.local?.name ?? '';
+
+          const activeAgents = state.tasks.filter(t => {
+            const s = typeof t.state === 'number' ? stateName[t.state] : t.state;
+            return cancellableStates.includes(s);
+          }).length;
+          $('statusAgentsCount').textContent = `${activeAgents} agents`;
+
+          const activeCron = state.schedules.filter(s => s.enabled).length;
+          $('statusCronCount').textContent = `${activeCron} cron`;
+
+          $('statusCost').textContent = state.stats ? (fmtUsd(state.stats.today.costUsd) || '$0.00') : '';
+          $('statusVersion').textContent = state.updateInfo?.currentVersion ? `v${state.updateInfo.currentVersion}` : '';
         }
 
         function renderNodes() {
@@ -2102,12 +2170,16 @@ internal static class Dashboard
               renderHost();
             }
 
-            const [nodesResult, topologyResult, tasksResult, messagesResult] =
+            const [nodesResult, topologyResult, tasksResult, messagesResult, schedulesResult] =
               await Promise.allSettled([
                 fetchJson('/api/nodes'),
                 fetchJson('/api/topology'),
                 fetchJson('/api/tasks'),
-                fetchJson('/api/chat')
+                fetchJson('/api/chat'),
+                // Fetched here too (not just loadSchedules(), which only runs
+                // once the Schema tab is opened) so the status bar's cron
+                // count is accurate even if that tab is never visited.
+                fetchJson('/api/schedules')
               ]);
 
             if (nodesResult.status === 'fulfilled')
@@ -2126,6 +2198,9 @@ internal static class Dashboard
             if (messagesResult.status === 'fulfilled')
               state.messages = messagesResult.value ?? [];
             renderMessages();
+
+            if (schedulesResult.status === 'fulfilled')
+              state.schedules = schedulesResult.value ?? [];
 
             if (state.selectedNodeId) await loadWorkerTasks(state.selectedNodeId);
 
@@ -2171,6 +2246,7 @@ internal static class Dashboard
 
             renderFirstRunBanner();
             checkForUpdate();
+            renderStatusBar();
           } finally {
             state.refreshing = false;
           }
@@ -2932,8 +3008,9 @@ internal static class Dashboard
           let theme = requested;
           try { theme = localStorage.getItem('ailocal-theme'); } catch {}
           if (requested === 'dark' || requested === 'light') theme = requested;
-          if (theme !== 'dark' && theme !== 'light')
-            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          // Dark by default now (no more OS-preference fallback) - light is
+          // still one click away via themeBtn, same as before.
+          if (theme !== 'dark' && theme !== 'light') theme = 'dark';
           applyTheme(theme);
         }
         function withCurrentTheme(endpoint) {
