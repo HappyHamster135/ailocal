@@ -31,6 +31,15 @@ public enum AgentAccessLevel
 /// Executes one agent tool call against the real filesystem/shell, enforcing
 /// whichever <see cref="AgentAccessLevel"/> this Worker's operator chose.
 /// </summary>
+/// <summary>A file-write the agent wants to make, offered to an operator for
+/// review before it lands on disk. OldContent is null when the file is new.
+/// All strings are already path-resolved to absolute by the executor.</summary>
+public sealed record FileChangeProposal(string Path, string? OldContent, string NewContent);
+
+/// <summary>Operator's answer to a <see cref="FileChangeProposal"/>. Approve =
+/// false makes the executor return a tool error so the agent can adapt.</summary>
+public sealed record FileChangeDecision(bool Approve, string? Reason = null);
+
 public sealed class AgentToolExecutor
 {
     private const int MaxOutputChars = 20_000;
@@ -38,11 +47,16 @@ public sealed class AgentToolExecutor
 
     private readonly AgentAccessLevel _level;
     private readonly string _workspaceRoot;
+    private readonly Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? _approvalGate;
 
-    public AgentToolExecutor(AgentAccessLevel level, string workspaceRoot)
+    public AgentToolExecutor(
+        AgentAccessLevel level,
+        string workspaceRoot,
+        Func<FileChangeProposal, CancellationToken, Task<FileChangeDecision>>? approvalGate = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _approvalGate = approvalGate;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -113,6 +127,19 @@ public sealed class AgentToolExecutor
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
+
+        // When a session wires an approval gate, the operator must preview and
+        // approve every file write before it lands - the agent never writes
+        // to disk blindly. No gate (e.g. a Worker's autonomous assignment) ->
+        // write immediately, unchanged behavior.
+        if (_approvalGate is not null)
+        {
+            string? oldContent = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
+            var decision = await _approvalGate(new FileChangeProposal(path, oldContent, content), ct);
+            if (!decision.Approve)
+                return Error(call, decision.Reason ?? "File write was rejected by the operator.");
+        }
+
         await File.WriteAllTextAsync(path, content, ct);
         return new ToolResult(call.Id, call.Name, $"wrote {content.Length} characters to {path}");
     }

@@ -794,6 +794,29 @@ internal static class Dashboard
           .form-grid { grid-template-columns: minmax(0, 1fr); }
           .field.wide { grid-column: auto; }
         }
+
+        /* Git awareness bar + file-write approval modal */
+        .git-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+          border-bottom: 1px solid var(--line); font-size: 12px; flex-wrap: wrap; }
+        .git-branch { font-weight: 640; }
+        .git-status { color: var(--muted); }
+        .git-spacer { flex: 1; }
+        .git-commit-input { min-height: 30px; padding: 0 8px; min-width: 180px; }
+        .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; padding: 4px; }
+        .link-btn:hover { text-decoration: underline; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55);
+          display: flex; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
+        .modal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+          width: min(820px, 100%); max-height: 86vh; display: flex; flex-direction: column; box-shadow: var(--shadow); }
+        .modal-head { display: flex; align-items: flex-start; justify-content: space-between;
+          padding: 14px 16px; border-bottom: 1px solid var(--line); }
+        .modal-title { font-weight: 700; font-size: 15px; }
+        .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line); }
+        .diff-view { margin: 0; padding: 14px 16px; overflow: auto; flex: 1;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+          white-space: pre; line-height: 1.5; background: var(--surface-2); }
+        .diff-view .add, .diff-view .del { display: block; }
       </style>
     </head>
     <body>
@@ -972,6 +995,14 @@ internal static class Dashboard
                 <button class="icon" id="sessionPinBtn" data-icon="pin" title="Nåla"></button>
                 <button class="icon" id="sessionDeleteBtn" data-icon="trash" title="Ta bort session"></button>
               </div>
+            </div>
+            <div class="git-bar" id="gitBar" style="display:none">
+              <span class="git-branch" id="gitBranch"></span>
+              <span class="git-status" id="gitStatus"></span>
+              <button class="link-btn" id="gitDiffBtn">Visa diff</button>
+              <span class="git-spacer"></span>
+              <input class="git-commit-input" id="gitCommitMsg" placeholder="Commit-meddelande...">
+              <button id="gitCommitBtn">Commit</button>
             </div>
             <div class="messages" id="sessionMessages"></div>
             <div class="composer" id="sessionComposer">
@@ -1801,6 +1832,8 @@ internal static class Dashboard
           const totalTokens = usage ? (usage.inputTokens || 0) + (usage.outputTokens || 0) : 0;
           $('sessionUsagePill').textContent = totalTokens ? `${totalTokens.toLocaleString('sv-SE')} tokens` : '';
           renderSessionMessages();
+          wireGitBar();
+          loadGitStatus();
         }
 
         function persistedSessionMessageHtml(m) {
@@ -1835,7 +1868,104 @@ internal static class Dashboard
           if (!all.length) {
             box.innerHTML = `<div class="empty">Inga meddelanden ännu i den här sessionen.</div>`;
             return;
-          }
+            }
+
+            // --- Git awareness (session folder) ---
+            function wireGitBar() {
+            $('gitDiffBtn').onclick = () => showGitDiff();
+            $('gitCommitBtn').onclick = () => doGitCommit();
+            }
+
+            async function loadGitStatus() {
+            const id = state.activeSessionId;
+            const bar = $('gitBar');
+            if (!id) { bar.style.display = 'none'; return; }
+            try {
+              const status = await fetchJson(`/api/sessions/${id}/git/status`);
+              if (!status || !status.isRepo) { bar.style.display = 'none'; return; }
+              bar.style.display = 'flex';
+              $('gitBranch').textContent = status.branch ? `⎇ ${status.branch}` : '(ingen branch)';
+              const parts = [];
+              if (status.ahead) parts.push(`↑${status.ahead}`);
+              if (status.behind) parts.push(`↓${status.behind}`);
+              const counts = [
+                status.staged?.length && `${status.staged.length} staged`,
+                status.unstaged?.length && `${status.unstaged.length} ändrad`,
+                status.untracked?.length && `${status.untracked.length} ny`
+              ].filter(Boolean);
+              $('gitStatus').textContent = [...parts, ...counts].join(' · ') || 'rent';
+            } catch {
+              bar.style.display = 'none';
+            }
+            }
+
+            async function showGitDiff() {
+            const id = state.activeSessionId;
+            if (!id) return;
+            const { diff } = await fetchJson(`/api/sessions/${id}/git/diff`) ?? { diff: '' };
+            openDiffModal('Arbetskopia', '(git diff)', diff);
+            }
+
+            async function doGitCommit() {
+            const id = state.activeSessionId;
+            const msg = $('gitCommitMsg').value.trim();
+            if (!id || !msg) { showSessionNotice('Skriv ett commit-meddelande.', true); return; }
+            try {
+              const res = await fetchJson(`/api/sessions/${id}/git/commit`, {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: msg })
+              });
+              $('gitCommitMsg').value = '';
+              showSessionNotice('Commit skapad.');
+              await loadGitStatus();
+            } catch (error) {
+              showSessionNotice(error.message, true);
+            }
+            }
+
+            // --- File-write approval (preview before save) ---
+            let _pendingDiffPath = '';
+
+            function openDiffModal(title, path, diff) {
+            _pendingDiffPath = path;
+            $('diffModalPath').textContent = path;
+            $('diffModalBody').textContent = diff || '(tom fil / ingen skillnad att visa)';
+            $('diffModal').style.display = 'flex';
+            }
+            function closeDiffModal() { $('diffModal').style.display = 'none'; }
+
+            async function approvePendingChange(approve, reason) {
+            const id = state.activeSessionId;
+            if (!id) return;
+            try {
+              await fetchJson(`/api/sessions/${id}/approve-change`, {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ approve, reason: reason || null })
+              });
+            } catch (error) {
+              showSessionNotice(error.message, true);
+            } finally {
+              closeDiffModal();
+            }
+            }
+
+            $('diffModalClose').onclick = closeDiffModal;
+            $('diffApproveBtn').onclick = () => approvePendingChange(true);
+            $('diffRejectBtn').onclick = () => {
+            const reason = window.prompt('Varför avvisas ändringen? (valfritt)');
+            approvePendingChange(false, reason || undefined);
+            };
+            $('diffModal').addEventListener('click', e => { if (e.target === $('diffModal')) closeDiffModal(); });
+
+            // Called from the run-loop when a step of kind "awaiting_approval"
+            // arrives - surfaces the diff for the operator to approve/reject.
+            function handleApprovalStep(detailJson) {
+            try {
+              const d = JSON.parse(detailJson);
+              openDiffModal('Agenten vill skriva en fil', d.path || '(okänd fil)', d.diff || '');
+            } catch {
+              openDiffModal('Agenten vill skriva en fil', '', '');
+            }
+            }
           const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
           const previousScrollTop = box.scrollTop;
           box.innerHTML = all.join('');
@@ -1903,6 +2033,7 @@ internal static class Dashboard
                 if (!dataLine) continue;
                 const payload = JSON.parse(dataLine.slice(5).trim());
                 if (payload.step) {
+                  if (payload.step.Kind === 'awaiting_approval') handleApprovalStep(payload.step.Detail);
                   appendLine(stepLine(payload.step));
                 } else if (payload.final) {
                   success = !!payload.final.Success;
@@ -2834,8 +2965,10 @@ internal static class Dashboard
 
             if (topologyResult.status === 'fulfilled')
               state.topology = topologyResult.value ?? state.topology;
-            renderTopology();
-            renderTopologyDetail();
+            if (state.activeView === 'network') {
+              renderTopology();
+              renderTopologyDetail();
+            }
 
             if (tasksResult.status === 'fulfilled')
               state.tasks = tasksResult.value ?? [];
@@ -2843,7 +2976,7 @@ internal static class Dashboard
 
             if (messagesResult.status === 'fulfilled')
               state.messages = messagesResult.value ?? [];
-            renderMessages();
+            if (state.activeView === 'chat') renderMessages();
 
             if (schedulesResult.status === 'fulfilled')
               state.schedules = schedulesResult.value ?? [];
@@ -3353,6 +3486,7 @@ internal static class Dashboard
             showSettingsNotice('Inställningarna är sparade.');
             if (!state.settingsTarget) await loadProviders();
             await refresh();
+            closeSettingsDialog();
           } catch (error) {
             showSettingsNotice(error.message, true);
           } finally {
@@ -3761,6 +3895,22 @@ internal static class Dashboard
         refresh();
         setInterval(refresh, 3000);
       </script>
+    <div class="modal-overlay" id="diffModal" style="display:none">
+      <div class="modal diff-modal">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">Agenten vill skriva en fil</div>
+            <div class="small mono" id="diffModalPath"></div>
+          </div>
+          <button class="icon" id="diffModalClose" title="Stäng">✕</button>
+        </div>
+        <pre class="diff-view" id="diffModalBody"></pre>
+        <div class="modal-foot">
+          <button id="diffRejectBtn">Avvisa</button>
+          <button class="primary" id="diffApproveBtn">Godkänn &amp; skriv</button>
+        </div>
+      </div>
+    </div>
     </body>
     </html>
     """;

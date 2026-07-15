@@ -324,6 +324,7 @@ public static class NodeWebHost
         // in this method, which runs unconditionally before the per-role switch.
         SessionApi.MapEndpoints(app);
         DialogsApi.MapEndpoints(app);
+        GitApi.MapEndpoints(app);
     }
 
     private static string CurrentVersion => SelfUpdater.CurrentVersion;

@@ -11,6 +11,7 @@ namespace AiLocal.Node.Roles;
 public sealed record SessionCreateRequest(string FolderPath, string? Title = null);
 public sealed record SessionUpdateRequest(string? Title = null, bool? Pinned = null);
 public sealed record SessionMessageRequest(string Message, string? ModelHint = null);
+public sealed record ChangeDecisionRequest(bool Approve, string? Reason = null);
 
 /// <summary>
 /// A session is local-only by design (see SessionStore) - every endpoint
@@ -80,13 +81,27 @@ public static class SessionApi
         app.MapDelete("/api/sessions/{id}", (string id, SessionStore store) =>
             store.Remove(id) ? Results.NoContent() : Results.NotFound());
 
-        app.MapPost("/api/sessions/{id}/cancel", (string id, SessionRunRegistry runs) =>
-            runs.Cancel(id) ? Results.Ok(new { cancelled = true }) : Results.NotFound());
+        app.MapPost("/api/sessions/{id}/cancel", (string id, SessionRunRegistry runs, PendingChangeRegistry pending) =>
+        {
+            runs.Cancel(id);
+            pending.RejectAllForSession(id); // unblock a paused write so it can't hang
+            return Results.Ok(new { cancelled = true });
+        });
+
+        app.MapGet("/api/sessions/{id}/pending-change", (string id, PendingChangeRegistry pending) =>
+            pending.Peek(id) is { } change
+                ? Results.Ok(new { path = change.Path, diff = change.Diff, oldContent = change.OldContent, newContent = change.NewContent })
+                : Results.NotFound());
+
+        app.MapPost("/api/sessions/{id}/approve-change", async (string id, ChangeDecisionRequest req, PendingChangeRegistry pending) =>
+            pending.Resolve(id, new ChangeDecision(req.Approve, req.Reason))
+                ? Results.Ok(new { resolved = true })
+                : Results.NotFound());
 
         app.MapPost("/api/sessions/{id}/run", async (
             string id, SessionMessageRequest req, HttpContext ctx,
-            SessionStore store, SessionRunRegistry runs, FallbackChatProvider provider,
-            NodeSettings settings, CancellationToken ct) =>
+            SessionStore store, SessionRunRegistry runs, PendingChangeRegistry pending,
+            FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
         {
             var session = store.Get(id);
             if (session is null)
@@ -115,7 +130,24 @@ public static class SessionApi
 
                 var instructions = await ProjectInstructionsReader.TryReadAsync(session.FolderPath, linked.Token);
                 var system = BuildSystemPrompt(session.FolderPath, accessLevel, instructions);
-                var executor = new AgentToolExecutor(accessLevel, session.FolderPath);
+
+                // Each file the agent wants to write is surfaced to the
+                // operator for review before it lands on disk: emit an
+                // "awaiting_approval" step (with the diff) and block on the
+                // registry until the dashboard approves/rejects. No gate on a
+                // Worker's autonomous assignment - those write immediately.
+                async Task<FileChangeDecision> Gate(FileChangeProposal proposal, CancellationToken ct2)
+                {
+                    var diff = LineDiff.Compute(proposal.OldContent ?? "", proposal.NewContent);
+                    await ctx.Response.WriteAsync(
+                        $"data: {JsonSerializer.Serialize(new { step = new AgentStep("awaiting_approval", JsonSerializer.Serialize(new { path = proposal.Path, diff })) })}\n\n",
+                        linked.Token);
+                    await ctx.Response.Body.FlushAsync(linked.Token);
+                    var decision = await pending.RequestAsync(id, new PendingChange(id, proposal.Path, proposal.OldContent, proposal.NewContent), ct2);
+                    return new FileChangeDecision(decision.Approve, decision.Reason);
+                }
+
+                var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate);
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
                 var result = await loop.RunAsync(req.Message, accessLevel, req.ModelHint, onStep: async step =>
@@ -149,6 +181,7 @@ public static class SessionApi
             finally
             {
                 runs.End(id);
+                pending.RejectAllForSession(id); // clear any stale pending change
             }
         });
     }
