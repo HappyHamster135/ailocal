@@ -688,24 +688,37 @@ internal static class Dashboard
           color: var(--text);
           background: var(--surface);
           box-shadow: 0 28px 80px rgba(23,32,41,.25);
+        }
+        /* display is intentionally untouched here - dialog:not([open]) {
+           display:none } is the browser's own default and this doesn't
+           override it, unlike an earlier version of this rule that set
+           display:grid unconditionally and fought the UA's :not([open])
+           rule via transition-behavior:allow-discrete + @starting-style.
+           That combination looked right on paper (opening worked) but
+           left CLOSE genuinely broken: the dialog never actually reached
+           display:none, so it stayed in the layout, invisible (opacity 0)
+           but still eating pointer-events - the exact "window is still
+           there after closing" bug the user hit. JS-driven close (see
+           closeSettingsDialog: add .dialog-closing, wait out the
+           transition, THEN call .close()) doesn't need the browser to
+           discretely animate `display` at all, so there's nothing to get
+           stuck. */
+        dialog[open] {
           display: grid;
           grid-template-rows: auto 1fr auto;
-          /* allow-discrete lets the [open]/no-[open] jump (display:none <->
-             block, which can't normally be transitioned) participate in
-             this transition instead of skipping it - paired with
-             @starting-style below for a real fade+scale open. */
-          transition: opacity .16s ease, transform .16s ease, overlay .16s ease allow-discrete, display .16s ease allow-discrete;
+          opacity: 1;
+          transform: scale(1);
+          transition: opacity .16s ease, transform .16s ease;
         }
-        dialog[open] { opacity: 1; transform: scale(1); }
         @starting-style {
           dialog[open] { opacity: 0; transform: scale(.97); }
         }
-        dialog::backdrop {
-          background: rgba(23,32,41,.42);
-          transition: background-color .16s ease, overlay .16s ease allow-discrete, display .16s ease allow-discrete;
-        }
+        dialog[open].dialog-closing { opacity: 0; transform: scale(.97); }
+        dialog::backdrop { transition: background-color .16s ease; }
+        dialog[open]::backdrop { background-color: rgba(23,32,41,.42); }
+        dialog[open].dialog-closing::backdrop { background-color: rgba(23,32,41,0); }
         @starting-style {
-          dialog[open]::backdrop { background: rgba(23,32,41,0); }
+          dialog[open]::backdrop { background-color: rgba(23,32,41,0); }
         }
         .dialog-head, .dialog-foot {
           min-height: 58px;
@@ -3272,9 +3285,23 @@ internal static class Dashboard
             await new Promise(resolve => setTimeout(resolve, 100));
         }
 
+        // Animates the fade-out, THEN calls the real .close() - doing it the
+        // other way around (close() first, animate after) is what the
+        // previous CSS-only attempt tried via transition-behavior:
+        // allow-discrete + @starting-style, and it left the dialog stuck:
+        // invisible but still display:grid and still eating pointer-events,
+        // because the browser never actually finished the discrete display
+        // swap. This way .close() (and its real, immediate display:none)
+        // only runs once the fade has already visually completed, so there
+        // is nothing left to get stuck.
         function closeSettingsDialog() {
-          $('settingsDialog').close();
-          refresh();
+          const dialog = $('settingsDialog');
+          if (!dialog.open || dialog.classList.contains('dialog-closing')) return;
+          dialog.classList.add('dialog-closing');
+          setTimeout(() => {
+            dialog.classList.remove('dialog-closing');
+            dialog.close();
+          }, 160);
         }
 
         async function saveSettings() {
