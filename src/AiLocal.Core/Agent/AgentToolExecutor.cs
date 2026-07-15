@@ -79,10 +79,16 @@ public sealed class AgentToolExecutor
 
         var tools = new List<ToolDefinition>
         {
-            new("read_file", "Read the full text contents of a file.",
-                """{"type":"object","properties":{"path":{"type":"string","description":"File path to read."}},"required":["path"]}"""),
-            new("write_file", "Create or overwrite a text file with the given content. Creates parent directories if needed.",
+            new("read_file", "Read the text contents of a file. Read the WHOLE file by default, or a slice with offset/limit (1-indexed). Prefer a slice for large files to save context.",
+                """{"type":"object","properties":{"path":{"type":"string","description":"File path to read."},"offset":{"type":"integer","description":"1-indexed line to start reading from (default 1)."},"limit":{"type":"integer","description":"Max number of lines to return (default: whole file)."}},"required":["path"]}"""),
+            new("write_file", "Create or overwrite a text file with the given content. Creates parent directories if needed. Prefer edit_file for changing existing files - it only touches the lines you name.",
                 """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""),
+            new("edit_file", "Make a targeted change to an EXISTING file: replace oldText with newText. Does not rewrite the whole file, so it's safe for large files. By default replaces the first match; set replaceAll=true to replace every match. The change is rejected if oldText is not found or is ambiguous (more than one match without replaceAll).",
+                """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string","description":"The exact text to replace. Must match a unique location unless replaceAll is true."},"newText":{"type":"string","description":"The replacement text."},"replaceAll":{"type":"boolean","description":"Replace every occurrence of oldText instead of just the first (default false)."}},"required":["path","oldText","newText"]}"""),
+            new("search", "Search file contents across the workspace for a regex pattern (case-insensitive). Returns matching lines with file path and line number. Use to find where something is defined or used. Respects the same path confinement as other tools.",
+                """{"type":"object","properties":{"pattern":{"type":"string","description":"Regular expression to search for."},"path":{"type":"string","description":"Optional directory or file to search within (relative to workspace root). Defaults to the whole workspace."},"maxMatches":{"type":"integer","description":"Cap on results (default 50)."}},"required":["pattern"]}"""),
+            new("glob", "List files matching a glob pattern (e.g. \"**/*.cs\", \"src/**/*.json\"). Good for discovering the project layout without reading everything.",
+                """{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern. '**' matches across directories; a leading '**/' is added automatically so patterns like '*.cs' search recursively."},"path":{"type":"string","description":"Optional directory to scope the search to (relative to workspace root)."}},"required":["pattern"]}"""),
             new("list_files", "List files and directories at a given path (non-recursive).",
                 """{"type":"object","properties":{"path":{"type":"string","description":"Directory to list. Defaults to the workspace root."}}}""")
         };
@@ -115,6 +121,9 @@ public sealed class AgentToolExecutor
             {
                 "read_file" => await ReadFileAsync(call, root, ct),
                 "write_file" => await WriteFileAsync(call, root, ct),
+                "edit_file" => await EditFileAsync(call, root, ct),
+                "search" => await SearchAsync(call, root, ct),
+                "glob" => await GlobAsync(call, root, ct),
                 "list_files" => ListFiles(call, root),
                 "run_command" when _level == AgentAccessLevel.Full => await RunCommandAsync(call, root, ct),
                 "run_command" => Error(call, "run_command is not available at this Worker's current access level (Sandboxed allows file access only)."),
@@ -138,8 +147,28 @@ public sealed class AgentToolExecutor
         var path = ResolvePath(RequireString(args, "path"));
         if (!File.Exists(path))
             return Error(call, $"file not found: {path}");
-        var content = await File.ReadAllTextAsync(path, ct);
-        return new ToolResult(call.Id, call.Name, Truncate(content));
+
+        // Whole-file by default; a slice when offset/limit are given so the
+        // agent can read just the relevant lines of a large file instead of
+        // burning its entire context window on the whole thing.
+        var offset = args.TryGetProperty("offset", out var o) && o.ValueKind == JsonValueKind.Number ? o.GetInt32() : 1;
+        var limit = args.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetInt32() : int.MaxValue;
+        if (offset < 1) offset = 1;
+
+        if (offset == 1 && limit == int.MaxValue)
+        {
+            var content = await File.ReadAllTextAsync(path, ct);
+            return new ToolResult(call.Id, call.Name, Truncate(content));
+        }
+
+        var allLines = await File.ReadAllLinesAsync(path, ct);
+        var start = offset - 1;
+        if (start >= allLines.Length)
+            return new ToolResult(call.Id, call.Name, $"(file has {allLines.Length} lines; offset {offset} is past the end)");
+        var end = Math.Min(start + limit, allLines.Length);
+        var slice = allLines[start..end];
+        var header = $"lines {start + 1}-{end} of {allLines.Length}:\n";
+        return new ToolResult(call.Id, call.Name, header + Truncate(string.Join('\n', slice)));
     }
 
     private async Task<ToolResult> WriteFileAsync(ToolCall call, JsonElement args, CancellationToken ct)
@@ -166,6 +195,40 @@ public sealed class AgentToolExecutor
         return new ToolResult(call.Id, call.Name, $"wrote {content.Length} characters to {path}");
     }
 
+    private async Task<ToolResult> EditFileAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var path = ResolvePath(RequireString(args, "path"));
+        var oldText = RequireString(args, "oldText");
+        var newText = RequireString(args, "newText");
+        var replaceAll = args.TryGetProperty("replaceAll", out var r) && r.ValueKind == JsonValueKind.True;
+
+        if (!File.Exists(path))
+            return Error(call, $"file not found: {path}");
+
+        var content = await File.ReadAllTextAsync(path, ct);
+        var occurrences = content.Split(oldText).Length - 1;
+
+        if (occurrences == 0)
+            return Error(call, "edit_file failed: oldText was not found in the file. Re-read the file and copy the exact text to replace (whitespace and punctuation must match).");
+        if (!replaceAll && occurrences > 1)
+            return Error(call, $"edit_file failed: oldText matched {occurrences} locations and replaceAll is false. Make oldText more specific, or set replaceAll=true to replace all of them.");
+
+        var updated = replaceAll ? content.Replace(oldText, newText) : content.Replace(oldText, newText);
+
+        // Apply the same approval gate as write_file so the operator (or the
+        // Host's ChangeReviewer) still previews an edit before it lands.
+        if (_approvalGate is not null)
+        {
+            var decision = await _approvalGate(new FileChangeProposal(path, content, updated), ct);
+            if (!decision.Approve)
+                return Error(call, decision.Reason ?? "File edit was rejected by the operator.");
+        }
+
+        await File.WriteAllTextAsync(path, updated, ct);
+        return new ToolResult(call.Id, call.Name,
+            $"edited {path}: replaced {occurrences} occurrence(s) of {oldText.Length} chars with {newText.Length} chars.");
+    }
+
     private ToolResult ListFiles(ToolCall call, JsonElement args)
     {
         var requested = args.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String
@@ -180,6 +243,165 @@ public sealed class AgentToolExecutor
             .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return new ToolResult(call.Id, call.Name, entries.Count > 0 ? string.Join('\n', entries) : "(empty directory)");
+    }
+
+    // Directories we never descend into when searching/globbing - keeps the
+    // agent from drowning in build output, deps, and VCS internals.
+    private static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", "bin", "obj", "node_modules", ".vs", "packages", "out", "dist", ".idea"
+    };
+
+    private async Task<ToolResult> SearchAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var pattern = RequireString(args, "pattern");
+        var maxMatches = args.TryGetProperty("maxMatches", out var m) && m.ValueKind == JsonValueKind.Number
+            ? Math.Clamp(m.GetInt32(), 1, 500) : 50;
+
+        Regex regex;
+        try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline); }
+        catch (ArgumentException ex) { return Error(call, $"invalid search pattern: {ex.Message}"); }
+
+        var baseDir = args.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && p.GetString() is { Length: > 0 } pp
+            ? ResolveDir(pp)
+            : _level == AgentAccessLevel.Sandboxed ? _workspaceRoot : ".";
+        if (!Directory.Exists(baseDir))
+            return Error(call, $"search path not found: {baseDir}");
+
+        var matches = new List<string>();
+        foreach (var file in EnumerateFiles(baseDir))
+        {
+            if (matches.Count >= maxMatches) break;
+            if (!IsTextFile(file)) continue;
+            string[] lines;
+            try { lines = await File.ReadAllLinesAsync(file, ct); }
+            catch { continue; }
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (matches.Count >= maxMatches) break;
+                if (regex.IsMatch(lines[i]))
+                {
+                    var rel = _level == AgentAccessLevel.Sandboxed
+                        ? Path.GetRelativePath(_workspaceRoot, file).Replace('\\', '/')
+                        : file;
+                    matches.Add($"{rel}:{i + 1}: {lines[i].Trim()}");
+                }
+            }
+        }
+
+        if (matches.Count == 0)
+            return new ToolResult(call.Id, call.Name, $"no matches for /{pattern}/ under {baseDir}");
+        var truncated = matches.Count >= maxMatches;
+        return new ToolResult(call.Id, call.Name,
+            string.Join('\n', matches) + (truncated ? $"\n...({maxMatches} match cap reached)" : ""));
+    }
+
+    private async Task<ToolResult> GlobAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        var pattern = RequireString(args, "pattern");
+        // Accept a leading "**/" automatically so a bare "*.cs" still searches
+        // recursively, matching the glob behaviour agents expect.
+        if (!pattern.StartsWith("**") && !pattern.Contains('/'))
+            pattern = "**/" + pattern;
+        if (pattern.StartsWith("**/"))
+            pattern = pattern[3..];
+
+        var baseDir = args.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && p.GetString() is { Length: > 0 } pp
+            ? ResolveDir(pp)
+            : _level == AgentAccessLevel.Sandboxed ? _workspaceRoot : ".";
+        if (!Directory.Exists(baseDir))
+            return Error(call, $"glob path not found: {baseDir}");
+
+        var results = new List<string>();
+        foreach (var file in EnumerateFiles(baseDir))
+        {
+            if (GlobMatch(Path.GetRelativePath(baseDir, file).Replace('\\', '/'), pattern)
+                || GlobMatch(Path.GetFileName(file), pattern))
+                results.Add(_level == AgentAccessLevel.Sandboxed
+                    ? Path.GetRelativePath(_workspaceRoot, file).Replace('\\', '/')
+                    : file);
+        }
+        results.Sort(StringComparer.OrdinalIgnoreCase);
+
+        if (results.Count == 0)
+            return new ToolResult(call.Id, call.Name, $"no files match '{pattern}' under {baseDir}");
+        return new ToolResult(call.Id, call.Name, string.Join('\n', results));
+    }
+
+    /// <summary>Enumerate files under a directory, skipping VCS/build/dep dirs.</summary>
+    private static IEnumerable<string> EnumerateFiles(string baseDir)
+    {
+        var stack = new Stack<string>();
+        stack.Push(baseDir);
+        while (stack.Count > 0)
+        {
+            var dir = stack.Pop();
+            IEnumerable<string> files;
+            try { files = Directory.EnumerateFiles(dir); }
+            catch { continue; }
+            foreach (var f in files) yield return f;
+
+            IEnumerable<string> subdirs;
+            try { subdirs = Directory.EnumerateDirectories(dir); }
+            catch { continue; }
+            foreach (var d in subdirs)
+                if (!SkipDirs.Contains(Path.GetFileName(d)))
+                    stack.Push(d);
+        }
+    }
+
+    private static bool IsTextFile(string path)
+    {
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".txt" or ".cs" or ".json" or ".md" or ".js" or ".ts" or ".tsx" or ".jsx"
+            or ".py" or ".java" or ".c" or ".cpp" or ".h" or ".hpp" or ".css" or ".scss"
+            or ".html" or ".xml" or ".yaml" or ".yml" or ".toml" or ".ini" or ".sh" or ".ps1"
+            or ".go" or ".rs" or ".rb" or ".php" or ".sql" or ".gitignore" or ".cfg" or ".conf"
+            or ".csproj" or ".fsproj" or ".sln" or ".props" or ".targets" or ".razor" or ".cshtml"
+            or ".vue" or ".lock" or ".graphql" or ".proto" or ".ipynb" or ".r" or ".kt" or ".swift"
+            or ".dart" or ".lua" or ".pl" or ".asm" or ".s" or ".bat" or ".cmd" or ".csv";
+    }
+
+    /// <summary>Lightweight glob match supporting '*' and '**'. Not a full
+    /// glob engine - covers the patterns an agent actually uses.</summary>
+    private static bool GlobMatch(string text, string pattern)
+    {
+        // Convert the glob to a regex: ** -> .*, * -> [^/]*, ? -> ., escape rest.
+        var sb = new System.Text.StringBuilder();
+        sb.Append('^');
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var c = pattern[i];
+            if (c == '*')
+            {
+                if (i + 1 < pattern.Length && pattern[i + 1] == '*')
+                {
+                    sb.Append(".*");
+                    i++; // consume second *
+                    // Skip a following slash so "**/*.cs" matches "a/b.cs" too.
+                    if (i + 1 < pattern.Length && pattern[i + 1] == '/') i++;
+                }
+                else sb.Append("[^/]*");
+            }
+            else if (c == '?') sb.Append('.');
+            else sb.Append(Regex.Escape(c.ToString()));
+        }
+        sb.Append('$');
+        return Regex.IsMatch(text, sb.ToString(), RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>Resolve a directory argument the same way file paths are
+    /// resolved (sandbox confinement for Sandboxed, workspace-relative for
+    /// Full), returning the absolute directory or throwing on escape.</summary>
+    private string ResolveDir(string requestedPath)
+    {
+        // Mirror ResolvePath's contract for directories.
+        if (_level == AgentAccessLevel.Full)
+            return Path.GetFullPath(requestedPath, _workspaceRoot);
+        if (Path.IsPathRooted(requestedPath))
+            throw new UnauthorizedAccessException(
+                $"absolute paths are not allowed in sandboxed mode: '{requestedPath}'");
+        return Path.GetFullPath(Path.Combine(_workspaceRoot, requestedPath));
     }
 
     private async Task<ToolResult> RunCommandAsync(ToolCall call, JsonElement args, CancellationToken ct)

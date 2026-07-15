@@ -379,4 +379,131 @@ public class AgentToolExecutorTests : IDisposable
         Assert.DoesNotContain("color:red", text);
         Assert.DoesNotContain("<p>", text);
     }
+
+    [Fact]
+    public async Task EditFile_ReplacesTargetedText_AndLeavesRest()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "code.cs", content = "line one\nline two\nline three" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("edit_file", new { path = "code.cs", oldText = "line two", newText = "line TWO edited" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        var after = await executor.ExecuteAsync(Call("read_file", new { path = "code.cs" }), CancellationToken.None);
+        Assert.Contains("line TWO edited", after.Output);
+        Assert.Contains("line one", after.Output);
+        Assert.Contains("line three", after.Output);
+    }
+
+    [Fact]
+    public async Task EditFile_AmbiguousWithoutReplaceAll_Fails()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "dup.txt", content = "repeat\nrepeat" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("edit_file", new { path = "dup.txt", oldText = "repeat", newText = "x" }), CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Contains("matched", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EditFile_ReplaceAll_HandlesMultiple()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "dup.txt", content = "repeat\nrepeat" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("edit_file", new { path = "dup.txt", oldText = "repeat", newText = "done", replaceAll = true }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        var after = await executor.ExecuteAsync(Call("read_file", new { path = "dup.txt" }), CancellationToken.None);
+        Assert.DoesNotContain("repeat", after.Output);
+        Assert.Equal(2, after.Output.Split("done").Length - 1);
+    }
+
+    [Fact]
+    public async Task EditFile_MissingOldText_Fails()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "x.txt", content = "actual content" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("edit_file", new { path = "x.txt", oldText = "not present", newText = "y" }), CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Contains("not found", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadFile_Slice_ReturnsOnlyRequestedLines()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "big.txt", content = "a\nb\nc\nd\ne" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("read_file", new { path = "big.txt", offset = 2, limit = 2 }), CancellationToken.None);
+
+        Assert.Contains("lines 2-3 of 5", result.Output);
+        Assert.Contains("b", result.Output);
+        Assert.Contains("c", result.Output);
+        Assert.DoesNotContain("a", result.Output);
+        Assert.DoesNotContain("d", result.Output);
+    }
+
+    [Fact]
+    public async Task Search_FindsPatternWithLineNumbers()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        Directory.CreateDirectory(Path.Combine(_workspace, "src"));
+        await executor.ExecuteAsync(
+            Call("write_file", new { path = "src/app.cs", content = "class App {\n  void Run() {}\n}" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(
+            Call("search", new { pattern = "void Run" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Contains("app.cs:2:", result.Output);
+    }
+
+    [Fact]
+    public async Task Glob_FindsFilesByExtension()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        Directory.CreateDirectory(Path.Combine(_workspace, "src"));
+        await executor.ExecuteAsync(Call("write_file", new { path = "src/a.cs", content = "x" }), CancellationToken.None);
+        await executor.ExecuteAsync(Call("write_file", new { path = "src/b.txt", content = "y" }), CancellationToken.None);
+        await executor.ExecuteAsync(Call("write_file", new { path = "top.md", content = "z" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(Call("glob", new { pattern = "*.cs" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Contains("a.cs", result.Output);
+        Assert.DoesNotContain("b.txt", result.Output);
+        Assert.DoesNotContain("top.md", result.Output);
+    }
+
+    [Fact]
+    public async Task Search_SkipsBuildAndVcsDirs()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        Directory.CreateDirectory(Path.Combine(_workspace, "bin"));
+        Directory.CreateDirectory(Path.Combine(_workspace, ".git"));
+        await executor.ExecuteAsync(Call("write_file", new { path = "bin/compiled.cs", content = "secret" }), CancellationToken.None);
+        await executor.ExecuteAsync(Call("write_file", new { path = ".git/history.cs", content = "secret" }), CancellationToken.None);
+        await executor.ExecuteAsync(Call("write_file", new { path = "real.cs", content = "secret" }), CancellationToken.None);
+
+        var result = await executor.ExecuteAsync(Call("search", new { pattern = "secret" }), CancellationToken.None);
+
+        Assert.Contains("real.cs", result.Output);
+        Assert.DoesNotContain("compiled.cs", result.Output);
+        Assert.DoesNotContain("history.cs", result.Output);
+    }
 }
