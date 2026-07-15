@@ -489,6 +489,10 @@ internal static class Dashboard
         }
         .chat-only-workspace .chat-head { border-bottom: none; min-height: 52px; }
         .chat-only-workspace .composer { border-top: none; padding-bottom: 16px; }
+        .office-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
+        .office-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
+        .office-card.offline { opacity: .55; }
+        .office-card .node-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .chat-only-workspace .messages {
           flex: 1;
           width: min(880px, 100%);
@@ -1370,6 +1374,7 @@ internal static class Dashboard
               <button class="view-tab" data-view="network"><span data-icon="globe"></span> Nätverk</button>
               <button class="view-tab" data-view="schedules"><span data-icon="clock"></span> Schema</button>
               <button class="view-tab" data-view="delegate" id="delegateNavBtn"><span data-icon="send"></span> Delegera till kluster</button>
+              <button class="view-tab" data-view="office"><span data-icon="users"></span> Kontorsvy</button>
             </nav>
             <div class="sidebar-section">
               <div class="sidebar-section-head">
@@ -1531,6 +1536,18 @@ internal static class Dashboard
               </div>
               <input type="file" id="delegateFileInput" multiple style="display:none">
             </div>
+          </section>
+        </main>
+
+        <main class="chat-only-workspace hidden" id="officeView">
+          <section class="panel chat-panel">
+            <div class="chat-head">
+              <div class="chat-title">Kontorsvy - vad alla agenter gor just nu</div>
+              <div class="small" style="opacity:.6">Varje ansluten worker som en "skrivbordsrad". Pagaende uppgift, roll och status visas live.</div>
+            </div>
+            <div class="office-grid" id="officeWorkers"></div>
+            <div class="panel-title" style="margin:14px 0 8px">Mal (pagaende forst)</div>
+            <div class="task-list" id="officeGoals"></div>
           </section>
         </main>
 
@@ -2147,7 +2164,8 @@ internal static class Dashboard
           square: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
           copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><rect x="4" y="4" width="11" height="11" rx="2"/>',
           'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>',
-          shield: '<polygon points="12 3 20 6 20 12 12 21 4 12 4 6"/>'
+          shield: '<polygon points="12 3 20 6 20 12 12 21 4 12 4 6"/>',
+          users: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15 14.5a5 5 0 0 1 6 5.5"/>'
         };
         const icon = (name, size = 16) =>
           `<svg class="icon-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
@@ -3031,7 +3049,7 @@ internal static class Dashboard
           }
         }
 
-        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session'];
+        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office'];
         function switchView(view) {
           state.activeView = knownViews.includes(view) ? view : 'work';
           $('workView').classList.toggle('hidden', state.activeView !== 'work');
@@ -3039,6 +3057,7 @@ internal static class Dashboard
           $('schedulesView').classList.toggle('hidden', state.activeView !== 'schedules');
           $('delegateView').classList.toggle('hidden', state.activeView !== 'delegate');
           $('sessionView').classList.toggle('hidden', state.activeView !== 'session');
+          $('officeView').classList.toggle('hidden', state.activeView !== 'office');
           document.querySelectorAll('[data-view]').forEach(button => {
             button.classList.toggle('active', button.dataset.view === state.activeView);
           });
@@ -3048,6 +3067,9 @@ internal static class Dashboard
           }
           if (state.activeView === 'schedules') {
             loadSchedules();
+          }
+          if (state.activeView === 'office') {
+            renderOffice();
           }
         }
 
@@ -3542,6 +3564,37 @@ internal static class Dashboard
             osc.start(); osc.stop(ctx.currentTime + 0.26);
           } catch { /* audio is best-effort */ }
         }
+
+        async function renderOffice() {
+          try {
+            const data = await fetchJson('/api/office');
+            const wEl = $('officeWorkers');
+            if (!wEl) return;
+            if (!data.workers.length) {
+              wEl.innerHTML = '<div class="small" style="opacity:.6">Inga workers anslutna.</div>';
+            } else {
+              wEl.innerHTML = data.workers.map(w => {
+                const statusClass = w.status === 'Offline' ? 'bad' : (w.status === 'Busy' ? 'good' : '');
+                const cur = w.current;
+                const curHtml = cur
+                  ? `<div class="small" style="margin-top:4px">${esc(trunc(cur.title, 70))}</div>
+                     <div class="small" style="opacity:.6">${esc(roleName(cur.role) || cur.role || 'agent')} | ${esc(stateNameFromStr(cur.state))}${cur.complexity ? ' | niva ' + cur.complexity : ''}</div>`
+                  : `<div class="small" style="opacity:.6;margin-top:4px">${w.status === 'Offline' ? 'frånkopplad' : 'ledig'}</div>`;
+                return `<div class="office-card ${w.status === 'Offline' ? 'offline' : ''}">
+                  <div class="node-main"><span class="mono">${esc(w.name)}</span><span class="pill ${statusClass}">${esc(w.status)}</span>${w.activeTasks ? `<span class="small">${w.activeTasks} aktiva</span>` : ''}</div>
+                  ${curHtml}
+                </div>`;
+              }).join('');
+            }
+            const gEl = $('officeGoals');
+            if (gEl) gEl.innerHTML = (data.goals.length ? data.goals : []).map(g => `<div class="node">
+              <div class="node-main"><span class="mono">${esc(trunc(g.title, 60))}</span><span class="pill">${esc(g.state)}</span>${g.role ? `<span class="pill">${esc(roleName(g.role) || g.role)}</span>` : ''}</div>
+              <div class="small" style="opacity:.6">${g.children} deluppgifter</div>
+            </div>`).join('') || '<div class="small" style="opacity:.6">Inga mål.</div>';
+          } catch { /* office view is best-effort */ }
+        }
+
+        const stateNameFromStr = s => s; // state already a readable string from /api/office
 
         async function cancelTask(id) {
           if (!window.confirm('Avbryt den här uppgiften?')) return;

@@ -653,6 +653,36 @@ public static class HostRole
             return Results.Ok(new { cleared = true });
         });
 
+        // "Office view": what every agent is doing right now. Built from the
+        // worker registry (who's online) + the task board (what each is on).
+        app.MapGet("/api/office", (WorkerRegistry reg, TaskBoard board) =>
+        {
+            var inflight = board.All.Where(t => t.State is TaskState.Running or TaskState.Dispatched or TaskState.Queued).ToList();
+            var workers = reg.All.Select(n => new
+            {
+                id = n.Id,
+                name = n.Name,
+                status = n.Status.ToString(),
+                activeTasks = n.ActiveTasks,
+                current = inflight.FirstOrDefault(t => t.WorkerName == n.Name) is { } cur
+                    ? new { id = cur.Id, title = cur.Title ?? cur.Prompt, role = cur.RoleId, state = cur.State.ToString(), complexity = cur.Complexity }
+                    : null
+            }).ToList();
+            var goals = board.All
+                .Where(t => t.ParentId is null)
+                .Select(t => new
+                {
+                    id = t.Id,
+                    title = t.Title ?? t.Prompt,
+                    state = t.State.ToString(),
+                    role = t.RoleId,
+                    children = board.All.Count(c => c.ParentId == t.Id)
+                })
+                .OrderByDescending(t => t.state == "Running" ? 1 : 0)
+                .ToList();
+            return Results.Ok(new { workers, goals });
+        });
+
         app.MapGet("/tasks/{id}", (string id, TaskBoard board) =>
             board.Get(id) is { } task ? Results.Ok(task) : Results.NotFound());
 
