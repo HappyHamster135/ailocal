@@ -55,7 +55,54 @@ public sealed class WorkspaceService
                 _ => new("go", ["build", "./..."], "build"),
             };
         }
+        // p3: Unity project - Assets/ + ProjectSettings/ is the tell.
+        if (Directory.Exists(Path.Combine(root, "Assets")) &&
+            Directory.Exists(Path.Combine(root, "ProjectSettings")))
+        {
+            return kind switch
+            {
+                "test" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-runTests", "-testPlatform", "EditMode"], "test"),
+                "run" => new("Unity", ["-batchmode", "-quit", "-projectPath", root], "run"),
+                "game" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-buildTarget", "Win64"], "game"),
+                _ => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-buildTarget", "Win64"], "build"),
+            };
+        }
+        // p3: Godot project - project.godot at the root.
+        if (File.Exists(Path.Combine(root, "project.godot")))
+        {
+            return kind switch
+            {
+                "test" => new("godot", ["--headless", "--quit", "--path", root], "test"),
+                "run" => new("godot", ["--path", root], "run"),
+                "game" => new("godot", ["--headless", "--quit", "--path", root,
+                    "--export-release", "Windows Desktop"], "game"),
+                _ => new("godot", ["--headless", "--quit", "--path", root, "--build"], "build"),
+            };
+        }
+        // p3: Python project - requirements.txt / pyproject.toml / a .py entry.
+        if (File.Exists(Path.Combine(root, "requirements.txt")) ||
+            File.Exists(Path.Combine(root, "pyproject.toml")) ||
+            Directory.GetFiles(root, "*.py").Length > 0)
+        {
+            var entry = FirstPythonEntry(root);
+            return kind switch
+            {
+                "test" => new("python", ["-m", "pytest"], "test"),
+                "run" => new("python", [entry ?? "main.py"], "run"),
+                _ => new("pip", ["install", "-r", "requirements.txt"], "build"),
+            };
+        }
         return null; // unknown project kind - pass through, nothing to do
+    }
+
+    static string? FirstPythonEntry(string root)
+    {
+        return Directory.GetFiles(root, "main.py").FirstOrDefault()
+            ?? Directory.GetFiles(root, "app.py").FirstOrDefault()
+            ?? Directory.GetFiles(root, "*.py").FirstOrDefault();
     }
 
     static string? FirstProject(string root)

@@ -419,7 +419,7 @@ public static class WorkerRole
             var root = body?.Root?.Trim() ?? "";
             if (string.IsNullOrWhiteSpace(root))
                 return Results.Problem(detail: "root (arbetsmapp) krävs", statusCode: StatusCodes.Status400BadRequest);
-            var allowed = new[] { "build", "run", "test" };
+            var allowed = new[] { "build", "run", "test", "game" };
             if (!allowed.Contains(kind))
                 return Results.Problem(detail: "okänt kommando: " + kind, statusCode: StatusCodes.Status400BadRequest);
             var (success, output) = await ws.RunAsync(root, kind, ct);

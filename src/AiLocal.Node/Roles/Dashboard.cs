@@ -1671,6 +1671,7 @@ internal static class Dashboard
                 <button class="btn ghost sm" id="studioBuildBtn" title="Bygg projektet i arbetsmappen">Bygg</button>
                 <button class="btn ghost sm" id="studioRunBtn" title="Kör projektet">Kör</button>
                 <button class="btn ghost sm" id="studioTestBtn" title="Kör projektets tester">Test</button>
+                <button class="btn ghost sm" id="studioGameBtn" title="Bygg spelskivan (Unity/Godot headless)">Bygg spel</button>
                 <span class="small mono" id="studioRunState"></span>
               </div>
               <pre class="studio-output" id="studioOutput" style="display:none"></pre>
@@ -5418,6 +5419,8 @@ internal static class Dashboard
           if (runBtn) runBtn.onclick = () => runStudioCommand('run');
           const testBtn = $('studioTestBtn');
           if (testBtn) testBtn.onclick = () => runStudioCommand('test');
+          const gameBtn = $('studioGameBtn');
+          if (gameBtn) gameBtn.onclick = () => runStudioCommand('game');
         }
 
         async function renderStudio() {
