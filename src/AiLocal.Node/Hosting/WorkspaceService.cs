@@ -112,13 +112,19 @@ public sealed class WorkspaceService
         return p is null ? null : Path.GetFileName(p);
     }
 
-    /// <summary>Runs the requested command, returning (Success, Output).</summary>
+    /// <summary>Runs the requested command, returning (Success, Output).
+    /// kind "verify" maps to the run command but with a short (30s) timeout so
+    /// an operator can confirm the app boots and emits startup output without
+    /// the process hanging forever.</summary>
     public async Task<(bool Success, string Output)> RunAsync(
         string root, string kind, CancellationToken ct = default)
     {
-        var cmd = DetectCommand(root, kind);
+        // P6: "verify" = run the app, but capture startup output and stop.
+        var effectiveKind = kind == "verify" ? "run" : kind;
+        var cmd = DetectCommand(root, effectiveKind);
         if (cmd is null)
             return (true, "inget känt byggsystem i arbetsmappen - inget att göra.");
+        var timeoutSec = kind == "verify" ? 30 : 300;
         try
         {
             var psi = new ProcessStartInfo
@@ -139,13 +145,16 @@ public sealed class WorkspaceService
             proc.Start();
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
             try { await proc.WaitForExitAsync(linked.Token); }
             catch (OperationCanceledException) when (timeout.IsCancellationRequested)
             {
                 try { proc.Kill(true); } catch { /* best effort */ }
-                return (false, "Kommandot timade ut efter 5 min: " + cmd.FileName + " " + string.Join(" ", cmd.Arguments));
+                var msg = kind == "verify"
+                    ? "Appen startade (verifiering avbröts efter " + timeoutSec + "s för att fånga uppstart):\n" + output.ToString().TrimEnd()
+                    : "Kommandot timade ut efter " + timeoutSec + "s: " + cmd.FileName + " " + string.Join(" ", cmd.Arguments);
+                return (true, msg);
             }
             return (proc.ExitCode == 0, output.ToString().TrimEnd());
         }

@@ -406,6 +406,21 @@ public static class WorkerRole
             AutoMergeHostedService.RunAutoMerge(services);
             return Results.Ok(new { ran = true });
         });
+
+        // P6: actually run the task's app and report startup output, so an
+        // operator can confirm it boots before merging. Runs in the worktree.
+        app.MapPost("/api/isolation/verify", async (
+            GitIsolationService isolation, WorkspaceService ws, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var task = isolation.Get(body.TaskId);
+            if (task is null)
+                return Results.Problem(detail: "unknown isolated task", statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await ws.RunAsync(task.WorktreePath, "verify", ct);
+            return Results.Ok(new { success, output });
+        });
     }
 
     /// <summary>Studio one-click Build / Run / Test against the workspace,

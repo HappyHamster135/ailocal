@@ -551,6 +551,23 @@ internal static class Dashboard
         .branch-row .mono { font-size: 12px; }
         .branch-actions { display: flex; gap: 4px; margin-top: 4px; }
         .iso-diff { background: #0b0f14; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; padding: 6px; font-size: 11px; white-space: pre-wrap; }
+        .iso-diff-side { background: #0b0f14; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; margin-top: 6px; max-height: 360px; overflow: auto; font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace); font-size: 11px; }
+        .iso-file { border-bottom: 1px solid rgba(255,255,255,.06); }
+        .iso-file:last-child { border-bottom: none; }
+        .iso-file-name { padding: 4px 8px; background: rgba(255,255,255,.04); color: #8ab4f8; font-size: 11px; }
+        .iso-cols { display: grid; grid-template-columns: 1fr 1fr; }
+        .iso-col { overflow-x: auto; }
+        .iso-col.old { border-right: 1px solid rgba(255,255,255,.06); }
+        .iso-line { display: flex; white-space: pre; line-height: 1.5; }
+        .iso-line .iso-ln { flex: 0 0 38px; text-align: right; padding-right: 8px; color: rgba(255,255,255,.3); user-select: none; }
+        .iso-line .iso-txt { flex: 1; padding-right: 8px; }
+        .iso-line.add { background: rgba(63,185,80,.14); }
+        .iso-line.add .iso-txt { color: #7ee787; }
+        .iso-line.del { background: rgba(248,81,73,.14); }
+        .iso-line.del .iso-txt { color: #ffa198; }
+        .iso-line.ctx { color: rgba(255,255,255,.82); }
+        .iso-verify-out { margin-top: 6px; padding: 6px 8px; background: #0b0f14; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace); font-size: 11px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+        .iso-verify-out.err { border-color: rgba(248,81,73,.5); color: #ffa198; }
         .studio-editor-panel { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
         .studio-editor-content { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 0; }
         .studio-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px 8px 0; background: var(--bg-2, #090c10); border-bottom: 1px solid var(--line, #1f2630); }
@@ -5669,12 +5686,16 @@ internal static class Dashboard
               <button class="btn ghost sm" data-iso-merge="${esc(t.taskId)}">Merge</button>
               <button class="btn ghost sm" data-iso-discard="${esc(t.taskId)}">Kasta</button>
               <button class="btn ghost sm" data-iso-diff="${esc(t.taskId)}">Visa diff</button>
+              <button class="btn ghost sm" data-iso-verify="${esc(t.taskId)}">Verifiera</button>
             </div>
             <pre class="iso-diff" id="iso-diff-${esc(t.taskId)}" style="display:none;max-height:240px;overflow:auto"></pre>
+            <div class="iso-diff-side" id="iso-diff-side-${esc(t.taskId)}" style="display:none"></div>
+            <div class="iso-verify-out" id="iso-verify-${esc(t.taskId)}" style="display:none"></div>
           </div>`).join('');
           el.querySelectorAll('[data-iso-merge]').forEach(b => b.onclick = () => studioMerge(b.dataset.isoMerge));
           el.querySelectorAll('[data-iso-discard]').forEach(b => b.onclick = () => studioDiscard(b.dataset.isoDiscard));
           el.querySelectorAll('[data-iso-diff]').forEach(b => b.onclick = () => studioDiff(b.dataset.isoDiff));
+          el.querySelectorAll('[data-iso-verify]').forEach(b => b.onclick = () => studioVerify(b.dataset.isoVerify));
         }
 
         async function studioMerge(taskId) {
@@ -5696,14 +5717,73 @@ internal static class Dashboard
         }
 
         async function studioDiff(taskId) {
-          const pre = $('iso-diff-' + taskId);
-          if (!pre) return;
-          if (pre.style.display !== 'none') { pre.style.display = 'none'; return; }
+          const side = $('iso-diff-side-' + taskId);
+          if (!side) return;
+          if (side.style.display !== 'none') { side.style.display = 'none'; return; }
           try {
             const r = await fetchJson('/api/isolation/diff', { method: 'POST', body: JSON.stringify({ taskId }) });
-            pre.textContent = r.diff || '(ingen diff)';
-            pre.style.display = 'block';
+            side.innerHTML = renderSideBySide(r.diff || '');
+            side.style.display = 'block';
           } catch (e) { showGlobalNotice(e.message, true); }
+        }
+
+        // P5: parse a unified git diff into a side-by-side (old | new) view
+        // with per-line syntax highlighting. Offline, no CDN.
+        function renderSideBySide(diff) {
+          if (!diff || !diff.trim()) return '<div class="small" style="opacity:.6">Ingen diff.</div>';
+          const files = [];
+          let cur = null, oldLine = 0, newLine = 0;
+          const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const langOf = p => /\.(cs|js|ts|tsx|jsx|json|html|xml|css|scss|py|rb|go|rs|cpp|c|h)$/i.test(p) ? p : '';
+          for (const raw of diff.split('\n')) {
+            if (raw.startsWith('diff --git')) {
+              if (cur) files.push(cur);
+              const m = raw.match(/diff --git a\/(.*) b\/(.*)/);
+              cur = { file: m ? m[2] : raw, left: [], right: [] };
+            } else if (raw.startsWith('@@')) {
+              const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+              oldLine = m ? +m[1] : 0; newLine = m ? +m[2] : 0;
+            } else if (raw.startsWith('+') && !raw.startsWith('+++')) {
+              cur.right.push({ type: 'add', n: newLine++, text: raw.slice(1) });
+            } else if (raw.startsWith('-') && !raw.startsWith('---')) {
+              cur.left.push({ type: 'del', n: oldLine++, text: raw.slice(1) });
+            } else if (raw.startsWith(' ')) {
+              cur.left.push({ type: 'ctx', n: oldLine++, text: raw.slice(1) });
+              cur.right.push({ type: 'ctx', n: newLine++, text: raw.slice(1) });
+            } else if (raw.startsWith('\\')) {
+              // "\ No newline at end of file" - ignore
+            }
+          }
+          if (cur) files.push(cur);
+          return files.map(f => {
+            const lang = langOf(f.file);
+            const left = f.left.map(l => {
+              const cls = l.type === 'del' ? 'del' : (l.type === 'ctx' ? 'ctx' : 'ctx');
+              const h = l.type === 'del' ? highlightCode(esc(l.text), langOf(lang)) : esc(l.text);
+              return `<div class="iso-line ${l.type}"><span class="iso-ln">${l.n || ''}</span><span class="iso-txt">${h}</span></div>`;
+            }).join('');
+            const right = f.right.map(l => {
+              const h = l.type === 'add' ? highlightCode(esc(l.text), langOf(lang)) : esc(l.text);
+              return `<div class="iso-line ${l.type}"><span class="iso-ln">${l.n || ''}</span><span class="iso-txt">${h}</span></div>`;
+            }).join('');
+            return `<div class="iso-file"><div class="iso-file-name mono">${esc(f.file)}</div>
+              <div class="iso-cols"><div class="iso-col old">${left}</div><div class="iso-col new">${right}</div></div></div>`;
+          }).join('');
+        }
+
+        // P6: ask a Worker to actually run the task's app and report the
+        // startup output back, so an operator can see it boots before merge.
+        async function studioVerify(taskId) {
+          const out = $('iso-verify-' + taskId);
+          if (!out) return;
+          out.style.display = 'block';
+          out.className = 'iso-verify-out';
+          out.textContent = 'Verifierar (bygger + kör)...';
+          try {
+            const r = await fetchJson('/api/isolation/verify', { method: 'POST', body: JSON.stringify({ taskId }) });
+            out.textContent = r.output || '(ingen output)';
+            if (!r.success) out.className = 'iso-verify-out err';
+          } catch (e) { out.textContent = e.message; out.className = 'iso-verify-out err'; }
         }
         initStudio();
       </script>
