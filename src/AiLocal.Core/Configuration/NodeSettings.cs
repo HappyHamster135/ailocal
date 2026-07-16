@@ -76,6 +76,11 @@ public sealed class WorkerProfileSettings
     /// workspace to be a git repo; a non-repo silently runs un-isolated.</summary>
     public bool UseGitIsolation { get; set; }
 
+    /// <summary>When on, isolated tasks whose CI gate passes are merged
+    /// automatically (and discarded if CI fails) instead of waiting for a
+    /// manual merge in the Studio "Branches" tab. Requires UseGitIsolation.</summary>
+    public bool AutoMergeIsolatedTasks { get; set; }
+
     /// <summary>When on, the agent gets a fetch_url tool (http/https, text
     /// extraction) so it can look things up on the internet. Independent of
     /// AgentAccess - network reach, not filesystem reach.</summary>

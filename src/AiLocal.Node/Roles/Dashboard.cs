@@ -1629,7 +1629,11 @@ internal static class Dashboard
                 <div class="file-tree" id="fileTree"></div>
               </div>
               <div id="studioBranchesPane" style="display:none">
-                <div class="small" style="margin-bottom:6px">Agenternas isolerade branches - granska och merga.</div>
+                <div class="studio-root-row">
+                  <span class="small" id="studioAutoMergeState">Auto-merge: av</span>
+                  <button class="btn ghost sm" id="studioAutoMergeBtn" title="Kör CI-grind + merge på alla klara branches">Auto-merge alla</button>
+                </div>
+                <div class="small" style="margin-bottom:6px">Agenternas isolerade branches - granska och merga. När Auto-merge är på (Inställningar) mergas gröna CI-branches automatiskt; röda kastas.</div>
                 <div id="studioBranches"></div>
               </div>
             </div>
@@ -1898,6 +1902,12 @@ internal static class Dashboard
                 <span class="small" style="display:block;margin-top:-6px">
                   Varje assignment får sin egen git-worktree + branch i Arbetsmappen (kräver att den är ett git-repo). Flera "anställda" skriver inte över varandra,
                   och när agenten är klar granskas diffen som en PR innan merge. Kräver att Arbetsmapp är ett git-repo - annars körs det vanligt.
+                </span>
+                <label class="check-field wide">
+                  <input id="settingAutoMergeIsolatedTasks" type="checkbox"> Auto-merge av isolerade uppgifter
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  När CI-grinden (bygg + test i worktreen) passerar mergas uppgiften automatiskt. Misslyckas CI kastas branchen (skillnaden försvinner) och du får en notis. Kräver Git-isolering.
                 </span>
                 <div class="field wide" style="margin-top:8px">
                   <span class="small">Kommando-skydd (run_command)</span>
@@ -4383,6 +4393,7 @@ internal static class Dashboard
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
+          $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
           $('settingCommandGuard').value = data.commandGuard ?? 'Block';
           $('settingBlockedCommands').value = (data.blockedCommands ?? []).join('\n');
           $('settingProjectMemory').checked = data.projectMemoryEnabled ?? false;
@@ -4711,6 +4722,7 @@ internal static class Dashboard
             aiReviewWrites: $('settingAiReviewWrites').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
+            autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
             commandGuard: $('settingCommandGuard').value,
             blockedCommands: $('settingBlockedCommands').value.split('\n').map(value => value.trim()).filter(Boolean),
             projectMemoryEnabled: $('settingProjectMemory').checked,
@@ -5359,6 +5371,14 @@ internal static class Dashboard
           if (tabFiles) tabFiles.onclick = () => studioTabSwitch('files');
           const tabBranches = $('studioTabBranches');
           if (tabBranches) tabBranches.onclick = () => studioTabSwitch('branches');
+          const autoMergeBtn = $('studioAutoMergeBtn');
+          if (autoMergeBtn) autoMergeBtn.onclick = async () => {
+            try {
+              await fetchJson('/api/isolation/auto-merge-all', { method: 'POST', body: '{}' });
+              showGlobalNotice('Auto-merge kördes på alla aktiva branches.');
+              await renderStudioBranches();
+            } catch (e) { showGlobalNotice(e.message, true); }
+          };
         }
 
         async function renderStudio() {
@@ -5489,6 +5509,12 @@ internal static class Dashboard
         async function renderStudioBranches() {
           const el = $('studioBranches');
           if (!el) return;
+          try {
+            const s = await fetchJson('/api/settings');
+            const on = !!(s && s.autoMergeIsolatedTasks);
+            const st = $('studioAutoMergeState');
+            if (st) st.textContent = 'Auto-merge: ' + (on ? 'PÅ' : 'av');
+          } catch (_) {}
           let tasks;
           try {
             tasks = await fetchJson('/api/isolation/list');

@@ -35,6 +35,7 @@ public sealed record SettingsUpdate(
     bool? AiReviewWrites = null,
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
+    bool? AutoMergeIsolatedTasks = null,
     ModelTiers? ModelTiers = null,
     List<AgentRole>? Roles = null,
     CommandGuardLevel? CommandGuard = null,
@@ -62,6 +63,7 @@ internal sealed class StoredNodeSettings
     public bool AiReviewWrites { get; set; }
     public bool AllowInternet { get; set; }
     public bool UseGitIsolation { get; set; }
+    public bool AutoMergeIsolatedTasks { get; set; }
     public ModelTiers ModelTiers { get; set; } = new();
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
@@ -183,6 +185,7 @@ public sealed class PersistentSettingsStore
                 aiReviewWrites = _settings.Worker.AiReviewWrites,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
+                autoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks,
                 commandGuard = _settings.Worker.CommandGuard.ToString(),
                 blockedCommands = _settings.Worker.BlockedCommands,
                 projectMemoryEnabled = _settings.Worker.ProjectMemoryEnabled,
@@ -279,6 +282,9 @@ public sealed class PersistentSettingsStore
 
             if (update.UseGitIsolation.HasValue)
                 _settings.Worker.UseGitIsolation = update.UseGitIsolation.Value;
+
+            if (update.AutoMergeIsolatedTasks.HasValue)
+                _settings.Worker.AutoMergeIsolatedTasks = update.AutoMergeIsolatedTasks.Value;
 
             if (update.ModelTiers is not null)
                 _settings.Worker.ModelTiers = update.ModelTiers;
@@ -481,6 +487,7 @@ public sealed class PersistentSettingsStore
         _stored.AiReviewWrites = _settings.Worker.AiReviewWrites;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
+        _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;
         _stored.ModelTiers = _settings.Worker.ModelTiers;
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).

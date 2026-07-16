@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text;
 
 namespace AiLocal.Node.Hosting;
 
@@ -34,7 +36,7 @@ public sealed record IsolatedTask(
 /// Worker silently runs the old way (no isolation, single shared folder) so a
 /// non-repo workspace is never broken by this feature.
 /// </summary>
-public sealed class GitIsolationService
+public class GitIsolationService
 {
     private readonly GitService _git;
     private readonly ConcurrentDictionary<string, IsolatedTask> _active = new();
@@ -119,6 +121,107 @@ public sealed class GitIsolationService
             _active.TryRemove(taskId, out _);
         }
         return (success, output);
+    }
+
+    /// <summary>Builds (and tests, if detected) the worktree of an isolated task.
+    /// Discovers the build system by looking for well-known project files in the
+    /// worktree root, then runs the appropriate build command. Returns
+    /// (Success=true, output) on a clean build, or (Success=false, output) on
+    /// failure. If no known build system is found, passes through without
+    /// blocking — the gate is only meaningful for projects that actually build.
+    /// Timeout: 5 minutes.</summary>
+    public async Task<(bool Success, string Output)> RunCiGateAsync(string taskId, CancellationToken ct = default)
+    {
+        var task = Get(taskId);
+        if (task is null)
+            return (false, "unknown isolated task");
+
+        var cmd = DetectBuildCommand(task.WorktreePath);
+        if (cmd is null)
+            return (true, "no build system detected - skipping gate");
+
+        var (exitCode, output) = await RunBuildProcessAsync(cmd, task.WorktreePath, ct);
+        return (exitCode == 0, output);
+    }
+
+    /// <summary>Describes a build executable and its arguments.</summary>
+    public sealed record BuildCommand(string FileName, IReadOnlyList<string> Arguments);
+
+    /// <summary>Detects which build system to use based on files present in the
+    /// worktree root. Returns null if no known build system is found or the
+    /// directory doesn't exist.</summary>
+    private static BuildCommand? DetectBuildCommand(string worktreePath)
+    {
+        if (!Directory.Exists(worktreePath))
+            return null;
+        if (Directory.GetFiles(worktreePath, "*.sln").Length > 0 ||
+            Directory.GetFiles(worktreePath, "*.csproj").Length > 0)
+        {
+            // .NET project — build is the minimum gate; if tests exist, run
+            // them too. A single dotnet test command covers both implicitly
+            // (it builds first), so we use that when test projects are present.
+            var hasTests = Directory.GetFiles(worktreePath, "*Tests.csproj").Length > 0
+                || Directory.GetFiles(worktreePath, "*Test.csproj").Length > 0
+                || Directory.Exists(Path.Combine(worktreePath, "tests"));
+            return new BuildCommand("dotnet", hasTests ? ["test"] : ["build"]);
+        }
+        if (File.Exists(Path.Combine(worktreePath, "package.json")))
+        {
+            // npm project — prefer the build script; fall back to install+build.
+            return new BuildCommand("npm", ["run", "build"]);
+        }
+        if (File.Exists(Path.Combine(worktreePath, "Cargo.toml")))
+        {
+            return new BuildCommand("cargo", ["build"]);
+        }
+        if (File.Exists(Path.Combine(worktreePath, "go.mod")))
+        {
+            return new BuildCommand("go", ["build", "./..."]);
+        }
+        return null;
+    }
+
+    /// <summary>Runs a build command in the worktree directory with a 5-minute
+    /// timeout. Protected virtual so tests can override it without needing a
+    /// real build toolchain.</summary>
+    protected virtual async Task<(int ExitCode, string Output)> RunBuildProcessAsync(
+        BuildCommand cmd, string workingDirectory, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = cmd.FileName,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var arg in cmd.Arguments)
+            psi.ArgumentList.Add(arg);
+
+        using var process = new Process { StartInfo = psi };
+        var output = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        try
+        {
+            await process.WaitForExitAsync(linked.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            try { process.Kill(true); } catch { /* best effort */ }
+            return (137, "CI timed out after 5 min");
+        }
+
+        return (process.ExitCode, output.ToString().TrimEnd());
     }
 
     /// <summary>The undo button: delete worktree + branch, throwing away the

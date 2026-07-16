@@ -35,6 +35,7 @@ public static class WorkerRole
     public static void ConfigureServices(IServiceCollection services)
     {
         services.AddHostedService<LocalRuntimeBootstrapper>();
+        services.AddHostedService<AutoMergeHostedService>();
     }
 
     public static void MapEndpoints(WebApplication app)
@@ -289,6 +290,39 @@ public static class WorkerRole
                 return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
             await isolation.DiscardAsync(body.TaskId, ct);
             return Results.Ok(new { discarded = true });
+        });
+
+        // CI gate: build (and test) the worktree to verify it's mergeable.
+        app.MapPost("/api/isolation/ci", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await isolation.RunCiGateAsync(body.TaskId, ct);
+            return Results.Ok(new { success, output });
+        });
+
+        // CI gate + conditional merge: only merges when the build passes.
+        app.MapPost("/api/isolation/merge-if-passing", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var (ciPassed, ciOutput) = await isolation.RunCiGateAsync(body.TaskId, ct);
+            if (!ciPassed)
+                return Results.Ok(new { success = false, output = $"CI gate failed: {ciOutput}" });
+            var (mergeSuccess, mergeOutput) = await isolation.MergeAsync(body.TaskId, ct);
+            return Results.Ok(new { success = mergeSuccess, output = mergeOutput });
+        });
+
+        // Manual trigger for the A3 auto-merge loop: runs the CI gate on every
+        // active isolated task and merges the green ones (discards + notifies on red).
+        app.MapPost("/api/isolation/auto-merge-all", (IServiceProvider services) =>
+        {
+            AutoMergeHostedService.RunAutoMerge(services);
+            return Results.Ok(new { ran = true });
         });
 
         app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
