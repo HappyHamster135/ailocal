@@ -74,12 +74,22 @@ public static class SelfUpdater
             Version.TryParse(CurrentVersion, out var current) &&
             latest > current;
 
-        var asset = MatchingAsset(release);
-        var downloadUrl = asset?.BrowserDownloadUrl ?? $"https://github.com/{Repo}/releases/latest";
+        // A "real" update is available whenever this install's package (every
+        // .exe sitting next to the running one) has a matching asset in the
+        // latest release - not just the single binary that happens to be
+        // answering this request. Basing canSelfUpdate on the lone
+        // Environment.ProcessPath breaks when the launcher spawns the node as
+        // a child process (or any path where ProcessPath is null/odd), which
+        // wrongly forced the operator into the manual Edge download.
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? ".";
+        var updates = CollectUpdates(release, exeDir);
+        var downloadUrl = updates.Count > 0
+            ? updates[0].Asset.BrowserDownloadUrl
+            : $"https://github.com/{Repo}/releases/latest";
 
         return new UpdateCheckResult(
             true, CurrentVersion, latestVersion, updateAvailable,
-            downloadUrl, release.Body, asset is not null, null);
+            downloadUrl, release.Body, updates.Count > 0, null);
     }
 
     public static async Task<UpdateApplyResult> ApplyAsync(
@@ -200,16 +210,6 @@ public static class SelfUpdater
         {
             return (null, ex.Message);
         }
-    }
-
-    private static GitHubAssetDto? MatchingAsset(GitHubReleaseDto release)
-    {
-        var exePath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(exePath))
-            return null;
-
-        var exeName = Path.GetFileName(exePath);
-        return release.Assets?.FirstOrDefault(a => string.Equals(a.Name, exeName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Every .exe sitting next to the one currently running that also
