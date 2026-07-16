@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace AiLocal.Core.Agent;
@@ -6,6 +7,7 @@ namespace AiLocal.Core.Agent;
 /// before a Worker runs them. Weak/small local models are the reason this
 /// exists: they can be talked into "rm -rf" by a prompt injection, so the
 /// guard stays on by default even in Full access mode.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum CommandGuardLevel
 {
     /// <summary>No screening - runs whatever the model asks (Claude Code / Codex parity).</summary>
