@@ -7,11 +7,22 @@ namespace AiLocal.Node.Roles;
 
 public static class LauncherRole
 {
-    public static void ConfigureServices(IServiceCollection services) { }
+    public static void ConfigureServices(IServiceCollection services)
+    {
+        // Launcher runs a co-located Worker, so it needs the same
+        // services (isolation, workspace, auto-merge) for the Studio
+        // "Branches" + "Build/Run/Test" features to work on port 5088.
+        WorkerRole.ConfigureServices(services);
+    }
 
     public static void MapEndpoints(WebApplication app)
     {
         app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
+
+        // Studio "Branches" + "Build/Run/Test" also work on the
+        // Launcher (it runs a co-located Worker) - map those endpoints.
+        WorkerRole.MapIsolationEndpoints(app);
+        WorkerRole.MapWorkspaceEndpoints(app);
 
         // One click: start a Host, then a Worker paired to it. The Worker adopts
         // the Host's freshly-minted cluster token automatically so pairing does

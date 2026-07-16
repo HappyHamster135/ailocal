@@ -553,22 +553,36 @@ internal static class Dashboard
         .iso-diff { background: #0b0f14; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; padding: 6px; font-size: 11px; white-space: pre-wrap; }
         .studio-editor-panel { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
         .studio-editor-content { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 0; }
-        #studioEditor {
-          width: 100%;
-          height: 100%;
-          resize: none;
-          border: none;
+        .studio-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px 8px 0; background: var(--bg-2, #090c10); border-bottom: 1px solid var(--line, #1f2630); }
+        .studio-tab { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+        .studio-tab.active { background: var(--bg-1, #0d1117); border-color: var(--line, #1f2630); }
+        .studio-tab .x { opacity: .5; }
+        .studio-tab .x:hover { opacity: 1; color: #f85149; }
+        .studio-tab.dirty .name::after { content: ' •'; color: #d29922; }
+        .studio-editor-wrap { min-height: 0; overflow: auto; background: var(--bg-1, #0d1117); }
+        #studioEditorView {
+          min-height: 100%;
+          padding: 12px;
           outline: none;
-          background: var(--bg-1, #0d1117);
-          color: var(--fg, #e6edf3);
           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
           font-size: 13px;
           line-height: 1.5;
-          padding: 12px;
           tab-size: 4;
-          white-space: pre;
-          overflow: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
+          color: var(--fg, #e6edf3);
         }
+        #studioEditorView:empty::before { content: attr(placeholder); opacity: .4; }
+        .studio-runbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line, #1f2630); background: var(--bg-2, #090c10); }
+        .studio-output { margin: 0; padding: 10px 12px; max-height: 200px; overflow: auto; background: #05070a; color: #9da7b3; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.4; border-top: 1px solid var(--line, #1f2630); white-space: pre-wrap; }
+        .studio-output.err { color: #f85149; }
+        /* syntax tokens */
+        .tok-kw { color: #ff7b72; }
+        .tok-str { color: #a5d6ff; }
+        .tok-com { color: #8b949e; font-style: italic; }
+        .tok-num { color: #79c0ff; }
+        .tok-type { color: #ffa657; }
+        .tok-punc { color: #c9d1d9; }
         .file-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
         .file-tree .node-row {
           display: flex; align-items: center; gap: 6px;
@@ -1649,7 +1663,17 @@ internal static class Dashboard
               </div>
             </div>
             <div class="content studio-editor-content">
-              <textarea id="studioEditor" placeholder="Välj en fil i trädet till vänster för att öppna den här." spellcheck="false"></textarea>
+              <div class="studio-tabs" id="studioTabs"></div>
+              <div class="studio-editor-wrap">
+                <div class="studio-editor" id="studioEditorView" contenteditable="true" spellcheck="false" placeholder="Välj en fil i trädet till vänster för att öppna den här."></div>
+              </div>
+              <div class="studio-runbar">
+                <button class="btn ghost sm" id="studioBuildBtn" title="Bygg projektet i arbetsmappen">Bygg</button>
+                <button class="btn ghost sm" id="studioRunBtn" title="Kör projektet">Kör</button>
+                <button class="btn ghost sm" id="studioTestBtn" title="Kör projektets tester">Test</button>
+                <span class="small mono" id="studioRunState"></span>
+              </div>
+              <pre class="studio-output" id="studioOutput" style="display:none"></pre>
               <div class="notice" id="studioEditorNotice"></div>
             </div>
           </section>
@@ -5388,6 +5412,12 @@ internal static class Dashboard
               await renderStudioBranches();
             } catch (e) { showGlobalNotice(e.message, true); }
           };
+          const buildBtn = $('studioBuildBtn');
+          if (buildBtn) buildBtn.onclick = () => runStudioCommand('build');
+          const runBtn = $('studioRunBtn');
+          if (runBtn) runBtn.onclick = () => runStudioCommand('run');
+          const testBtn = $('studioTestBtn');
+          if (testBtn) testBtn.onclick = () => runStudioCommand('test');
         }
 
         async function renderStudio() {
@@ -5432,38 +5462,132 @@ internal static class Dashboard
           }
         }
 
+        // ---- Studio: tabbed + syntax-highlighted editor (P1) ----
+        const studioTabs = [];   // { path, name, content, dirty }
+        let studioActive = null;
+
+        function langFromPath(p) {
+          if (/\.cs$/i.test(p)) return 'cs';
+          if (/\.(js|ts|tsx|jsx)$/i.test(p)) return 'js';
+          if (/\.json$/i.test(p)) return 'json';
+          if (/\.(html|xml)$/i.test(p)) return 'html';
+          if (/\.(css|scss)$/i.test(p)) return 'css';
+          if (/\.(py|rb|go|rs|cpp|c|h)$/i.test(p)) return 'clike';
+          return 'text';
+        }
+
+        // Minimal offline syntax highlighter - escapes HTML then wraps tokens.
+        // Good enough for "feels like a studio"; not a full parser.
+        function highlightCode(code, lang) {
+          const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          let h = esc(code);
+          // strings (double + single quoted)
+          h = h.replace(/(&quot;|"|')(?:\\.|(?!\1).)*\1/g, m => `<span class="tok-str">${m}</span>`);
+          // comments: // line and /* block */
+          h = h.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, m => `<span class="tok-com">${m}</span>`);
+          // keywords
+          const kw = /\b(typeof|var|let|const|function|return|if|else|for|while|class|public|private|protected|internal|static|void|int|string|bool|true|false|null|undefined|new|async|await|import|export|from|interface|enum|struct|namespace|using|get|set|in|of|do|switch|case|break|continue|throw|try|catch|finally|yield|this|def|elif|fi|then)\b/g;
+          h = h.replace(kw, m => `<span class="tok-kw">${m}</span>`);
+          // numbers
+          h = h.replace(/\b\d+(\.\d+)?\b/g, m => `<span class="tok-num">${m}</span>`);
+          return h;
+        }
+
+        function renderStudioTabs() {
+          const c = $('studioTabs');
+          if (!c) return;
+          c.innerHTML = studioTabs.map(t =>
+            `<div class="studio-tab ${t === studioActive ? 'active' : ''} ${t.dirty ? 'dirty' : ''}" data-path="${esc(t.path)}">` +
+            `<span class="name">${esc(t.name)}</span>` +
+            `<span class="x" data-close="${esc(t.path)}">✕</span></div>`).join('');
+          c.querySelectorAll('.studio-tab').forEach(el => {
+            el.onclick = (e) => {
+              if (e.target.classList.contains('x')) { closeStudioTab(e.target.dataset.close); return; }
+              const t = studioTabs.find(x => x.path === el.dataset.path);
+              if (t) { studioActive = t; renderStudioTabs(); refreshStudioEditor(); }
+            };
+          });
+        }
+
+        function closeStudioTab(path) {
+          const i = studioTabs.findIndex(t => t.path === path);
+          if (i < 0) return;
+          studioTabs.splice(i, 1);
+          if (studioActive && studioActive.path === path)
+            studioActive = studioTabs[Math.max(0, i - 1)] || null;
+          if (!studioActive) {
+            $('studioEditorView').innerHTML = '';
+            $('studioFileName').textContent = 'Ingen fil öppen';
+            $('studioFilePath').textContent = '';
+          } else refreshStudioEditor();
+          renderStudioTabs();
+        }
+
+        function refreshStudioEditor() {
+          const ed = $('studioEditorView');
+          if (!ed || !studioActive) return;
+          ed.innerHTML = highlightCode(studioActive.content, langFromPath(studioActive.path));
+          ed.onblur = () => {
+            if (!studioActive) return;
+            studioActive.content = ed.innerText;
+            ed.innerHTML = highlightCode(studioActive.content, langFromPath(studioActive.path));
+          };
+          $('studioFileName').textContent = studioActive.name;
+          $('studioFilePath').textContent = studioActive.path;
+          $('studioEditorNotice').textContent = '';
+        }
+
         async function openStudioFile(rel) {
-          studio.openPath = rel;
-          try {
+          let tab = studioTabs.find(t => t.path === rel);
+          if (!tab) {
             const data = await fetchJson('/api/files/content?path=' + encodeURIComponent(rel) + '&root=' + encodeURIComponent(studio.root) + '&offset=1&limit=2000');
-            const ed = $('studioEditor');
-            ed.value = (data.lines || []).join('\n');
-            $('studioFileName').textContent = rel.split('/').pop();
-            $('studioFilePath').textContent = rel;
-            $('studioSaveBtn').disabled = false;
-            $('studioEditorNotice').textContent = '';
-          } catch (e) {
-            $('studioEditorNotice').textContent = e.message;
-            $('studioEditorNotice').className = 'notice bad';
+            tab = { path: rel, name: rel.split('/').pop(), content: (data.lines || []).join('\n'), dirty: false };
+            studioTabs.push(tab);
           }
+          studioActive = tab;
+          renderStudioTabs();
+          refreshStudioEditor();
         }
 
         async function saveStudioFile() {
-          if (!studio.openPath) return;
+          if (!studioActive) return;
           const btn = $('studioSaveBtn');
           btn.disabled = true;
           try {
+            studioActive.content = $('studioEditorView').innerText;
             await fetchJson('/api/files/write', {
               method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ path: studio.openPath, root: studio.root, content: $('studioEditor').value })
+              body: JSON.stringify({ path: studioActive.path, root: studio.root, content: studioActive.content })
             });
+            studioActive.dirty = false;
+            renderStudioTabs();
             $('studioEditorNotice').textContent = 'Sparad.';
             $('studioEditorNotice').className = 'notice';
           } catch (e) {
             $('studioEditorNotice').textContent = e.message;
             $('studioEditorNotice').className = 'notice bad';
-          } finally {
-            btn.disabled = false;
+          } finally { btn.disabled = false; }
+        }
+
+        // ---- Studio: Build / Run / Test (P2) ----
+        async function runStudioCommand(kind) { // 'build' | 'run' | 'test'
+          if (!studio.root) { showGlobalNotice('Välj en arbetsmapp först.', true); return; }
+          const out = $('studioOutput'), state = $('studioRunState');
+          if (!out) return;
+          out.style.display = 'block';
+          out.className = 'studio-output';
+          out.textContent = 'Kör ' + kind + '...';
+          state.textContent = 'körs';
+          try {
+            const r = await fetchJson('/api/workspace/' + kind, {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ root: studio.root })
+            });
+            out.textContent = r.output || '(ingen output)';
+            if (!r.success) out.className = 'studio-output err';
+            state.textContent = r.success ? 'klar' : 'misslyckades';
+          } catch (e) {
+            out.textContent = e.message; out.className = 'studio-output err'; state.textContent = 'fel';
           }
         }
 

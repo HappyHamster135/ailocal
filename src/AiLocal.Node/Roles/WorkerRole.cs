@@ -36,6 +36,7 @@ public static class WorkerRole
     {
         services.AddHostedService<LocalRuntimeBootstrapper>();
         services.AddHostedService<AutoMergeHostedService>();
+        services.AddSingleton<WorkspaceService>();
     }
 
     public static void MapEndpoints(WebApplication app)
@@ -251,6 +252,88 @@ public static class WorkerRole
         // in-app Studio "Branches" tab works on a single node without a cluster
         // token. Sits under /api/ (not /execute/) so it is not node-only and
         // therefore reachable with ordinary local dashboard auth.
+        MapIsolationEndpoints(app);
+
+        app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.InspectAsync(ct)));
+
+        app.MapPost("/runtime/pull", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.PullRecommendedModelAsync(ct)));
+
+        // One click: install Ollama (if missing), start it, and pull the model.
+        app.MapPost("/runtime/setup", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.SetupLocalAiAsync(ct)));
+
+        // P2: Studio one-click Build / Run / Test against the workspace.
+        MapWorkspaceEndpoints(app);
+
+        // Click-to-pair, no typing: a Host that discovered this Worker via LAN
+        // beacon sends a connect request with a random nonce. This node's own
+        // operator must explicitly accept it (see /pairing/pending/{id}/accept)
+        // before anything is trusted - see PairingCoordinator for the full flow.
+        app.MapPost("/pairing/request", (PairingHandshakePayload req, PairingCoordinator pairing) =>
+        {
+            pairing.AddInbound(req.PeerId, req.PeerName, req.PeerEndpoint, req.Nonce);
+            return Results.Ok(new { received = true });
+        });
+
+        app.MapGet("/pairing/pending", (PairingCoordinator pairing) =>
+            Results.Ok(pairing.PendingInbound()));
+
+        app.MapPost("/pairing/pending/{hostId}/reject", (string hostId, PairingCoordinator pairing) =>
+        {
+            pairing.RejectInbound(hostId);
+            return Results.Ok(new { rejected = true });
+        });
+
+        app.MapPost("/pairing/pending/{hostId}/accept", async (
+            string hostId, PairingCoordinator pairing, PersistentSettingsStore store, HostLocator hostLocator,
+            NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            // Peek, don't consume: only remove the pending request once the
+            // callback below actually succeeds, so a transient network/
+            // firewall failure leaves it available to retry instead of
+            // silently discarding an accept the operator already clicked.
+            var request = pairing.GetInbound(hostId);
+            if (request is null)
+                return Results.NotFound(new { error = "no pending request from that host - it may have expired" });
+
+            try
+            {
+                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
+                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, request.Nonce);
+                var client = httpFactory.CreateClient("cluster");
+                using var response = await client.PostAsJsonAsync($"{request.RequesterEndpoint}/pairing/approved", payload, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)response.StatusCode}";
+                    return Results.Problem(
+                        detail: $"Host {request.RequesterEndpoint} svarade: {reason}",
+                        statusCode: StatusCodes.Status502BadGateway);
+                }
+
+                var approval = await response.Content.ReadFromJsonAsync<PairingApprovalResponse>(ct);
+                if (approval?.ClusterToken is not { Length: > 0 } token)
+                    return Results.Problem(
+                        detail: "Host skickade ingen klusternyckel.", statusCode: StatusCodes.Status502BadGateway);
+
+                pairing.RemoveInboundIfMatches(hostId, request.Nonce);
+                store.Update(new SettingsUpdate(HostEndpoint: request.RequesterEndpoint, ClusterToken: token), hostLocator);
+                return Results.Ok(new { connected = true, host = request.RequesterName });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+    }
+
+    /// <summary>Isolation + auto-merge endpoints, factored out so the Launcher
+    /// role (which runs a co-located Worker) can expose them too. Sits
+    /// under /api/ so it is not node-only.</summary>
+    public static void MapIsolationEndpoints(WebApplication app)
+    {
         app.MapGet("/api/isolation/list", (GitIsolationService isolation) =>
             Results.Ok(isolation.ListActive().Select(t => new
             {
@@ -317,83 +400,30 @@ public static class WorkerRole
             return Results.Ok(new { success = mergeSuccess, output = mergeOutput });
         });
 
-        // Manual trigger for the A3 auto-merge loop: runs the CI gate on every
-        // active isolated task and merges the green ones (discards + notifies on red).
+        // Manual trigger for the A3 auto-merge loop.
         app.MapPost("/api/isolation/auto-merge-all", (IServiceProvider services) =>
         {
             AutoMergeHostedService.RunAutoMerge(services);
             return Results.Ok(new { ran = true });
         });
+    }
 
-        app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.InspectAsync(ct)));
-
-        app.MapPost("/runtime/pull", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.PullRecommendedModelAsync(ct)));
-
-        // One click: install Ollama (if missing), start it, and pull the model.
-        app.MapPost("/runtime/setup", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.SetupLocalAiAsync(ct)));
-
-        // Click-to-pair, no typing: a Host that discovered this Worker via LAN
-        // beacon sends a connect request with a random nonce. This node's own
-        // operator must explicitly accept it (see /pairing/pending/{id}/accept)
-        // before anything is trusted - see PairingCoordinator for the full flow.
-        app.MapPost("/pairing/request", (PairingHandshakePayload req, PairingCoordinator pairing) =>
+    /// <summary>Studio one-click Build / Run / Test against the workspace,
+    /// factored out so the Launcher role can expose it too.</summary>
+    public static void MapWorkspaceEndpoints(WebApplication app)
+    {
+        app.MapPost("/api/workspace/{kind}", async (
+            WorkspaceService ws, HttpContext ctx, string kind, CancellationToken ct) =>
         {
-            pairing.AddInbound(req.PeerId, req.PeerName, req.PeerEndpoint, req.Nonce);
-            return Results.Ok(new { received = true });
-        });
-
-        app.MapGet("/pairing/pending", (PairingCoordinator pairing) =>
-            Results.Ok(pairing.PendingInbound()));
-
-        app.MapPost("/pairing/pending/{hostId}/reject", (string hostId, PairingCoordinator pairing) =>
-        {
-            pairing.RejectInbound(hostId);
-            return Results.Ok(new { rejected = true });
-        });
-
-        app.MapPost("/pairing/pending/{hostId}/accept", async (
-            string hostId, PairingCoordinator pairing, PersistentSettingsStore store, HostLocator hostLocator,
-            NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
-        {
-            // Peek, don't consume: only remove the pending request once the
-            // callback below actually succeeds, so a transient network/
-            // firewall failure leaves it available to retry instead of
-            // silently discarding an accept the operator already clicked.
-            var request = pairing.GetInbound(hostId);
-            if (request is null)
-                return Results.NotFound(new { error = "no pending request from that host - it may have expired" });
-
-            try
-            {
-                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
-                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, request.Nonce);
-                var client = httpFactory.CreateClient("cluster");
-                using var response = await client.PostAsJsonAsync($"{request.RequesterEndpoint}/pairing/approved", payload, ct);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync(ct);
-                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)response.StatusCode}";
-                    return Results.Problem(
-                        detail: $"Host {request.RequesterEndpoint} svarade: {reason}",
-                        statusCode: StatusCodes.Status502BadGateway);
-                }
-
-                var approval = await response.Content.ReadFromJsonAsync<PairingApprovalResponse>(ct);
-                if (approval?.ClusterToken is not { Length: > 0 } token)
-                    return Results.Problem(
-                        detail: "Host skickade ingen klusternyckel.", statusCode: StatusCodes.Status502BadGateway);
-
-                pairing.RemoveInboundIfMatches(hostId, request.Nonce);
-                store.Update(new SettingsUpdate(HostEndpoint: request.RequesterEndpoint, ClusterToken: token), hostLocator);
-                return Results.Ok(new { connected = true, host = request.RequesterName });
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
-            }
+            var body = await ctx.Request.ReadFromJsonAsync<WorkspaceRootRequest>(ct);
+            var root = body?.Root?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(root))
+                return Results.Problem(detail: "root (arbetsmapp) krävs", statusCode: StatusCodes.Status400BadRequest);
+            var allowed = new[] { "build", "run", "test" };
+            if (!allowed.Contains(kind))
+                return Results.Problem(detail: "okänt kommando: " + kind, statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await ws.RunAsync(root, kind, ct);
+            return Results.Ok(new { success, output });
         });
     }
 
@@ -422,6 +452,8 @@ public static class WorkerRole
     /// <summary>Request bodies for the isolation endpoints.</summary>
     private sealed record IsolationTaskRequest(string TaskId);
     private sealed record IsolationCommitRequest(string TaskId, string? Message = null);
+    /// <summary>Request body for the Studio workspace build/run/test endpoints.</summary>
+    private sealed record WorkspaceRootRequest(string? Root = null);
 
     /// <summary>Resolves the repo path the agent works in: the explicit
     /// WorkspacePath if set, else the default agent-workspace. Isolation only
