@@ -2055,7 +2055,6 @@ internal static class Dashboard
 
       <script>
         const AUTH_HEADER = 'X-AiLocal-Token';
-        const roleName = ['Launcher','Host','Worker','Overseer'];
         const stateName = ['Pending','Dispatched','Running','Completed','Failed','Queued','Cancelled','Paused'];
         const cancellableStates = ['Pending','Dispatched','Running','Queued','Paused'];
         const roleNames = {}; // id -> display name, loaded from /api/roles
