@@ -329,6 +329,8 @@ public static class NodeWebHost
         SessionApi.MapEndpoints(app);
         DialogsApi.MapEndpoints(app);
         GitApi.MapEndpoints(app);
+        FilesApi.MapEndpoints(app);
+        TerminalApi.MapEndpoints(app);
     }
 
     private static string CurrentVersion => SelfUpdater.CurrentVersion;

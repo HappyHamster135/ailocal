@@ -534,6 +534,51 @@ internal static class Dashboard
           min-height: 0;
           min-width: 0;
         }
+        .studio-workspace {
+          display: grid;
+          grid-template-columns: 280px minmax(0, 1fr) 380px;
+          gap: 12px;
+          padding: 12px;
+          min-height: 0;
+          min-width: 0;
+        }
+        .studio-tree-panel .content, .studio-term-panel .content { overflow: auto; }
+        .studio-editor-panel { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+        .studio-editor-content { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 0; }
+        #studioEditor {
+          width: 100%;
+          height: 100%;
+          resize: none;
+          border: none;
+          outline: none;
+          background: var(--bg-1, #0d1117);
+          color: var(--fg, #e6edf3);
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 13px;
+          line-height: 1.5;
+          padding: 12px;
+          tab-size: 4;
+          white-space: pre;
+          overflow: auto;
+        }
+        .file-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+        .file-tree .node-row {
+          display: flex; align-items: center; gap: 6px;
+          padding: 2px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+        }
+        .file-tree .node-row:hover { background: rgba(255,255,255,.06); }
+        .file-tree .node-row.selected { background: rgba(88,166,255,.18); }
+        .file-tree .dir { color: #58a6ff; }
+        .file-tree .indent { display: inline-block; width: 14px; }
+        .studio-term-panel { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+        .studio-term-content { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 0; }
+        #studioTermOut {
+          margin: 0; padding: 10px; overflow: auto;
+          font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+          color: #c9d1d9; white-space: pre-wrap; word-break: break-word;
+        }
+        .term-input-row { display: flex; gap: 6px; padding: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+        .term-input-row input { flex: 1; }
         .topology-panel {
           display: grid;
           grid-template-rows: auto 1fr;
@@ -1375,6 +1420,7 @@ internal static class Dashboard
               <button class="view-tab" data-view="schedules"><span data-icon="clock"></span> Schema</button>
               <button class="view-tab" data-view="delegate" id="delegateNavBtn"><span data-icon="send"></span> Delegera till kluster</button>
               <button class="view-tab" data-view="office"><span data-icon="users"></span> Kontorsvy</button>
+              <button class="view-tab" data-view="studio"><span data-icon="code"></span> Studio</button>
             </nav>
             <div class="sidebar-section">
               <div class="sidebar-section-head">
@@ -1556,6 +1602,52 @@ internal static class Dashboard
             <div class="panel-title" style="margin:14px 0 8px">Mal (pagaende forst)</div>
             <div class="task-list" id="officeGoals"></div>
           </section>
+        </main>
+
+        <main class="studio-workspace hidden" id="studioView">
+          <aside class="panel side studio-tree-panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Filer</div>
+                <div class="small" id="studioRoot">ingen mapp vald</div>
+              </div>
+              <button class="icon" id="studioPickRoot" data-icon="folder" title="Välj mapp"></button>
+            </div>
+            <div class="content">
+              <div class="file-tree" id="fileTree"></div>
+            </div>
+          </aside>
+          <section class="panel studio-editor-panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title" id="studioFileName">Ingen fil öppen</div>
+                <div class="small mono" id="studioFilePath"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary sm" id="studioSaveBtn" disabled>Spara</button>
+              </div>
+            </div>
+            <div class="content studio-editor-content">
+              <textarea id="studioEditor" placeholder="Välj en fil i trädet till vänster för att öppna den här." spellcheck="false"></textarea>
+              <div class="notice" id="studioEditorNotice"></div>
+            </div>
+          </section>
+          <aside class="panel side studio-term-panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Terminal</div>
+                <div class="small" id="studioTermStatus">inte startad</div>
+              </div>
+              <button class="icon" id="studioTermStart" data-icon="play" title="Starta terminal"></button>
+            </div>
+            <div class="content studio-term-content">
+              <pre id="studioTermOut"></pre>
+              <div class="term-input-row">
+                <span class="mono" id="studioTermPrompt">$</span>
+                <input id="studioTermInput" placeholder="kommando..." autocomplete="off">
+              </div>
+            </div>
+          </aside>
         </main>
 
         <main class="chat-only-workspace hidden" id="sessionView">
@@ -3061,7 +3153,7 @@ internal static class Dashboard
           }
         }
 
-        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office'];
+        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office', 'studio'];
         function switchView(view) {
           state.activeView = knownViews.includes(view) ? view : 'work';
           $('workView').classList.toggle('hidden', state.activeView !== 'work');
@@ -3070,6 +3162,7 @@ internal static class Dashboard
           $('delegateView').classList.toggle('hidden', state.activeView !== 'delegate');
           $('sessionView').classList.toggle('hidden', state.activeView !== 'session');
           $('officeView').classList.toggle('hidden', state.activeView !== 'office');
+          $('studioView').classList.toggle('hidden', state.activeView !== 'studio');
           document.querySelectorAll('[data-view]').forEach(button => {
             button.classList.toggle('active', button.dataset.view === state.activeView);
           });
@@ -3082,6 +3175,9 @@ internal static class Dashboard
           }
           if (state.activeView === 'office') {
             renderOffice();
+          }
+          if (state.activeView === 'studio') {
+            renderStudio();
           }
         }
 
@@ -5218,6 +5314,147 @@ internal static class Dashboard
         renderBacklog();
         setInterval(renderNotices, 5000);
         setInterval(renderBacklog, 5000);
+
+        // ---- Studio view: file explorer + code editor + terminal ----
+        const studio = { root: null, openPath: null, termId: null, termTimer: null };
+
+        function initStudio() {
+          const pick = $('studioPickRoot');
+          if (pick) pick.onclick = async () => {
+            try {
+              const data = await fetchJson('/api/dialogs/pick-folder', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              if (data && data.path) { studio.root = data.path; renderStudio(); }
+            } catch (e) { showGlobalNotice(e.message, true); }
+          };
+          const save = $('studioSaveBtn');
+          if (save) save.onclick = () => saveStudioFile();
+          const termStart = $('studioTermStart');
+          if (termStart) termStart.onclick = () => startStudioTerminal();
+          const termInput = $('studioTermInput');
+          if (termInput) termInput.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              sendStudioTerminalInput(termInput.value);
+              termInput.value = '';
+            }
+          };
+        }
+
+        async function renderStudio() {
+          if (state.activeView !== 'studio') return;
+          if (!studio.root) {
+            // try the worker workspace from settings
+            try {
+              const s = await fetchJson('/api/settings');
+              studio.root = s.workspacePath || null;
+            } catch (_) {}
+          }
+          $('studioRoot').textContent = studio.root || 'ingen mapp vald';
+          if (studio.root) loadFileTree(studio.root, '');
+        }
+
+        async function loadFileTree(root, rel) {
+          const tree = $('fileTree');
+          if (!tree) return;
+          tree.innerHTML = '<div class="small">Laddar...</div>';
+          try {
+            const items = await fetchJson('/api/files/tree?root=' + encodeURIComponent(root));
+            const sorted = (items || []).slice().sort((a, b) =>
+              (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1));
+            tree.innerHTML = sorted.map(it => {
+              const depth = (it.path.split('/').length - 1);
+              const indent = ' '.repeat(Math.min(depth, 8) * 2);
+              const cls = it.isDir ? 'node-row dir' : 'node-row';
+              const icon = it.isDir ? '📁' : '📄';
+              return `<div class="${cls}" data-path="${esc(it.path)}" data-dir="${it.isDir}">${indent}${icon} ${esc(it.name)}</div>`;
+            }).join('');
+            tree.querySelectorAll('.node-row').forEach(row => {
+              row.onclick = () => {
+                tree.querySelectorAll('.node-row').forEach(r => r.classList.remove('selected'));
+                row.classList.add('selected');
+                const p = row.dataset.path;
+                if (row.dataset.dir === 'true') loadFileTree(root, p);
+                else openStudioFile(p);
+              };
+            });
+          } catch (e) {
+            tree.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+          }
+        }
+
+        async function openStudioFile(rel) {
+          studio.openPath = rel;
+          try {
+            const data = await fetchJson('/api/files/content?path=' + encodeURIComponent(rel) + '&root=' + encodeURIComponent(studio.root) + '&offset=1&limit=2000');
+            const ed = $('studioEditor');
+            ed.value = (data.lines || []).join('\n');
+            $('studioFileName').textContent = rel.split('/').pop();
+            $('studioFilePath').textContent = rel;
+            $('studioSaveBtn').disabled = false;
+            $('studioEditorNotice').textContent = '';
+          } catch (e) {
+            $('studioEditorNotice').textContent = e.message;
+            $('studioEditorNotice').className = 'notice bad';
+          }
+        }
+
+        async function saveStudioFile() {
+          if (!studio.openPath) return;
+          const btn = $('studioSaveBtn');
+          btn.disabled = true;
+          try {
+            await fetchJson('/api/files/write', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ path: studio.openPath, root: studio.root, content: $('studioEditor').value })
+            });
+            $('studioEditorNotice').textContent = 'Sparad.';
+            $('studioEditorNotice').className = 'notice';
+          } catch (e) {
+            $('studioEditorNotice').textContent = e.message;
+            $('studioEditorNotice').className = 'notice bad';
+          } finally {
+            btn.disabled = false;
+          }
+        }
+
+        async function startStudioTerminal() {
+          if (studio.termId) return;
+          try {
+            const data = await fetchJson('/api/terminals', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ root: studio.root || '.' })
+            });
+            studio.termId = data.terminalId;
+            $('studioTermStatus').textContent = 'körs';
+            pollStudioTerminal();
+          } catch (e) {
+            $('studioTermStatus').textContent = 'fel: ' + e.message;
+          }
+        }
+
+        async function sendStudioTerminalInput(data) {
+          if (!studio.termId) return;
+          try {
+            await fetchJson('/api/terminals/' + studio.termId + '/input', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ data })
+            });
+          } catch (e) { $('studioTermStatus').textContent = 'fel: ' + e.message; }
+        }
+
+        async function pollStudioTerminal() {
+          if (!studio.termId) return;
+          try {
+            const data = await fetchJson('/api/terminals/' + studio.termId + '/output');
+            const out = $('studioTermOut');
+            if (data && data.output) {
+              out.textContent += data.output;
+              out.scrollTop = out.scrollHeight;
+            }
+          } catch (_) {}
+          studio.termTimer = setTimeout(pollStudioTerminal, 700);
+        }
+        initStudio();
       </script>
     </body>
     </html>
