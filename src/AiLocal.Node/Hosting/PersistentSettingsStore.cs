@@ -330,7 +330,10 @@ public sealed class PersistentSettingsStore
             if (update.OllamaModel is not null)
                 _settings.Providers.OllamaModel = NullIfWhiteSpace(update.OllamaModel);
             if (update.OllamaEndpoint is not null)
-                _settings.Providers.OllamaEndpoint = RequiredEndpoint(update.OllamaEndpoint, "Ollama endpoint");
+                _settings.Providers.OllamaEndpoint =
+                    string.IsNullOrWhiteSpace(update.OllamaEndpoint)
+                        ? "http://localhost:11434"   // blankt = lokal Ollama på standardport
+                        : RequiredEndpoint(update.OllamaEndpoint, "Ollama endpoint");
             if (update.OpenRouterModel is not null)
                 _settings.Providers.OpenRouterModel = Required(update.OpenRouterModel, "OpenRouter model");
             if (update.OpenAIModel is not null)

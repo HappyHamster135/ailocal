@@ -81,6 +81,11 @@ public sealed class HostAutoConnectService : BackgroundService
         foreach (var peer in _pairing.Discovered(NodeRole.Worker))
         {
             if (ct.IsCancellationRequested) break;
+            // Never auto-connect to our own endpoint - when Host + Worker share
+            // a machine they have different NodeIds, so the NodeId filter alone
+            // would still let the Host spam its own Worker with pair requests.
+            var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{_settings.Port}";
+            if (peer.Endpoint == selfEndpoint) continue;
             if (connectedIds.Contains(peer.Id) || pendingPeerIds.Contains(peer.Id))
                 continue;
 

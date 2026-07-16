@@ -143,7 +143,11 @@ public sealed class ClusterHostedService : BackgroundService
 
     private void OnBeacon(DiscoveryBeacon beacon)
     {
-        if (beacon.NodeId != _nodeId)
+        // Ignore our own beacon (same NodeId) AND any beacon coming from our
+        // own endpoint - when Host + Worker run on the same machine they have
+        // different NodeIds but the Host would otherwise "discover" its own
+        // Worker and spam it with pairing requests forever.
+        if (beacon.NodeId != _nodeId && beacon.Endpoint != SelfEndpoint)
             _pairing.NoteDiscovered(beacon);
 
         if (beacon.Role == NodeRole.Host && _hostLocator.HostEndpoint is null)
