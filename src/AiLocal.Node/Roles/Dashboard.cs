@@ -1910,6 +1910,13 @@ internal static class Dashboard
                   När CI-grinden (bygg + test i worktreen) passerar mergas uppgiften automatiskt. Misslyckas CI kastas branchen (skillnaden försvinner) och du får en notis. Kräver Git-isolering.
                 </span>
                 <div class="field wide" style="margin-top:8px">
+                  <span class="small">Daglig budget (USD) - A4</span>
+                  <input id="settingBudgetLimitUsd" class="input" type="number" min="0" step="0.01" style="max-width:160px">
+                </div>
+                <span class="small" style="display:block;margin-top:-6px">
+                  När dagens kostnad når taket dirigeras nytt arbete till lokal Ollama istället för betalda API:er. 0 = ingen gräns.
+                </span>
+                <div class="field wide" style="margin-top:8px">
                   <span class="small">Kommando-skydd (run_command)</span>
                   <select id="settingCommandGuard" class="input">
                     <option value="Block">Blockera farliga (rm -rf-klassen)</option>
@@ -4394,6 +4401,7 @@ internal static class Dashboard
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
+          $('settingBudgetLimitUsd').value = data.budgetLimitUsd != null ? data.budgetLimitUsd : 0;
           $('settingCommandGuard').value = data.commandGuard ?? 'Block';
           $('settingBlockedCommands').value = (data.blockedCommands ?? []).join('\n');
           $('settingProjectMemory').checked = data.projectMemoryEnabled ?? false;
@@ -4723,6 +4731,7 @@ internal static class Dashboard
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
+            budgetLimitUsd: parseFloat($('settingBudgetLimitUsd').value) || 0,
             commandGuard: $('settingCommandGuard').value,
             blockedCommands: $('settingBlockedCommands').value.split('\n').map(value => value.trim()).filter(Boolean),
             projectMemoryEnabled: $('settingProjectMemory').checked,

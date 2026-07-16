@@ -590,10 +590,12 @@ public static class HostRole
         services.AddSingleton<ScheduleStore>();
         services.AddHostedService<ScheduleRunner>();
         services.AddHostedService<HostAutoConnectService>();
+        services.AddSingleton<BudgetService>();
     }
 
     public static void MapEndpoints(WebApplication app)
     {
+        BudgetService.Bind(app.Services.GetRequiredService<BudgetService>());
         app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
 
         app.MapGet("/cluster/nodes", (WorkerRegistry reg) => Results.Ok(reg.All));
@@ -1854,6 +1856,15 @@ public static class HostRole
         // private/data to a local Ollama model, etc. - multiple models
         // collaborating on the goal instead of everything hitting one provider.
         var (provider, tieredModel) = worker.ModelTiers.ForTask(task.RequiredSkill, task.Complexity ?? 3);
+        // A4: once the daily budget is spent, downshift to the local Ollama
+        // model instead of paid providers - free compute, no surprise bill.
+        if (BudgetService.Current is { } budget && budget.IsOverBudget())
+        {
+            provider = "ollama";
+            tieredModel = budget.FallbackOllamaModel() ?? "";
+            NoticeBoard.Add(NoticeType.TaskDone,
+                $"Budget nått - dirigerar '{task.Prompt}' till lokal Ollama.");
+        }
         var model = modelHint ?? tieredModel;
         var chat = new ChatRequest
         {

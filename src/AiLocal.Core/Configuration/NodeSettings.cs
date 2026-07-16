@@ -81,6 +81,11 @@ public sealed class WorkerProfileSettings
     /// manual merge in the Studio "Branches" tab. Requires UseGitIsolation.</summary>
     public bool AutoMergeIsolatedTasks { get; set; }
 
+    /// <summary>Daily USD spend cap (A4). When today's accumulated task cost
+    /// reaches this, the dispatcher routes new work to the local Ollama model
+    /// instead of paid providers. 0 = no cap.</summary>
+    public decimal BudgetLimitUsd { get; set; }
+
     /// <summary>When on, the agent gets a fetch_url tool (http/https, text
     /// extraction) so it can look things up on the internet. Independent of
     /// AgentAccess - network reach, not filesystem reach.</summary>
