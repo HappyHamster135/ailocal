@@ -108,6 +108,16 @@ public static class SelfUpdater
         if (updates.Count == 0)
             return new UpdateApplyResult(false, "Hittade ingen matchande fil i senaste GitHub-releasen.");
 
+        // Relaunch the launcher when one ships alongside the node (the process
+        // the operator actually sees) - it re-spawns the freshly-swapped node
+        // itself, so a single Apply click restarts the whole app. Fall back to
+        // relaunching the running exe directly when there's no separate launcher.
+        var launcherPath = Path.Combine(exeDir, "ailocal-app.exe");
+        var relaunchExe = File.Exists(launcherPath) ? launcherPath : exePath;
+        var relaunchArgs = File.Exists(launcherPath)
+            ? ""
+            : string.Join(' ', Environment.GetCommandLineArgs().Skip(1).Select(QuoteArg));
+
         // Download every binary in the package to a .new next to it, so the
         // swap below is atomic per file and the whole release lands together.
         long totalBytes = 0;
@@ -154,7 +164,7 @@ public static class SelfUpdater
         string scriptPath;
         try
         {
-            scriptPath = WriteSwapScript(exeDir, downloaded, currentExe: exePath);
+            scriptPath = WriteSwapScript(exeDir, downloaded, relaunchExe, relaunchArgs);
         }
         catch (Exception ex)
         {
@@ -250,10 +260,10 @@ public static class SelfUpdater
     private static string WriteSwapScript(
         string exeDir,
         IReadOnlyList<(string CurrentPath, string NewPath, GitHubAssetDto Asset)> downloaded,
-        string currentExe)
+        string relaunchExe,
+        string relaunchArgs)
     {
         var logPath = Path.Combine(exeDir, "update.log");
-        var relaunchArgs = string.Join(' ', Environment.GetCommandLineArgs().Skip(1).Select(QuoteArg));
         var scriptPath = Path.Combine(Path.GetTempPath(), $"ailocal-update-{Guid.NewGuid():N}.cmd");
 
         // Build a rename+swap block per binary so the whole package updates
@@ -293,7 +303,7 @@ public static class SelfUpdater
             echo [%date% %time%] update: swapping {{downloaded.Count}} binary/ies >> "{{logPath}}"
             {{swaps}}
             echo [%date% %time%] update: swapped ok, relaunching >> "{{logPath}}"
-            start "" "{{currentExe}}" {{relaunchArgs}}
+            start "" "{{relaunchExe}}" {{relaunchArgs}}
             :done
             {{cleanups}}
             (goto) 2>nul & del "%~f0"

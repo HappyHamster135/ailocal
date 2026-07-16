@@ -78,4 +78,18 @@ public class CommandGuardTests
     {
         Assert.NotEmpty(CommandGuard.DefaultPatterns);
     }
+
+    // Guards against the regression where CommandGuardLevel was missing the
+    // JsonStringEnumConverter, so the dashboard's "commandGuard":"Block" string
+    // hit the server as a 400. This is the exact bug that broke Save Settings
+    // in 1.12.3 - keep it so a future refactor can't silently revert it.
+    [Theory]
+    [InlineData("\"Block\"", CommandGuardLevel.Block)]
+    [InlineData("\"Warn\"", CommandGuardLevel.Warn)]
+    [InlineData("\"Off\"", CommandGuardLevel.Off)]
+    public void CommandGuardLevel_BindsFromString(string json, CommandGuardLevel expected)
+    {
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<CommandGuardLevel>(json);
+        Assert.Equal(expected, parsed);
+    }
 }
