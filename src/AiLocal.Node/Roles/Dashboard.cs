@@ -543,6 +543,14 @@ internal static class Dashboard
           min-width: 0;
         }
         .studio-tree-panel .content, .studio-term-panel .content { overflow: auto; }
+        .studio-tabs { display: flex; gap: 4px; }
+        .studio-tab { background: transparent; border: 1px solid rgba(255,255,255,.12); color: var(--fg, #e6edf3); padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .studio-tab.active { background: rgba(88,166,255,.18); border-color: rgba(88,166,255,.4); }
+        .studio-root-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+        .branch-row { border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+        .branch-row .mono { font-size: 12px; }
+        .branch-actions { display: flex; gap: 4px; margin-top: 4px; }
+        .iso-diff { background: #0b0f14; border: 1px solid rgba(255,255,255,.1); border-radius: 4px; padding: 6px; font-size: 11px; white-space: pre-wrap; }
         .studio-editor-panel { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
         .studio-editor-content { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 0; }
         #studioEditor {
@@ -1607,14 +1615,23 @@ internal static class Dashboard
         <main class="studio-workspace hidden" id="studioView">
           <aside class="panel side studio-tree-panel">
             <div class="panel-head">
-              <div>
-                <div class="panel-title">Filer</div>
-                <div class="small" id="studioRoot">ingen mapp vald</div>
+              <div class="studio-tabs">
+                <button class="studio-tab active" id="studioTabFiles">Filer</button>
+                <button class="studio-tab" id="studioTabBranches">Branches</button>
               </div>
-              <button class="icon" id="studioPickRoot" data-icon="folder" title="Välj mapp"></button>
             </div>
             <div class="content">
-              <div class="file-tree" id="fileTree"></div>
+              <div id="studioFilesPane">
+                <div class="studio-root-row">
+                  <span class="small" id="studioRoot">ingen mapp vald</span>
+                  <button class="icon" id="studioPickRoot" data-icon="folder" title="Välj mapp"></button>
+                </div>
+                <div class="file-tree" id="fileTree"></div>
+              </div>
+              <div id="studioBranchesPane" style="display:none">
+                <div class="small" style="margin-bottom:6px">Agenternas isolerade branches - granska och merga.</div>
+                <div id="studioBranches"></div>
+              </div>
             </div>
           </aside>
           <section class="panel studio-editor-panel">
@@ -5338,6 +5355,10 @@ internal static class Dashboard
               termInput.value = '';
             }
           };
+          const tabFiles = $('studioTabFiles');
+          if (tabFiles) tabFiles.onclick = () => studioTabSwitch('files');
+          const tabBranches = $('studioTabBranches');
+          if (tabBranches) tabBranches.onclick = () => studioTabSwitch('branches');
         }
 
         async function renderStudio() {
@@ -5453,6 +5474,74 @@ internal static class Dashboard
             }
           } catch (_) {}
           studio.termTimer = setTimeout(pollStudioTerminal, 700);
+        }
+
+        // ---- Studio: branches tab (git isolation review) ----
+        function studioTabSwitch(which) {
+          const files = which === 'files';
+          $('studioTabFiles').classList.toggle('active', files);
+          $('studioTabBranches').classList.toggle('active', !files);
+          $('studioFilesPane').style.display = files ? '' : 'none';
+          $('studioBranchesPane').style.display = files ? 'none' : '';
+          if (!files) renderStudioBranches();
+        }
+
+        async function renderStudioBranches() {
+          const el = $('studioBranches');
+          if (!el) return;
+          let tasks;
+          try {
+            tasks = await fetchJson('/api/isolation/list');
+          } catch (e) {
+            el.innerHTML = '<div class="small" style="opacity:.6">Kunde inte läsa isolerade uppgifter (agentläge/worktree saknas).</div>';
+            return;
+          }
+          if (!tasks || !tasks.length) {
+            el.innerHTML = '<div class="small" style="opacity:.6">Inga aktiva isolerade uppgifter.</div>';
+            return;
+          }
+          el.innerHTML = tasks.map(t => `<div class="branch-row">
+            <div class="mono">${esc(t.branch)}</div>
+            <div class="small">bas: ${esc(t.baseBranch)} · ${esc(trunc(t.title || t.taskId, 48))}</div>
+            <div class="branch-actions">
+              <button class="btn ghost sm" data-iso-merge="${esc(t.taskId)}">Merge</button>
+              <button class="btn ghost sm" data-iso-discard="${esc(t.taskId)}">Kasta</button>
+              <button class="btn ghost sm" data-iso-diff="${esc(t.taskId)}">Visa diff</button>
+            </div>
+            <pre class="iso-diff" id="iso-diff-${esc(t.taskId)}" style="display:none;max-height:240px;overflow:auto"></pre>
+          </div>`).join('');
+          el.querySelectorAll('[data-iso-merge]').forEach(b => b.onclick = () => studioMerge(b.dataset.isoMerge));
+          el.querySelectorAll('[data-iso-discard]').forEach(b => b.onclick = () => studioDiscard(b.dataset.isoDiscard));
+          el.querySelectorAll('[data-iso-diff]').forEach(b => b.onclick = () => studioDiff(b.dataset.isoDiff));
+        }
+
+        async function studioMerge(taskId) {
+          if (!window.confirm('Merga den här uppgifts-branchen in i sin bas?')) return;
+          try {
+            const r = await fetchJson('/api/isolation/merge', { method: 'POST', body: JSON.stringify({ taskId }) });
+            showGlobalNotice(r.success ? 'Mergad: ' + (r.output || 'OK') : 'Merge misslyckades: ' + (r.output || ''), !r.success);
+            await renderStudioBranches();
+          } catch (e) { showGlobalNotice(e.message, true); }
+        }
+
+        async function studioDiscard(taskId) {
+          if (!window.confirm('Kasta den här uppgifts-branchen? Ändringarna försvinner (ångra).')) return;
+          try {
+            await fetchJson('/api/isolation/discard', { method: 'POST', body: JSON.stringify({ taskId }) });
+            showGlobalNotice('Uppgifts-branch kastad.');
+            await renderStudioBranches();
+          } catch (e) { showGlobalNotice(e.message, true); }
+        }
+
+        async function studioDiff(taskId) {
+          const pre = $('iso-diff-' + taskId);
+          if (!pre) return;
+          if (pre.style.display !== 'none') { pre.style.display = 'none'; return; }
+          try {
+            const r = await fetchJson('/api/isolation/diff', { method: 'POST', body: JSON.stringify({ taskId }) });
+            pre.textContent = r.diff || '(ingen diff)';
+            pre.style.display = 'block';
+          } catch (e) { showGlobalNotice(e.message, true); }
         }
         initStudio();
       </script>

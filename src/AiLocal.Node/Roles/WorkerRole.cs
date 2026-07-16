@@ -246,6 +246,51 @@ public static class WorkerRole
             return Results.Ok(new { discarded = true });
         });
 
+        // Local dashboard mirror of the /execute/isolation/* endpoints so the
+        // in-app Studio "Branches" tab works on a single node without a cluster
+        // token. Sits under /api/ (not /execute/) so it is not node-only and
+        // therefore reachable with ordinary local dashboard auth.
+        app.MapGet("/api/isolation/list", (GitIsolationService isolation) =>
+            Results.Ok(isolation.ListActive().Select(t => new
+            {
+                taskId = t.TaskId,
+                branch = t.BranchName,
+                baseBranch = t.BaseBranch,
+                worktree = t.WorktreePath,
+                title = t.Title,
+                createdAt = t.CreatedAt
+            })));
+
+        app.MapPost("/api/isolation/merge", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await isolation.MergeAsync(body.TaskId, ct);
+            return Results.Ok(new { success, output });
+        });
+
+        app.MapPost("/api/isolation/diff", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var diff = await isolation.DiffAsync(body.TaskId, ct);
+            return Results.Ok(new { taskId = body.TaskId, diff });
+        });
+
+        app.MapPost("/api/isolation/discard", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            await isolation.DiscardAsync(body.TaskId, ct);
+            return Results.Ok(new { discarded = true });
+        });
+
         app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
             Results.Ok(await runtime.InspectAsync(ct)));
 
