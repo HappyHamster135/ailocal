@@ -122,9 +122,15 @@ public sealed class AgentToolExecutor
         // may touch - a Sandboxed agent with internet on can research docs
         // without gaining a single byte of extra disk access.
         if (allowInternet)
+        {
+            // Self-provisioning: only on Full + internet. The agent passes a
+            // TOOL NAME (godot|blender|unity), never a URL - ToolProvisioner
+            // fetches only pinned trusted sources and verifies them.
+            tools.Add(ProvisionTool.Definition);
             tools.Add(new("fetch_url",
                 "Fetch a web page over http/https and return its readable text content (HTML tags stripped). Use for looking things up on the internet.",
                 """{"type":"object","properties":{"url":{"type":"string","description":"Absolute http:// or https:// URL to fetch."}},"required":["url"]}"""));
+        }
 
         // Project memory/index: the agent's accumulated, growing knowledge of
         // THIS workspace. Off by default - the operator opts in per Worker.
