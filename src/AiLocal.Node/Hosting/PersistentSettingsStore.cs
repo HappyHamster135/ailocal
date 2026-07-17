@@ -139,30 +139,57 @@ public sealed class PersistentSettingsStore
 
     public static void LoadInto(NodeSettings settings)
     {
-        var stored = ReadStored(settings.Role);
-        if (!string.IsNullOrWhiteSpace(stored.NodeName))
-            settings.NodeName = stored.NodeName;
+        var (stored, present) = ReadStoredWithPresence(settings.Role);
+        bool Has(string key) => present.Contains(key);
 
-        settings.HostEndpoint = stored.HostEndpoint;
-        settings.Discovery.Enabled = stored.DiscoveryEnabled;
-        settings.Worker.Skills = NormalizeSkills(stored.Skills);
-        settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
-        settings.Worker.AgentAccess = stored.AgentAccess;
-        settings.Worker.WorkspacePath = stored.WorkspacePath;
-        settings.Worker.AiReviewWrites = stored.AiReviewWrites;
-        settings.Worker.AllowInternet = stored.AllowInternet;
-        settings.Worker.UseGitIsolation = stored.UseGitIsolation;
-        settings.Worker.ModelTiers = stored.ModelTiers;
-        settings.Worker.AllowDesktopControl = stored.AllowDesktopControl;
-        settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
-        settings.Providers.DefaultModel = stored.AnthropicModel;
-        settings.Providers.GeminiModel = stored.GeminiModel;
-        settings.Providers.OllamaModel = stored.OllamaModel;
-        settings.Providers.OllamaEndpoint = stored.OllamaEndpoint;
-        settings.Providers.OpenRouterModel = stored.OpenRouterModel;
-        settings.Providers.OpenAIModel = stored.OpenAIModel;
-        settings.Providers.MaxTokens = stored.MaxTokens;
-        settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
+        // Only copy a field when the stored file actually contained it. This
+        // preserves values supplied via CLI args / appsettings.json (already
+        // bound into `settings` before LoadInto runs) instead of silently
+        // resetting them to the StoredNodeSettings class defaults on every
+        // launch - e.g. a partial/older settings file that omits a key
+        // used to clobber a good host-endpoint / workspace / model.
+        if (Has("NodeName") && !string.IsNullOrWhiteSpace(stored.NodeName))
+            settings.NodeName = stored.NodeName;
+        if (Has("HostEndpoint") && stored.HostEndpoint is not null)
+            settings.HostEndpoint = stored.HostEndpoint;
+        if (Has("DiscoveryEnabled"))
+            settings.Discovery.Enabled = stored.DiscoveryEnabled;
+        if (Has("Skills"))
+            settings.Worker.Skills = NormalizeSkills(stored.Skills);
+        if (Has("MaxConcurrentTasks"))
+            settings.Worker.MaxConcurrentTasks = Math.Clamp(stored.MaxConcurrentTasks, 1, 32);
+        if (Has("AgentAccess"))
+            settings.Worker.AgentAccess = stored.AgentAccess;
+        if (Has("WorkspacePath") && stored.WorkspacePath is not null)
+            settings.Worker.WorkspacePath = stored.WorkspacePath;
+        if (Has("AiReviewWrites"))
+            settings.Worker.AiReviewWrites = stored.AiReviewWrites;
+        if (Has("AllowInternet"))
+            settings.Worker.AllowInternet = stored.AllowInternet;
+        if (Has("UseGitIsolation"))
+            settings.Worker.UseGitIsolation = stored.UseGitIsolation;
+        if (Has("ModelTiers"))
+            settings.Worker.ModelTiers = stored.ModelTiers;
+        if (Has("AllowDesktopControl"))
+            settings.Worker.AllowDesktopControl = stored.AllowDesktopControl;
+        if (Has("ProviderPriority"))
+            settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
+        if (Has("AnthropicModel"))
+            settings.Providers.DefaultModel = stored.AnthropicModel;
+        if (Has("GeminiModel"))
+            settings.Providers.GeminiModel = stored.GeminiModel;
+        if (Has("OllamaModel") && stored.OllamaModel is not null)
+            settings.Providers.OllamaModel = stored.OllamaModel;
+        if (Has("OllamaEndpoint"))
+            settings.Providers.OllamaEndpoint = stored.OllamaEndpoint;
+        if (Has("OpenRouterModel"))
+            settings.Providers.OpenRouterModel = stored.OpenRouterModel;
+        if (Has("OpenAIModel"))
+            settings.Providers.OpenAIModel = stored.OpenAIModel;
+        if (Has("MaxTokens"))
+            settings.Providers.MaxTokens = stored.MaxTokens;
+        if (Has("AutoPullOllamaModel"))
+            settings.Installer.AutoPullOllamaModel = stored.AutoPullOllamaModel;
     }
 
     /// <param name="includeSecrets">False redacts clusterToken/operatorToken
@@ -541,16 +568,23 @@ public sealed class PersistentSettingsStore
         File.Move(temporary, settingsFile, true);
     }
 
-    private static StoredNodeSettings ReadStored(NodeRole role)
+    private static (StoredNodeSettings stored, HashSet<string> present) ReadStoredWithPresence(NodeRole role)
     {
         var settingsFile = SettingsPaths.SettingsFile(role);
+        var stored = new StoredNodeSettings();
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(settingsFile))
+            return (stored, present);
+
+        string TextOf(string path) => File.ReadAllText(path);
         try
         {
-            if (!File.Exists(settingsFile))
-                return new StoredNodeSettings();
-
-            return JsonSerializer.Deserialize<StoredNodeSettings>(
-                File.ReadAllText(settingsFile), JsonOptions) ?? new StoredNodeSettings();
+            var text = TextOf(settingsFile);
+            var raw = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(text, JsonOptions);
+            if (raw is not null)
+                foreach (var key in raw.Keys) present.Add(key);
+            stored = JsonSerializer.Deserialize<StoredNodeSettings>(text, JsonOptions) ?? stored;
+            return (stored, present);
         }
         catch (Exception ex)
         {
@@ -569,10 +603,13 @@ public sealed class PersistentSettingsStore
                 var backupFile = settingsFile + ".bak";
                 if (File.Exists(backupFile))
                 {
-                    var restored = JsonSerializer.Deserialize<StoredNodeSettings>(
-                        File.ReadAllText(backupFile), JsonOptions);
+                    var btext = TextOf(backupFile);
+                    var braw = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(btext, JsonOptions);
+                    if (braw is not null)
+                        foreach (var key in braw.Keys) present.Add(key);
+                    var restored = JsonSerializer.Deserialize<StoredNodeSettings>(btext, JsonOptions);
                     if (restored is not null)
-                        return restored;
+                        return (restored, present);
                 }
             }
             catch (Exception backupEx)
@@ -580,9 +617,11 @@ public sealed class PersistentSettingsStore
                 CrashLog.Write($"SettingsBackupAlsoCorrupted({role})", backupEx);
             }
 
-            return new StoredNodeSettings();
+            return (stored, present);
         }
     }
+
+    private static StoredNodeSettings ReadStored(NodeRole role) => ReadStoredWithPresence(role).stored;
 
     private static string Required(string value, string label) =>
         !string.IsNullOrWhiteSpace(value) ? value.Trim() : throw new ArgumentException($"{label} is required.");
