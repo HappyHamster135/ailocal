@@ -139,8 +139,15 @@ public static class SessionApi
                 async Task<FileChangeDecision> Gate(FileChangeProposal proposal, CancellationToken ct2)
                 {
                     var diff = LineDiff.Compute(proposal.OldContent ?? "", proposal.NewContent);
+                    var isNew = string.IsNullOrEmpty(proposal.OldContent);
                     await ctx.Response.WriteAsync(
-                        $"data: {JsonSerializer.Serialize(new { step = new AgentStep("awaiting_approval", JsonSerializer.Serialize(new { path = proposal.Path, diff })) })}\n\n",
+                        $"data: {JsonSerializer.Serialize(new { step = new AgentStep("awaiting_approval", JsonSerializer.Serialize(new {
+                            path = proposal.Path,
+                            diff,
+                            isNew,
+                            oldContent = proposal.OldContent ?? "",
+                            newContent = proposal.NewContent
+                        })) })}\n\n",
                         linked.Token);
                     await ctx.Response.Body.FlushAsync(linked.Token);
                     var decision = await pending.RequestAsync(id, new PendingChange(id, proposal.Path, proposal.OldContent, proposal.NewContent), ct2);
@@ -201,16 +208,22 @@ public static class SessionApi
     private static string BuildSystemPrompt(string folderPath, AgentAccessLevel level, string? projectInstructions)
     {
         var sb = new StringBuilder();
-        sb.Append($"You are an autonomous agent working in the folder {folderPath}.");
+        sb.Append($"You are an autonomous coding agent working inside the folder \"{folderPath}\".");
         sb.Append(level == AgentAccessLevel.Full
-            ? " You have file and command access on this computer; commands default to running in this folder."
+            ? " You have file and shell/command access on this computer; commands run in this folder by default."
             : " You can read, write, and list files within this folder only - you cannot run shell commands at this access level.");
+
+        sb.Append("\n\nYOUR JOB: When the user asks you to CREATE something (a game, an app, a script, a document, a fix), actually PRODUCE it using your tools - write the files, scaffold the project, build it. Do NOT just describe how it could be done or write a text outline instead of the real artifact. If you cannot do it with the tools you have, say so plainly.");
+
+        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and - via the local API - scaffold a game project (/api/game/scaffold with engine 'unity'|'godot', a prompt and a root folder) and build it (/api/workspace/game with the project root). Prefer producing a runnable result over a description.");
 
         if (!string.IsNullOrWhiteSpace(projectInstructions))
         {
-            sb.Append("\n\nProject instructions (from AILOCAL.md in this folder):\n");
+            sb.Append("\n\nPROJECT INSTRUCTIONS (from AILOCAL.md in this folder - follow these priorities and context):\n");
             sb.Append(projectInstructions);
         }
+
+        sb.Append("\n\nReply in the same language the user writes in (e.g. Swedish if they write Swedish). Keep the user informed of what you are building, step by step.");
 
         return sb.ToString();
     }

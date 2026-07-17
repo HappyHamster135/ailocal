@@ -2261,7 +2261,7 @@ internal static class Dashboard
         <div class="modal diff-modal">
           <div class="modal-head">
             <div>
-              <div class="modal-title">Agenten vill skriva en fil</div>
+              <div class="modal-title">Agenten vill <span id="diffModalKind">skriva en fil</span></div>
               <div class="small mono" id="diffModalPath"></div>
             </div>
             <button class="icon" id="diffModalClose" data-icon="x" title="Stäng"></button>
@@ -3038,9 +3038,10 @@ internal static class Dashboard
         }
 
         // --- File-write approval (preview before save) ---
-        function openDiffModal(title, path, diff) {
-          $('diffModalPath').textContent = path;
-          $('diffModalBody').textContent = diff || '(tom fil / ingen skillnad att visa)';
+        function openDiffModal(kindLabel, path, body) {
+          $('diffModalKind').textContent = kindLabel;
+          $('diffModalPath').textContent = path || '(okänd fil)';
+          $('diffModalBody').textContent = body || '(tom fil / ingen skillnad att visa)';
           $('diffModal').style.display = 'flex';
         }
         function closeDiffModal() { $('diffModal').style.display = 'none'; }
@@ -3069,13 +3070,19 @@ internal static class Dashboard
         $('diffModal').addEventListener('click', e => { if (e.target === $('diffModal')) closeDiffModal(); });
 
         // Called from the run-loop when a step of kind "awaiting_approval"
-        // arrives - surfaces the diff for the operator to approve/reject.
+        // arrives - surfaces the change for the operator to approve/reject.
+        // For a brand-new file we show the full content (there is no diff);
+        // for an edit we show the line diff.
         function handleApprovalStep(detailJson) {
           try {
             const d = JSON.parse(detailJson);
-            openDiffModal('Agenten vill skriva en fil', d.path || '(okänd fil)', d.diff || '');
+            const isNew = !!d.isNew;
+            const body = isNew
+              ? (d.newContent || d.diff || '')
+              : (d.diff || (d.newContent ? d.newContent : ''));
+            openDiffModal(isNew ? 'skapa en ny fil' : 'ändra en fil', d.path || '', body);
           } catch {
-            openDiffModal('Agenten vill skriva en fil', '', '');
+            openDiffModal('skriva en fil', '', '');
           }
         }
 
