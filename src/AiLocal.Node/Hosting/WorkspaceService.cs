@@ -17,6 +17,37 @@ public sealed class WorkspaceService
     public WsCommand? DetectCommand(string root, string kind)
     {
         if (!Directory.Exists(root)) return null;
+
+        // p3: Unity project - Assets/ + ProjectSettings/ is the tell. Check
+        // BEFORE .sln/.csproj: Unity generates a .sln next to the project, but
+        // the real build must go through Unity's batchmode, not dotnet.
+        if (Directory.Exists(Path.Combine(root, "Assets")) &&
+            Directory.Exists(Path.Combine(root, "ProjectSettings")))
+        {
+            return kind switch
+            {
+                "test" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-runTests", "-testPlatform", "EditMode"], "test"),
+                "run" => new("Unity", ["-batchmode", "-quit", "-projectPath", root], "run"),
+                "game" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-buildWindowsPlayer", Path.Combine(root, "build", "GameTest.exe")], "game"),
+                _ => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
+                    "-buildTarget", "Win64"], "build"),
+            };
+        }
+        // p3: Godot project - project.godot at the root.
+        if (File.Exists(Path.Combine(root, "project.godot")))
+        {
+            return kind switch
+            {
+                "test" => new("godot", ["--headless", "--quit", "--path", root], "test"),
+                "run" => new("godot", ["--path", root], "run"),
+                "game" => new("godot", ["--headless", "--quit", "--path", root,
+                    "--export-release", "Windows Desktop"], "game"),
+                _ => new("godot", ["--headless", "--quit", "--path", root, "--build"], "build"),
+            };
+        }
+
         var isDotnet = Directory.GetFiles(root, "*.sln").Length > 0
             || Directory.GetFiles(root, "*.csproj").Length > 0;
         if (isDotnet)
@@ -55,33 +86,6 @@ public sealed class WorkspaceService
                 _ => new("go", ["build", "./..."], "build"),
             };
         }
-        // p3: Unity project - Assets/ + ProjectSettings/ is the tell.
-        if (Directory.Exists(Path.Combine(root, "Assets")) &&
-            Directory.Exists(Path.Combine(root, "ProjectSettings")))
-        {
-            return kind switch
-            {
-                "test" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
-                    "-runTests", "-testPlatform", "EditMode"], "test"),
-                "run" => new("Unity", ["-batchmode", "-quit", "-projectPath", root], "run"),
-                "game" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
-                    "-buildTarget", "Win64"], "game"),
-                _ => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
-                    "-buildTarget", "Win64"], "build"),
-            };
-        }
-        // p3: Godot project - project.godot at the root.
-        if (File.Exists(Path.Combine(root, "project.godot")))
-        {
-            return kind switch
-            {
-                "test" => new("godot", ["--headless", "--quit", "--path", root], "test"),
-                "run" => new("godot", ["--path", root], "run"),
-                "game" => new("godot", ["--headless", "--quit", "--path", root,
-                    "--export-release", "Windows Desktop"], "game"),
-                _ => new("godot", ["--headless", "--quit", "--path", root, "--build"], "build"),
-            };
-        }
         // p3: Python project - requirements.txt / pyproject.toml / a .py entry.
         if (File.Exists(Path.Combine(root, "requirements.txt")) ||
             File.Exists(Path.Combine(root, "pyproject.toml")) ||
@@ -112,6 +116,42 @@ public sealed class WorkspaceService
         return p is null ? null : Path.GetFileName(p);
     }
 
+    /// <summary>Resolves a game-engine executable name to a full path. "Unity"
+    /// lives under Unity Hub's Editor folder (not on PATH); "godot" is usually
+    /// on PATH but may also need a common install location. Falls back to the
+    /// bare name so non-Windows / already-on-PATH setups still work.</summary>
+    static string ResolveEnginePath(string fileName)
+    {
+        if (fileName.Equals("Unity", StringComparison.OrdinalIgnoreCase))
+        {
+            // Unity Hub installs editors under %PROGRAMFILES%\Unity\Hub\Editor\<ver>\Editor\Unity.exe
+            var baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Unity", "Hub", "Editor");
+            if (Directory.Exists(baseDir))
+            {
+                var latest = Directory.GetDirectories(baseDir)
+                    .OrderByDescending(d => d)
+                    .Select(d => Path.Combine(d, "Editor", "Unity.exe"))
+                    .FirstOrDefault(File.Exists);
+                if (latest is not null) return latest;
+            }
+        }
+        if (fileName.Equals("godot", StringComparison.OrdinalIgnoreCase))
+        {
+            // Try PATH first (handled by UseShellExecute=false + Process), then
+            // a few well-known install spots.
+            foreach (var cand in new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Godot", "Godot.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Godot", "Godot.exe"),
+            })
+            {
+                if (File.Exists(cand)) return cand;
+            }
+        }
+        return fileName;
+    }
+
     /// <summary>Runs the requested command, returning (Success, Output).
     /// kind "verify" maps to the run command but with a short (30s) timeout so
     /// an operator can confirm the app boots and emits startup output without
@@ -127,9 +167,10 @@ public sealed class WorkspaceService
         var timeoutSec = kind == "verify" ? 30 : 300;
         try
         {
+            var fileName = ResolveEnginePath(cmd.FileName);
             var psi = new ProcessStartInfo
             {
-                FileName = cmd.FileName,
+                FileName = fileName,
                 WorkingDirectory = root,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

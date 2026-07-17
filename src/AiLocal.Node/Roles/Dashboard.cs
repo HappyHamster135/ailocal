@@ -1649,6 +1649,8 @@ internal static class Dashboard
               <div class="studio-tabs">
                 <button class="studio-tab active" id="studioTabFiles">Filer</button>
                 <button class="studio-tab" id="studioTabBranches">Branches</button>
+                <button class="studio-tab" id="studioTabNewGame">Nytt spel</button>
+                <button class="studio-tab" id="studioTabScreen">Skärm</button>
               </div>
             </div>
             <div class="content">
@@ -1709,6 +1711,44 @@ internal static class Dashboard
                 <span class="mono" id="studioTermPrompt">$</span>
                 <input id="studioTermInput" placeholder="kommando..." autocomplete="off">
               </div>
+            </div>
+          </aside>
+          <aside class="panel side studio-newgame-panel hidden" id="newGamePanel">
+            <div class="panel-head">
+              <div class="panel-title">Skapa nytt spel</div>
+            </div>
+            <div class="content">
+              <p class="small">Agenten genererar ett komplett Unity/Godot-projekt från din prompt - sen bygger du det med "Bygg spel".</p>
+              <label class="field"><span>Motor</span>
+                <select id="newGameEngine">
+                  <option value="unity">Unity</option>
+                  <option value="godot">Godot</option>
+                </select>
+              </label>
+              <label class="field"><span>Mapp</span>
+                <input id="newGameRoot" placeholder="D:\\spel\\MittSpel" />
+              </label>
+              <label class="field"><span>Prompt</span>
+                <textarea id="newGamePrompt" rows="4" placeholder="En 2D-plattformare med hopp och fiender..."></textarea>
+              </label>
+              <button class="primary sm" id="newGameCreateBtn">Skapa projekt</button>
+              <pre class="studio-output" id="newGameOut" style="display:none"></pre>
+            </div>
+          </aside>
+          <aside class="panel side studio-screen-panel hidden" id="screenPanel">
+            <div class="panel-head">
+              <div class="panel-title">Skärm</div>
+              <div style="display:flex;gap:8px">
+                <button class="icon" id="screenRefreshBtn" data-icon="refresh" title="Ta ny skärmdump"></button>
+              </div>
+            </div>
+            <div class="content">
+              <p class="small" id="screenHint">Slå på "Tillåt skärmkontroll" i Inställningar för att agenten ska kunna se och styra skärmen.</p>
+              <div class="screen-shot-wrap">
+                <img id="screenImg" alt="skärmdump" style="display:none;width:100%;border-radius:6px" />
+              </div>
+              <p class="small mono" id="screenState"></p>
+              <p class="small">Klicka i bilden för att låta agenten klicka där (kräver skärmkontroll på).</p>
             </div>
           </aside>
         </main>
@@ -1978,6 +2018,12 @@ internal static class Dashboard
                 </label>
                 <span class="small" style="display:block;margin-top:-6px">
                   Ger agenten verktygen recall/remember och bygger ett kodindex + minnesfil (.ailocal-memory.md) i arbetsmappen. "Anställda" bygger upp och återanvänder projektkunskap mellan sessioner.
+                </span>
+                <label class="check-field wide" style="margin-top:8px">
+                  <input id="settingAllowDesktopControl" type="checkbox"> Tillåt skärmkontroll (agenten ser + styr skärmen)
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  När detta är påtänt kan agenten ta skärmdumpar och klicka/skriva på DIN skärm via Studio-fliken "Skärm" - så den kan se hur ett byggt spel ser ut och styra det. Potent: lämna avstängt om du inte medvetet vill låta agenten styra datorn.
                 </span>
                 <div class="field wide" style="margin-top:4px">
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
@@ -4447,6 +4493,7 @@ internal static class Dashboard
           $('settingCommandGuard').value = data.commandGuard ?? 'Block';
           $('settingBlockedCommands').value = (data.blockedCommands ?? []).join('\n');
           $('settingProjectMemory').checked = data.projectMemoryEnabled ?? false;
+          $('settingAllowDesktopControl').checked = data.allowDesktopControl ?? false;
           $('settingTierSimple').value = data.modelTiers?.simple ?? '';
           $('settingTierMedium').value = data.modelTiers?.medium ?? '';
           $('settingTierComplex').value = data.modelTiers?.complex ?? '';
@@ -4777,6 +4824,7 @@ internal static class Dashboard
             commandGuard: $('settingCommandGuard').value,
             blockedCommands: $('settingBlockedCommands').value.split('\n').map(value => value.trim()).filter(Boolean),
             projectMemoryEnabled: $('settingProjectMemory').checked,
+            allowDesktopControl: $('settingAllowDesktopControl').checked,
             modelTiers: {
               simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
               medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',
@@ -5438,6 +5486,96 @@ internal static class Dashboard
           if (testBtn) testBtn.onclick = () => runStudioCommand('test');
           const gameBtn = $('studioGameBtn');
           if (gameBtn) gameBtn.onclick = () => runStudioCommand('game');
+
+          const tabNewGame = $('studioTabNewGame');
+          if (tabNewGame) tabNewGame.onclick = () => studioTabSwitch('newgame');
+          const tabScreen = $('studioTabScreen');
+          if (tabScreen) tabScreen.onclick = () => studioTabSwitch('screen');
+
+          const newGameCreate = $('newGameCreateBtn');
+          if (newGameCreate) newGameCreate.onclick = () => createNewGame();
+          const screenRefresh = $('screenRefreshBtn');
+          if (screenRefresh) screenRefresh.onclick = () => captureScreen();
+          const screenImg = $('screenImg');
+          if (screenImg) screenImg.onclick = (e) => clickOnScreen(e, screenImg);
+        }
+
+        function studioTabSwitch(tab) {
+          ['files', 'branches', 'newgame', 'screen'].forEach(t => {
+            const el = $('studioTab' + t.charAt(0).toUpperCase() + t.slice(1));
+            if (el) el.classList.toggle('active', t === tab);
+          });
+          const filesPane = $('studioFilesPane');
+          const branchesPane = $('studioBranchesPane');
+          const ng = $('newGamePanel');
+          const sp = $('screenPanel');
+          if (filesPane) filesPane.parentElement.style.display = tab === 'files' ? '' : 'none';
+          if (branchesPane) branchesPane.parentElement.style.display = tab === 'branches' ? '' : 'none';
+          if (ng) ng.classList.toggle('hidden', tab !== 'newgame');
+          if (sp) sp.classList.toggle('hidden', tab !== 'screen');
+          if (tab === 'screen') captureScreen();
+        }
+
+        async function createNewGame() {
+          const out = $('newGameOut');
+          const engine = $('newGameEngine').value;
+          const root = $('newGameRoot').value.trim();
+          const prompt = $('newGamePrompt').value.trim();
+          if (!root) { showGlobalNotice('Välj en mapp för projektet.', true); return; }
+          try {
+            out.style.display = 'block';
+            out.textContent = 'Skapar ' + engine + '-projekt...';
+            const data = await fetchJson('/api/game/scaffold', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ engine, prompt, root })
+            });
+            out.textContent = (data.output || 'Klart') + '\n\nFiler:\n' + (data.files || []).join('\n');
+            showGlobalNotice('Spelprojekt skapat i ' + data.path + '. Växla till Filer och tryck "Bygg spel".');
+          } catch (e) {
+            out.style.display = 'block';
+            out.textContent = 'Fel: ' + (e.message || e);
+          }
+        }
+
+        async function captureScreen() {
+          const img = $('screenImg');
+          const stateEl = $('screenState');
+          const hint = $('screenHint');
+          try {
+            const res = await fetch('/api/desktop/screenshot', { headers: authHeaders() });
+            if (res.status === 403) {
+              if (hint) hint.textContent = 'Skärmkontroll är avstängd. Slå på "Tillåt skärmkontroll" i Inställningar.';
+              if (stateEl) stateEl.textContent = 'avstängd';
+              return;
+            }
+            if (!res.ok) { if (stateEl) stateEl.textContent = 'kunnde inte ta skärmdump (' + res.status + ')'; return; }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            if (img) { img.src = url; img.style.display = 'block'; }
+            if (hint) hint.textContent = 'Live-skärm. Agenten ser detta när skärmkontroll är på.';
+            if (stateEl) stateEl.textContent = 'live';
+          } catch (e) {
+            if (stateEl) stateEl.textContent = 'fel: ' + (e.message || e);
+          }
+        }
+
+        async function clickOnScreen(e, img) {
+          const rect = img.getBoundingClientRect();
+          const scaleX = img.naturalWidth / rect.width;
+          const scaleY = img.naturalHeight / rect.height;
+          const x = Math.round((e.clientX - rect.left) * scaleX);
+          const y = Math.round((e.clientY - rect.top) * scaleY);
+          try {
+            await fetchJson('/api/desktop/click', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ x, y })
+            });
+            showGlobalNotice('Klickade på skärmen (' + x + ', ' + y + ').');
+          } catch (err) {
+            showGlobalNotice('Kunde inte klicka: ' + (err.message || err), true);
+          }
         }
 
         async function renderStudio() {

@@ -106,6 +106,12 @@ public sealed class WorkerProfileSettings
     /// by a per-project code index + memory file in the workspace, so the
     /// "employees" build up and reuse project knowledge across sessions.</summary>
     public bool ProjectMemoryEnabled { get; set; }
+
+    /// <summary>Opt-in desktop control: when on, the agent (via the Studio
+    /// "Skärm" tab or the /api/desktop endpoints) may capture the screen and
+    /// inject mouse/keyboard input on THIS machine. Off by default - this is
+    /// powerful, so only the operator turns it on deliberately.</summary>
+    public bool AllowDesktopControl { get; set; }
 }
 
 /// <summary>Which (provider, model) to use for a task of a given skill+complexity.

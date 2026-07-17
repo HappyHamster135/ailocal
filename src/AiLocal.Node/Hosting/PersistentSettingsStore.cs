@@ -42,6 +42,7 @@ public sealed record SettingsUpdate(
     CommandGuardLevel? CommandGuard = null,
     List<string>? BlockedCommands = null,
     bool? ProjectMemoryEnabled = null,
+    bool? AllowDesktopControl = null,
     string? AnthropicApiKey = null,
     string? GeminiApiKey = null,
     string? OpenRouterApiKey = null,
@@ -83,6 +84,7 @@ internal sealed class StoredNodeSettings
     public string? ProtectedGeminiApiKey { get; set; }
     public string? ProtectedOpenRouterApiKey { get; set; }
     public string? ProtectedOpenAIApiKey { get; set; }
+    public bool AllowDesktopControl { get; set; }
 }
 
 public static class SettingsPaths
@@ -151,6 +153,7 @@ public sealed class PersistentSettingsStore
         settings.Worker.AllowInternet = stored.AllowInternet;
         settings.Worker.UseGitIsolation = stored.UseGitIsolation;
         settings.Worker.ModelTiers = stored.ModelTiers;
+        settings.Worker.AllowDesktopControl = stored.AllowDesktopControl;
         settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
         settings.Providers.DefaultModel = stored.AnthropicModel;
         settings.Providers.GeminiModel = stored.GeminiModel;
@@ -192,6 +195,7 @@ public sealed class PersistentSettingsStore
                 commandGuard = _settings.Worker.CommandGuard.ToString(),
                 blockedCommands = _settings.Worker.BlockedCommands,
                 projectMemoryEnabled = _settings.Worker.ProjectMemoryEnabled,
+                allowDesktopControl = _settings.Worker.AllowDesktopControl,
                 modelTiers = new
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
@@ -304,6 +308,8 @@ public sealed class PersistentSettingsStore
                 _settings.Worker.BlockedCommands = update.BlockedCommands;
             if (update.ProjectMemoryEnabled.HasValue)
                 _settings.Worker.ProjectMemoryEnabled = update.ProjectMemoryEnabled.Value;
+            if (update.AllowDesktopControl.HasValue)
+                _settings.Worker.AllowDesktopControl = update.AllowDesktopControl.Value;
 
             if (update.RegenerateClusterToken)
                 _stored.ProtectedClusterToken = _protector.Protect(GenerateToken());
@@ -496,6 +502,7 @@ public sealed class PersistentSettingsStore
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;
         _stored.BudgetLimitUsd = _settings.Worker.BudgetLimitUsd;
         _stored.ModelTiers = _settings.Worker.ModelTiers;
+        _stored.AllowDesktopControl = _settings.Worker.AllowDesktopControl;
         // do not overwrite them from NodeSettings here (NodeSettings has no field
         // for them, so this stays intentionally silent about that pair).
         _stored.ProviderPriority = [.. _settings.Providers.Priority];

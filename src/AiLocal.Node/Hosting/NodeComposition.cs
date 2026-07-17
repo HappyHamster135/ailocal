@@ -22,6 +22,8 @@ public static class NodeComposition
         services.AddSingleton<SessionRunRegistry>();
         services.AddSingleton<GitService>();
         services.AddSingleton<GitIsolationService>();
+        services.AddSingleton<GameScaffoldService>();
+        services.AddSingleton<DesktopControlService>();
         services.AddSingleton<PendingChangeRegistry>();
         services.AddTransient<ClusterTokenHandler>();
         services.AddHttpClient();
