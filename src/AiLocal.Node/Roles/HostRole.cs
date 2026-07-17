@@ -726,6 +726,8 @@ public static class HostRole
                 name = n.Name,
                 status = n.Status.ToString(),
                 activeTasks = n.ActiveTasks,
+                workspacePath = n.WorkspacePath,
+                agentAccess = n.AgentAccess.ToString(),
                 current = inflight.FirstOrDefault(t => t.WorkerName == n.Name) is { } cur
                     ? new { id = cur.Id, title = cur.Title ?? cur.Prompt, role = cur.RoleId, state = cur.State.ToString(), complexity = cur.Complexity }
                     : null

@@ -53,6 +53,9 @@ public sealed class AgentToolExecutor
     private readonly CommandGuard _commandGuard;
     private readonly CodebaseIndex? _codeIndex;
     private readonly ProjectMemory? _memory;
+    // Optional self-provisioning delegate (Node layer wires this to the
+    // ToolProvisioner). Null in Core tests / when not provisioned.
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? _provisioner;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -61,7 +64,8 @@ public sealed class AgentToolExecutor
         bool allowInternet = false,
         CommandGuard? commandGuard = null,
         CodebaseIndex? codeIndex = null,
-        ProjectMemory? memory = null)
+        ProjectMemory? memory = null,
+        Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -70,6 +74,7 @@ public sealed class AgentToolExecutor
         _commandGuard = commandGuard ?? new CommandGuard(CommandGuardLevel.Off);
         _codeIndex = codeIndex;
         _memory = memory;
+        _provisioner = provisioner;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -153,6 +158,11 @@ public sealed class AgentToolExecutor
                 "list_files" => ListFiles(call, root),
                 "run_command" when _level == AgentAccessLevel.Full => await RunCommandAsync(call, root, ct),
                 "verify" when _level == AgentAccessLevel.Full => await VerifyAsync(call, root, ct),
+                "provision" when _level == AgentAccessLevel.Full && _allowInternet && _provisioner is not null
+                    => await ProvisionAsync(call, root, ct),
+                "provision" => Error(call, _allowInternet
+                    ? "provision requires Full agent access (Inställningar -> Agent & arbetsyta)."
+                    : "provision is not available - internet access is disabled on this Worker."),
                 "recall" when _memory is not null => await RecallAsync(call, root, ct),
                 "remember" when _memory is not null => await RememberAsync(call, root, ct),
                 "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
@@ -581,6 +591,19 @@ public sealed class AgentToolExecutor
             ? HtmlToText(raw)
             : raw;
         return new ToolResult(call.Id, call.Name, Truncate($"[{uri}]\n{text}"));
+    }
+
+    private async Task<ToolResult> ProvisionAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_provisioner is null)
+            return Error(call, "provision is not available on this Worker (ToolProvisioner not wired).");
+        var tool = RequireString(args, "tool");
+        var destination = args.TryGetProperty("destination", out var d) && d.ValueKind == JsonValueKind.String
+            ? d.GetString()! : _workspaceRoot;
+        var (success, output) = await _provisioner(tool, destination, ct);
+        return success
+            ? new ToolResult(call.Id, call.Name, output)
+            : Error(call, output);
     }
 
     /// <summary>Crude, dependency-free readable-text extraction: good enough

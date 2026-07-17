@@ -161,7 +161,12 @@ public static class WorkerRole
             var executor = new AgentToolExecutor(accessLevel, workspaceRoot, gate, settings.Worker.AllowInternet,
                 new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
                 settings.Worker.ProjectMemoryEnabled ? new CodebaseIndex() : null,
-                settings.Worker.ProjectMemoryEnabled ? new ProjectMemory(workspaceRoot) : null);
+                settings.Worker.ProjectMemoryEnabled ? new ProjectMemory(workspaceRoot) : null,
+                async (tool, dest, provCt) =>
+                {
+                    var r = await new ToolProvisioner().ProvisionAsync(tool, dest, provCt);
+                    return (r.Success, r.Output);
+                });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
             var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>

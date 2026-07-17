@@ -1618,8 +1618,8 @@ internal static class Dashboard
                     </select>
                     <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
                     <input id="parallelism" type="number" min="1" max="32" value="4">
-                    <label class="check-field small" style="min-height:28px" title="Skickar till en Worker med agentläge påslaget, som jobbar med filer/kommandon tills den anser uppgiften klar, istället för ett vanligt engångssvar.">
-                      <input id="assignmentMode" type="checkbox"> Agentläge
+                    <label class="check-field small" style="min-height:28px" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
+                      <input id="assignmentMode" type="checkbox"> Agentläge (kör på Worker)
                     </label>
                   </div>
                   <div class="composer-tools">
@@ -3899,11 +3899,35 @@ internal static class Dashboard
                   ? `<div class="small" style="margin-top:4px">${esc(trunc(cur.title, 70))}</div>
                      <div class="small" style="opacity:.6">${esc(roleName(cur.role) || cur.role || 'agent')} | ${esc(stateNameFromStr(cur.state))}${cur.complexity ? ' | niva ' + cur.complexity : ''}</div>`
                   : `<div class="small" style="opacity:.6;margin-top:4px">${w.status === 'Offline' ? 'frånkopplad' : 'ledig'}</div>`;
+                const acc = w.agentAccess || 'Off';
+                const accPill = acc === 'Full' ? 'good' : (acc === 'Off' ? 'bad' : '');
+                const wsShort = w.workspacePath ? esc(trunc(w.workspacePath, 40)) : '<span style="opacity:.5">standard-mapp</span>';
+                const opt = (v, label) => `<option value="${v}"${acc === v ? ' selected' : ''}>${label}</option>`;
                 return `<div class="office-card ${w.status === 'Offline' ? 'offline' : ''}">
-                  <div class="node-main"><span class="mono">${esc(w.name)}</span><span class="pill ${statusClass}">${esc(w.status)}</span>${w.activeTasks ? `<span class="small">${w.activeTasks} aktiva</span>` : ''}</div>
+                  <div class="node-main"><span class="mono">${esc(w.name)}</span><span class="pill ${statusClass}">${esc(w.status)}</span><span class="pill ${accPill}">${esc(acc)}</span>${w.activeTasks ? `<span class="small">${w.activeTasks} aktiva</span>` : ''}</div>
                   ${curHtml}
+                  <div class="small" style="opacity:.6;margin-top:4px">📁 ${wsShort}</div>
+                  <button class="btn-mini" data-wcfg="${esc(w.id)}" style="margin-top:6px">⚙ Inställningar</button>
+                  <div class="worker-cfg" id="wcfg-${esc(w.id)}" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px">
+                    <label class="small" style="display:block;margin-bottom:2px">Arbetsmapp på workerns dator</label>
+                    <input class="inp" id="wcfg-ws-${esc(w.id)}" placeholder="t.ex. C:\\Users\\namn\\Desktop\\TEST" value="${w.workspacePath ? esc(w.workspacePath) : ''}" style="width:100%;margin-bottom:6px">
+                    <label class="small" style="display:block;margin-bottom:2px">Åtkomstnivå</label>
+                    <select class="inp" id="wcfg-acc-${esc(w.id)}" style="width:100%;margin-bottom:6px">
+                      ${opt('Off', 'Av (ingen agent)')}${opt('Sandboxed', 'Begränsad (endast arbetsmappen)')}${opt('Full', 'Full åtkomst (hela datorn)')}
+                    </select>
+                    <label class="small" style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                      <input type="checkbox" id="wcfg-net-${esc(w.id)}"> Tillåt internet (krävs för auto-nedladdning av verktyg)
+                    </label>
+                    <button class="btn" data-wsave="${esc(w.id)}">Spara till workern</button>
+                    <span class="small" id="wcfg-msg-${esc(w.id)}" style="margin-left:8px"></span>
+                  </div>
                 </div>`;
               }).join('');
+              wEl.querySelectorAll('[data-wcfg]').forEach(b => b.onclick = () => {
+                const p = $('wcfg-' + b.dataset.wcfg);
+                if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+              });
+              wEl.querySelectorAll('[data-wsave]').forEach(b => b.onclick = () => saveWorkerSettings(b.dataset.wsave));
             }
             const gEl = $('officeGoals');
             if (gEl) gEl.innerHTML = (data.goals.length ? data.goals : []).map(g => `<div class="node">
@@ -3911,6 +3935,31 @@ internal static class Dashboard
               <div class="small" style="opacity:.6">${g.children} deluppgifter</div>
             </div>`).join('') || '<div class="small" style="opacity:.6">Inga mål.</div>';
           } catch { /* office view is best-effort */ }
+        }
+
+        // B1: push per-worker workspace + access-level to a specific Worker via
+        // the Host proxy (PUT /api/nodes/{id}/settings -> that worker's own
+        // /api/settings). The Overseer decides where each Worker saves/works
+        // and how much of its machine the agent may touch.
+        async function saveWorkerSettings(id) {
+          const msg = $('wcfg-msg-' + id);
+          const ws = ($('wcfg-ws-' + id)?.value || '').trim();
+          const acc = $('wcfg-acc-' + id)?.value || 'Off';
+          const net = !!$('wcfg-net-' + id)?.checked;
+          const body = { agentAccess: acc, allowInternet: net };
+          if (ws) body.workspacePath = ws;
+          if (msg) { msg.textContent = 'Sparar...'; msg.style.color = ''; }
+          try {
+            await fetchJson('/api/nodes/' + encodeURIComponent(id) + '/settings', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            if (msg) { msg.textContent = '✓ sparat'; msg.style.color = 'var(--good)'; }
+            setTimeout(renderOffice, 1200);
+          } catch (e) {
+            if (msg) { msg.textContent = 'Fel: ' + e.message; msg.style.color = 'var(--bad)'; }
+          }
         }
 
         const stateNameFromStr = s => s; // state already a readable string from /api/office
