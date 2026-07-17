@@ -200,4 +200,31 @@ public class OllamaProviderToolsTests
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
         Assert.Equal("llama3.1:8b", sentBody.RootElement.GetProperty("model").GetString());
     }
+
+    /// <summary>Regression for the real-world failure: a misconfigured
+    /// OllamaModel set to a cloud id (e.g. "claude-haiku-4-5" - exactly what
+    /// showed up as "ollama 404: model 'claude-haiku-4-5' not found" in a
+    /// user's run) must NOT be sent to Ollama. It is not a valid Ollama tag,
+    /// so the provider falls back to the hardware-recommended tag instead of
+    /// 404ing and breaking the whole fallback chain.</summary>
+    [Fact]
+    public async Task CompleteAsync_MisconfiguredCloudOllamaModel_FallsBackToRecommendedTag()
+    {
+        const string plainBody = """
+            { "message": { "role": "assistant", "content": "hi" }, "prompt_eval_count": 1, "eval_count": 1 }
+            """;
+        var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, plainBody));
+        var settings = new ProviderSettings { OllamaModel = "claude-haiku-4-5" };
+        var provider = new OllamaProvider(new HttpClient(handler), settings,
+            new LocalModelRecommendation("llama3.1:8b", "Llama 3.1 8B", 8, "test"));
+
+        var result = await provider.CompleteAsync(new ChatRequest
+        {
+            Messages = { new ChatMessage("user", "hi") }
+        });
+
+        Assert.True(result.IsSuccess);
+        using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
+        Assert.Equal("llama3.1:8b", sentBody.RootElement.GetProperty("model").GetString());
+    }
 }

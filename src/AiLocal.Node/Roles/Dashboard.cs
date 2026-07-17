@@ -860,6 +860,15 @@ internal static class Dashboard
           color: var(--accent, #6ea8fe);
           font-weight: 600;
         }
+        .notice.warn {
+          background: rgba(207, 45, 86, .12);
+          border: 1px solid var(--bad, #cf2d56);
+          color: var(--bad, #cf2d56);
+          padding: 8px 10px;
+          border-radius: 8px;
+          margin-bottom: 8px;
+          font-size: 13px;
+        }
 
         /* Message-jump rail (Hermes' right-edge minimap): one tick per user
            turn. The whole rail is one generous hover zone - hovering
@@ -1803,6 +1812,7 @@ internal static class Dashboard
             <div class="chat-outline" id="sessionOutline" style="display:none"></div>
             <div class="composer" id="sessionComposer">
               <div class="notice" id="sessionNotice"></div>
+              <div class="notice warn" id="sessionAgentOffNotice" style="display:none">⚠ Agentläge är avstängt på den här datorn. Meddelanden besvaras som ren text – inget byggs eller skrivs till disk. Sätt "Behörighet" till minst Begränsad för att appen ska kunna skapa filer/spel.</div>
               <div class="composer-box">
                 <div class="attach-chips" id="sessionAttachChips"></div>
                 <textarea id="sessionPrompt" placeholder="Skriv ett meddelande till agenten i den här mappen"></textarea>
@@ -5584,6 +5594,11 @@ internal static class Dashboard
             el.value = value;
             el.classList.toggle('mode-danger', value === 'Full');
           });
+          // Warn up front when building is impossible: a session with agent
+          // access Off can only answer with text - it can never write files
+          // or scaffold a project, so "bygg ett spel" would just return code.
+          const off = $('sessionAgentOffNotice');
+          if (off) off.style.display = (value === 'Off') ? 'block' : 'none';
           syncToolMenus();
         }
         async function loadAgentAccess() {

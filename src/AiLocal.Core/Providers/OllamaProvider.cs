@@ -50,9 +50,15 @@ public sealed class OllamaProvider : IChatProvider
         // GeminiProvider. Ollama's own model catalog has nothing in common
         // with the Anthropic ids the dashboard can produce, so a hint from
         // there ("claude-sonnet-5") 404s instead of resolving to anything.
-        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+        // Guard against a misconfigured OllamaModel too: if someone sets it
+        // to an Anthropic/OpenAI id (e.g. "claude-haiku-4-5") it will 404 on
+        // Ollama just the same - fall back to the hardware-recommended tag
+        // instead of blindly 404ing.
+        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) && LooksLikeOllamaTag(_settings.OllamaModel)
+            ? _settings.OllamaModel
             : _recommendation.OllamaTag;
 
+        // (LooksLikeOllamaTag is a private static helper at the bottom of the class.)
         var payload = new Dictionary<string, object?>
         {
             ["model"] = model,
@@ -200,7 +206,10 @@ public sealed class OllamaProvider : IChatProvider
     {
         // See the matching note in CompleteAsync - ModelHint is never
         // honored here, only this Worker's own configured/recommended model.
-        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) ? _settings.OllamaModel
+        // Apply the same misconfiguration guard so a cloud id in OllamaModel
+        // doesn't 404 the streaming path either.
+        var model = !string.IsNullOrWhiteSpace(_settings.OllamaModel) && LooksLikeOllamaTag(_settings.OllamaModel)
+            ? _settings.OllamaModel
             : _recommendation.OllamaTag;
 
         var messages = new List<object>();
@@ -295,6 +304,22 @@ public sealed class OllamaProvider : IChatProvider
     }
 
     private string BaseUrl => _settings.OllamaEndpoint.TrimEnd('/');
+
+    // A real Ollama tag looks like "llama3.1:8b" or "qwen2.5-coder:7b"
+    // (name[:version] or namespace/name[:version]). Cloud ids
+    // ("claude-*", "gpt-*", "anthropic/...", "openai/...", "google/...")
+    // are NOT valid Ollama tags, so we refuse to use them and let the
+    // caller fall back to the hardware-recommended tag instead of 404ing.
+    private static bool LooksLikeOllamaTag(string name)
+    {
+        if (name.Contains('/')) return !name.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase)
+                                       && !name.StartsWith("openai/", StringComparison.OrdinalIgnoreCase)
+                                       && !name.StartsWith("google/", StringComparison.OrdinalIgnoreCase);
+        return name.StartsWith("claude-", StringComparison.OrdinalIgnoreCase)
+            ? false
+            : !name.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase)
+              && !name.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string Truncate(string s) => s.Length > 200 ? s[..200] : s;
 }

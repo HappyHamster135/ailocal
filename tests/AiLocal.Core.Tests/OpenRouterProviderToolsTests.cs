@@ -209,9 +209,11 @@ public class OpenRouterProviderToolsTests
     /// OpenRouter ids are prefixed ("anthropic/claude-sonnet-4.5"); a bare
     /// Anthropic ModelHint ("claude-sonnet-5") used to get sent as-is and
     /// 404 instead of resolving - breaking OpenRouter as a fallback the
-    /// moment Anthropic itself failed over to it.</summary>
+    /// moment Anthropic itself failed over to it. Now a bare Anthropic id is
+    /// translated into its prefixed form (anthropic/claude-sonnet-5) so it
+    /// resolves instead of 404ing.</summary>
     [Fact]
-    public async Task CompleteAsync_WithAnthropicModelHint_IgnoresItAndUsesOwnConfiguredModel()
+    public async Task CompleteAsync_WithAnthropicModelHint_TranslatesToPrefixedForm()
     {
         const string plainBody = """
             { "choices": [ { "message": { "role": "assistant", "content": "hi" } } ], "usage": {} }
@@ -227,8 +229,8 @@ public class OpenRouterProviderToolsTests
 
         Assert.True(result.IsSuccess);
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
-        // Provider forwards ProviderSettings.OpenRouterModel verbatim (default is
-        // now the "openrouter/auto" routing alias - no manual id required).
-        Assert.Equal("openrouter/auto", sentBody.RootElement.GetProperty("model").GetString());
+        // Bare Anthropic id is now translated to OpenRouter's prefixed form
+        // (anthropic/claude-sonnet-5) so it resolves instead of 404ing.
+        Assert.Equal("anthropic/claude-sonnet-5", sentBody.RootElement.GetProperty("model").GetString());
     }
 }

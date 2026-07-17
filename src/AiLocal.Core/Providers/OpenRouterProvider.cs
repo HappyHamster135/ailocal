@@ -41,12 +41,30 @@ public sealed class OpenRouterProvider : IChatProvider
         if (string.IsNullOrWhiteSpace(apiKey))
             return ProviderResponse.Fail(ProviderOutcome.AuthFailed, "OPENROUTER_API_KEY not set");
 
-        // ModelHint is never honored here - see the matching note in
-        // GeminiProvider/OllamaProvider. OpenRouter ids are prefixed
-        // ("anthropic/claude-sonnet-4.5"); every current source of ModelHint
-        // sends a bare Anthropic id ("claude-sonnet-5"), which OpenRouter
-        // would 404 on just the same.
+        // ModelHint is never honored here by default - OpenRouter's catalog
+        // uses prefixed ids ("anthropic/claude-sonnet-4.5"). But every current
+        // source of ModelHint sends a BARE Anthropic id ("claude-sonnet-5"),
+        // which OpenRouter 404s on. So when the configured OpenRouterModel is
+        // the "openrouter/auto" magic value, fall back to translating a bare
+        // Anthropic id into its prefixed form instead of 404ing.
         var model = _settings.OpenRouterModel;
+        if ((string.IsNullOrWhiteSpace(model) || model.Equals("openrouter/auto", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(request.ModelHint))
+        {
+            model = ToOpenRouterId(request.ModelHint);
+        }
+
+        // Translate a bare Anthropic id (claude-sonnet-5) into OpenRouter's
+        // prefixed form (anthropic/claude-sonnet-5) so it resolves instead of
+        // 404ing. Other providers' ids (openai/..., google/...) pass through.
+        static string ToOpenRouterId(string hint)
+        {
+            if (hint.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase))
+                return hint;
+            if (hint.StartsWith("claude-"))
+                return "anthropic/" + hint;
+            return hint;
+        }
 
         var payload = new Dictionary<string, object?>
         {
