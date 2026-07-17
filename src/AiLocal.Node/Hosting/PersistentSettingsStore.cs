@@ -76,7 +76,7 @@ internal sealed class StoredNodeSettings
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
     public string? OllamaModel { get; set; }
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
-    public string OpenRouterModel { get; set; } = "anthropic/claude-sonnet-4.5";
+    public string OpenRouterModel { get; set; } = "openrouter/auto";
     public string OpenAIModel { get; set; } = "gpt-4o";
     public int MaxTokens { get; set; } = 4096;
     public bool AutoPullOllamaModel { get; set; }

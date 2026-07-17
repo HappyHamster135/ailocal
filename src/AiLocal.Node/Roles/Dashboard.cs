@@ -1345,6 +1345,8 @@ internal static class Dashboard
           border-radius: 7px;
         }
         .key-state { color: var(--ok); font-size: 12px; min-height: 17px; }
+        .mini-btn { font-size: 12px; padding: 4px 10px; margin-top: 6px; align-self: flex-start; }
+        .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
         .token-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -2042,7 +2044,12 @@ internal static class Dashboard
               <div class="form-grid">
                 <label class="field"><span class="small">Claude-modell</span><input id="settingAnthropicModel"></label>
                 <label class="field"><span class="small">Gemini-modell</span><input id="settingGeminiModel"></label>
-                <label class="field"><span class="small">OpenRouter-modell</span><input id="settingOpenRouterModel" placeholder="t.ex. anthropic/claude-sonnet-4.5"></label>
+                <label class="field"><span class="small">OpenRouter-modell</span>
+                  <input id="settingOpenRouterModel" placeholder="openrouter/auto (automatisk)">
+                  <button type="button" class="mini-btn" id="fetchOpenRouterModels">Hämta modeller</button>
+                  <select id="openRouterModelList" class="model-select hidden"><option value="">— välj från listan —</option></select>
+                  <span class="key-state" id="openRouterModelsState"></span>
+                </label>
                 <label class="field"><span class="small">ChatGPT-modell (OpenAI)</span><input id="settingOpenAIModel" placeholder="t.ex. gpt-4o"></label>
                 <label class="field"><span class="small">Lokal Ollama-modell</span><input id="settingOllamaModel" placeholder="Använd rekommenderad"></label>
                 <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
@@ -4873,6 +4880,29 @@ internal static class Dashboard
           }
         }
 
+        async function fetchOpenRouterModels() {
+          const btn = $('fetchOpenRouterModels');
+          const list = $('openRouterModelList');
+          const state2 = $('openRouterModelsState');
+          btn.disabled = true;
+          state2.textContent = 'hämtar…';
+          state2.className = 'key-state';
+          try {
+            const data = await fetchJson('/api/openrouter/models');
+            const models = (data.models || []).filter(m => m.id);
+            list.innerHTML = '<option value="">— välj från listan —</option>' +
+              models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+            list.classList.remove('hidden');
+            state2.textContent = `${models.length} modeller`;
+            list.onchange = () => { if (list.value) $('settingOpenRouterModel').value = list.value; };
+          } catch (error) {
+            state2.textContent = error.message;
+            state2.className = 'key-state bad';
+          } finally {
+            btn.disabled = false;
+          }
+        }
+
         function showComposerNotice(message, isError = false) {
           const box = $('composerNotice');
           box.textContent = message;
@@ -5170,6 +5200,7 @@ internal static class Dashboard
         $('settingsBtn').onclick = () => openSettings(null);
         $('configureNode').onclick = () => openSettings(state.selectedNodeId);
         $('saveSettings').onclick = saveSettings;
+        $('fetchOpenRouterModels').onclick = fetchOpenRouterModels;
         $('toggleTokenVisibility').onclick = toggleTokenVisibility;
         $('copyClusterToken').onclick = copyClusterToken;
         $('regenerateClusterToken').onclick = regenerateClusterToken;

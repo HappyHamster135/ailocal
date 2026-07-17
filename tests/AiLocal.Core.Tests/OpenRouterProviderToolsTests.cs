@@ -227,6 +227,8 @@ public class OpenRouterProviderToolsTests
 
         Assert.True(result.IsSuccess);
         using var sentBody = JsonDocument.Parse(handler.CapturedRequestBody!);
-        Assert.Equal("anthropic/claude-sonnet-4.5", sentBody.RootElement.GetProperty("model").GetString());
+        // Provider forwards ProviderSettings.OpenRouterModel verbatim (default is
+        // now the "openrouter/auto" routing alias - no manual id required).
+        Assert.Equal("openrouter/auto", sentBody.RootElement.GetProperty("model").GetString());
     }
 }

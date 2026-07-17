@@ -212,6 +212,45 @@ public static class NodeWebHost
                 [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
             UpdateSettings(store, locator, req, registry, hf, lf));
 
+        // Lists the models the configured OpenRouter key can use, so the UI can
+        // offer a dropdown instead of making the operator paste a raw model id.
+        // OpenRouter's /api/v1/models requires the key; we proxy it here so the
+        // browser never sees the secret and the node reuses its stored credential.
+        app.MapGet("/api/openrouter/models", async (
+            PersistentSettingsStore store, IHttpClientFactory hf, CancellationToken ct) =>
+        {
+            var key = store.GetApiKey("openrouter");
+            if (string.IsNullOrWhiteSpace(key))
+                return Results.Problem("OpenRouter-nyckel saknas. Lägg till den under Modeller & providers och spara.", statusCode: 400);
+            var client = hf.CreateClient("openrouter");
+            using var req = new HttpRequestMessage(HttpMethod.Get, "https://openrouter.ai/api/v1/models");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+            try
+            {
+                using var resp = await client.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync(ct);
+                    return Results.Problem($"OpenRouter svarade {resp.StatusCode}: {body}", statusCode: (int)resp.StatusCode);
+                }
+                using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                var models = doc.RootElement.GetProperty("data").EnumerateArray()
+                    .Select(m => new
+                    {
+                        id = m.GetProperty("id").GetString(),
+                        name = (m.TryGetProperty("name", out var n) ? n.GetString() : null) ?? m.GetProperty("id").GetString()
+                    })
+                    .Where(m => m.id is not null)
+                    .OrderBy(m => m.id)
+                    .ToArray();
+                return Results.Ok(new { models });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Kunde inte nå OpenRouter: {ex.Message}", statusCode: 502);
+            }
+        });
+
         app.MapGet("/api/local", (NodeSettings s, RegistrationStatus registrationStatus, HostLocator hostLocator) =>
         {
             var (state, detail) = registrationStatus.Read();

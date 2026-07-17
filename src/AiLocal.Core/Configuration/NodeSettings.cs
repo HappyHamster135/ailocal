@@ -203,10 +203,10 @@ public sealed class ProviderSettings
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
 
     /// <summary>OpenRouter's catalog (and model ids) changes far more often
-    /// than the other providers', so this has no confident hardcoded
-    /// default beyond a broadly-available id - set explicitly for anything
-    /// specific.</summary>
-    public string OpenRouterModel { get; set; } = "anthropic/claude-sonnet-4.5";
+    /// than the other providers', so the default is the "auto" routing alias
+    /// which lets OpenRouter pick a sensible model - no manual id needed.
+    /// Set explicitly for a specific model (e.g. "anthropic/claude-sonnet-4.5").</summary>
+    public string OpenRouterModel { get; set; } = "openrouter/auto";
 
     public int MaxTokens { get; set; } = 4096;
 
