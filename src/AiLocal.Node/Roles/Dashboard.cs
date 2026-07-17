@@ -840,6 +840,27 @@ internal static class Dashboard
           animation: shimmerSweep 1.4s linear infinite;
           width: fit-content;
         }
+        /* Live assignment (agent-mode) bubble: prominent step-log + worker +
+           ticking elapsed timer, so "delegera till kluster" shows what the
+           agent is actually doing instead of a single "working" word. */
+        .assignment-steps {
+          margin-top: 6px;
+          padding: 8px 10px;
+          background: var(--code-bg, rgba(255,255,255,.04));
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          max-height: 280px;
+          overflow: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
+          line-height: 1.5;
+        }
+        .elapsed-timer {
+          font-variant-numeric: tabular-nums;
+          color: var(--accent, #6ea8fe);
+          font-weight: 600;
+        }
+
         /* Message-jump rail (Hermes' right-edge minimap): one tick per user
            turn. The whole rail is one generous hover zone - hovering
            ANYWHERE on it slides out a panel listing every sent message
@@ -1763,6 +1784,8 @@ internal static class Dashboard
                 <div class="small mono" id="sessionFolderPath"></div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
+                <span class="pill" id="sessionAgePill"></span>
+                <span class="pill" id="sessionCountPill"></span>
                 <span class="pill" id="sessionUsagePill"></span>
                 <button class="icon" id="sessionPinBtn" data-icon="pin" title="Nåla"></button>
                 <button class="icon" id="sessionDeleteBtn" data-icon="trash" title="Ta bort session"></button>
@@ -2427,6 +2450,31 @@ internal static class Dashboard
           return seconds < 3 ? 'nu' : seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
         };
 
+        // Per-message age label (e.g. "3m sedan"), shown in session history
+        // so the operator can see the cadence + how long ago each turn landed.
+        const msgAge = m => (m && m.createdAt) ? `<span class="small">${ago(m.createdAt)} sedan</span>` : '';
+
+        // Millisecond -> compact elapsed clock for LIVE run timers
+        // (e.g. "12s", "3m 04s", "1h 02m"). Distinct from `ago` (coarse, past).
+        const formatDuration = ms => {
+          const s = Math.max(0, Math.floor(ms / 1000));
+          if (s < 60) return `${s}s`;
+          const m = Math.floor(s / 60), r = s % 60;
+          if (m < 60) return `${m}m ${String(r).padStart(2, '0')}s`;
+          const h = Math.floor(m / 60);
+          return `${h}h ${String(m % 60).padStart(2, '0')}m`;
+        };
+
+        // Tick all live elapsed-timers in the DOM without a full re-render
+        // (keeps scroll position + avoids re-parsing the whole transcript).
+        function tickElapsedTimers() {
+          document.querySelectorAll('.elapsed-timer[data-started]').forEach(el => {
+            const start = Number(el.dataset.started);
+            if (start) el.textContent = formatDuration(Date.now() - start);
+          });
+        }
+        setInterval(tickElapsedTimers, 1000);
+
         async function fetchJson(url, options) {
           const opts = { ...(options || {}) };
           if (state.authToken) {
@@ -2870,6 +2918,20 @@ internal static class Dashboard
           const usage = s.totalUsage;
           const totalTokens = usage ? (usage.inputTokens || 0) + (usage.outputTokens || 0) : 0;
           $('sessionUsagePill').textContent = totalTokens ? `${totalTokens.toLocaleString('sv-SE')} tokens` : '';
+          // Session context polish: age since created + message count, next
+          // to the token pill. Age uses data-started so the 1s tick keeps it
+          // live without a full re-render.
+          const ageEl = $('sessionAgePill');
+          if (ageEl) {
+            if (s.createdAt) {
+              const start = new Date(s.createdAt).getTime();
+              ageEl.dataset.started = String(start);
+              ageEl.className = 'pill elapsed-timer';
+              ageEl.textContent = formatDuration(Date.now() - start) + ' sedan';
+            } else { ageEl.textContent = ''; }
+          }
+          const countEl = $('sessionCountPill');
+          if (countEl) countEl.textContent = `${(s.messages || []).length} meddelanden`;
           renderSessionMessages();
           wireGitBar();
           loadGitStatus();
@@ -2930,16 +2992,16 @@ internal static class Dashboard
           const ta = formatToolActivity(m);
           if (ta) return ta;
           if (m.role === 'user')
-            return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
+            return `<article class="message user"><div class="message-meta"><strong>Du</strong>${msgAge(m)}</div><div class="msg-text">${esc(m.content)}</div></article>`;
           if (m.role === 'tool')
             return `<article class="message assistant">
-              <div class="message-meta"><span class="pill">✓ ${esc(m.toolName ?? 'verktyg')}</span></div>
+              <div class="message-meta"><span class="pill">✓ ${esc(m.toolName ?? 'verktyg')}</span>${msgAge(m)}</div>
               <div class="mono small msg-text">${esc(trunc(m.content ?? '', 2000))}</div>
             </article>`;
           const toolLines = (m.toolCalls ?? []).map(tc => `> ${tc.name}(${trunc(tc.argumentsJson ?? '', 160)})`).join('\n');
           const body = [toolLines, m.content].filter(Boolean).join('\n');
           return `<article class="message assistant">
-            <div class="message-meta"><strong>AiLocal</strong></div>
+            <div class="message-meta"><strong>AiLocal</strong>${msgAge(m)}</div>
             <div class="msg-text">${body ? esc(body) : '<span class="small">...</span>'}</div>
             ${body ? msgActionsHtml : ''}
           </article>`;
@@ -4067,6 +4129,7 @@ internal static class Dashboard
           const previousScrollTop = box.scrollTop;
           box.innerHTML = allMessages.map(m => {
             if (m.isPlan) return renderPlanBubble(m);
+            if (m.isAssignment) return assignmentBubbleHtml(m);
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
             const live = inFlight && state.streamBuffer && state.streamBuffer.taskId === m.taskId;
             const content = live ? state.streamBuffer.text : m.content;
@@ -5081,6 +5144,52 @@ internal static class Dashboard
           return `${marker} ${step.Detail}`;
         }
 
+        // Renders an assignment (agent-mode) bubble with live context: a
+        // ticking elapsed timer, which Worker it landed on, how many steps
+        // have run, and the step-log kept separate from the final answer.
+        // Fixes the old "bara working" experience where the only visible
+        // signal was the static state word.
+        function assignmentBubbleHtml(m) {
+          const running = m.state === 'Running';
+          const timer = m.startedAt
+            ? `<span class="elapsed-timer" data-started="${m.startedAt}">${formatDuration(Date.now() - m.startedAt)}</span>`
+            : '';
+          const workerPill = m.workerName
+            ? `<span class="pill">⚙ ${esc(m.workerName)}</span>`
+            : (running ? `<span class="small">väljer worker…</span>` : '');
+          const stepCount = (m.steps || []).length;
+          const stepMeta = running && stepCount
+            ? `<span class="small">${stepCount} steg</span>`
+            : (stepCount ? `<span class="small">${stepCount} steg</span>` : '');
+          const statePill = m.state && m.state !== 'Running'
+            ? `<span class="${m.state === 'Completed' ? 'good' : 'bad'}">${esc(m.state === 'Completed' ? 'Klar' : m.state === 'Failed' ? 'Misslyckades' : m.state)}</span>`
+            : `<span class="small">${running ? 'arbetar…' : ''}</span>`;
+
+          const stepsHtml = stepCount
+            ? `<div class="assignment-steps mono small">${esc((m.steps || []).join('\n'))}</div>`
+            : (running ? `<div class="msg-text"><span class="thinking-shimmer">startar…</span></div>` : '');
+
+          const answer = (!running && m.content && m.content.trim())
+            ? `<div class="msg-text">${esc(m.content)}</div>`
+            : '';
+
+          return `
+          <article class="message assistant assignment">
+            <div class="message-meta">
+              <strong>AiLocal</strong>
+              <span class="pill">Assignment</span>
+              ${m.subtaskTitle ? `<span class="pill">${esc(m.subtaskTitle)}</span>` : ''}
+              ${workerPill}
+              ${timer}
+              ${stepMeta}
+              ${statePill}
+            </div>
+            ${stepsHtml}
+            ${answer}
+            ${!running && m.content ? msgActionsHtml : ''}
+          </article>`;
+        }
+
         // Assignment mode plans before it runs: the goal gets broken into a
         // reviewable list of subtasks (POST /api/goal-plan) instead of being
         // handed straight to one Worker as one big vague instruction. The
@@ -5173,20 +5282,15 @@ internal static class Dashboard
         // group's later steps can pin to the same Worker the first one landed
         // on (see HostRole's /api/assignment WorkerId handling).
         async function runPlanSubtask(subtask, assignmentText, workerId) {
-          const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title };
+          const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title, startedAt: Date.now(), steps: [] };
           state.assignmentMessages.push(stepMsg);
           renderMessages();
-
-          const lines = [];
-          const appendLine = line => {
-            lines.push(line);
-            stepMsg.content = lines.join('\n');
-            renderMessages();
-          };
 
           let workerIdUsed = workerId;
           let success = false;
           let summary = '';
+
+          const addStep = step => { stepMsg.steps.push(stepLine(step)); renderMessages(); };
 
           try {
             const headers = { 'content-type': 'application/json' };
@@ -5225,25 +5329,24 @@ internal static class Dashboard
                   stepMsg.workerName = payload.worker.name;
                   renderMessages();
                 } else if (payload.step) {
-                  appendLine(stepLine(payload.step));
+                  addStep(payload.step);
                 } else if (payload.final) {
                   success = !!payload.final.Success;
                   summary = payload.final.FinalAnswer || '';
                   stepMsg.state = success ? 'Completed' : 'Failed';
-                  // See the equivalent note this replaced: AgentLoop always
-                  // emits a step with this same text right before returning.
-                  if (!lines.length) {
-                    appendLine(summary || (success ? '(inget svar)' : '(misslyckades)'));
-                  } else {
-                    renderMessages();
-                  }
+                  // The final answer lives in content; the running step-log
+                  // stays in steps[]. If the run produced no steps at all
+                  // (a plain chat reply), surface the answer as the body.
+                  stepMsg.content = summary || (success ? '(inget svar)' : '(misslyckades)');
+                  renderMessages();
                 }
               }
             }
           } catch (error) {
             stepMsg.state = 'Failed';
-            appendLine(`✗ ${error.message}`);
+            stepMsg.content = `✗ ${error.message}`;
             summary = error.message;
+            renderMessages();
           }
 
           return { success, summary, workerId: workerIdUsed };

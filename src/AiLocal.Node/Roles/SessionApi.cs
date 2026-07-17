@@ -171,10 +171,19 @@ public static class SessionApi
                 // instead of the conversation accumulating broken turns.
                 if (result.Success)
                 {
+                    // Stamp a per-message timestamp on any turn the agent
+                    // didn't already tag, so the transcript can show how long
+                    // ago each message landed (and how long the session has
+                    // run). AgentLoop's messages are records, so project with
+                    // `with` rather than mutating shared history.
+                    var now = DateTimeOffset.UtcNow;
+                    var stamped = result.Messages
+                        .Select(m => m.CreatedAt is null ? m with { CreatedAt = now } : m)
+                        .ToList();
                     store.Update(id, s =>
                     {
-                        s.Messages = result.Messages.ToList();
-                        s.LastActiveAt = DateTimeOffset.UtcNow;
+                        s.Messages = stamped;
+                        s.LastActiveAt = now;
                         s.TotalUsage = new TokenUsage(
                             s.TotalUsage.InputTokens + result.TotalUsage.InputTokens,
                             s.TotalUsage.OutputTokens + result.TotalUsage.OutputTokens);
