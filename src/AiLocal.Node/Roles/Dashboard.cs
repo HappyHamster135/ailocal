@@ -2927,6 +2927,8 @@ internal static class Dashboard
           </div>`;
 
         function persistedSessionMessageHtml(m) {
+          const ta = formatToolActivity(m);
+          if (ta) return ta;
           if (m.role === 'user')
             return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
           if (m.role === 'tool')
@@ -2944,6 +2946,8 @@ internal static class Dashboard
         }
 
         function liveSessionBubbleHtml(m) {
+          const ta = formatToolActivity(m);
+          if (ta) return ta;
           if (m.role === 'user')
             return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
           // Innan första steget kommit: visa ett skimrande "Tänker..." så det
@@ -3035,6 +3039,51 @@ internal static class Dashboard
           } catch (error) {
             showSessionNotice(error.message, true);
           }
+        }
+
+        // Turn a raw tool-call (name + JSON args/parameters) into one
+        // readable line instead of dumping the JSON into the history.
+        function describeToolCall(name, argsJson) {
+          let n = (name || '').trim();
+          let a = null;
+          try { a = argsJson ? JSON.parse(argsJson) : null; } catch { a = null; }
+          if (a && typeof a === 'object' && a.name && a.parameters) { n = n || a.name; a = a.parameters; }
+          const arg = k => a && a[k] != null ? String(a[k]) : '';
+          const map = {
+            scaffold: () => `scaffold: ${arg('engine') || 'spel'} i ${arg('rootFolder') || 'mapp'}`,
+            write_file: () => `skriver fil: ${arg('path') || arg('file_path') || '?'}`,
+            create_file: () => `skapar fil: ${arg('path') || '?'}`,
+            read_file: () => `läser fil: ${arg('path') || '?'}`,
+            list_files: () => `listar: ${arg('path') || 'mapp'}`,
+            verify: () => `verifierar ändring`,
+            run_command: () => `kör kommando: ${arg('command') || arg('cmd') || '?'}`
+          };
+          const made = map[n];
+          if (made) return made();
+          const compact = a && typeof a === 'object' ? JSON.stringify(a).slice(0, 120) : '';
+          return compact ? `${n || 'verktyg'}: ${compact}` : (n || 'verktyg');
+        }
+
+        // Render any tool activity (tool role, assistant toolCalls, or an
+        // assistant message whose content is a raw tool-call JSON blob) as a
+        // single readable line. Returns HTML or null if not a tool activity.
+        function formatToolActivity(m) {
+          if (m.role === 'tool') {
+            return `<article class="message assistant"><div class="message-meta"><span class="pill">✓ ${esc(describeToolCall(m.toolName, m.content))}</span></div></article>`;
+          }
+          const calls = m.toolCalls;
+          if (calls && calls.length) {
+            const lines = calls.map(tc => `> ${esc(describeToolCall(tc.name, tc.argumentsJson))}`).join('\n');
+            return `<article class="message assistant"><div class="message-meta"><strong>AiLocal</strong></div><div class="msg-text mono small">${lines}</div></article>`;
+          }
+          if (m.content) {
+            const c = m.content.trim();
+            if (c.startsWith('{') && c.includes('"name"')) {
+              const txt = describeToolCall(null, c);
+              return `<article class="message assistant"><div class="message-meta"><strong>AiLocal</strong></div><div class="msg-text mono small">> ${esc(txt)}</div></article>`;
+            }
+          }
+          return null;
         }
 
         // --- File-write approval (preview before save) ---
