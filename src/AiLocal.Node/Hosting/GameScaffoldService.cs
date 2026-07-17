@@ -151,11 +151,21 @@ GameObject:
 ";
 
     static string GodotProject(bool is3D) =>
-        @"[application]
-
-config/name=""GodotGame""
-run/main_scene=""res://Main.tscn""
-" + (is3D ? "[rendering]\nrenderer/rendering_method=\"forward_plus\"\n" : "[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n");
+        "[application]\n\n" +
+            "config/name=\"GodotGame\"\n" +
+            "run/main_scene=\"res://Main.tscn\"\n" +
+            (is3D ? "[rendering]\nrenderer/rendering_method=\"forward_plus\"\n" : "[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n") +
+            // Export preset named "Windows Desktop" - matches the --export-release
+            // target used by WorkspaceService, so the Godot "Bygg spel" button
+            // actually produces a .exe instead of erroring "preset not found".
+            "\n[export]\n\n" +
+            "[export_profile]\n" +
+            "name=\"Windows Desktop\"\n" +
+            "platform=\"Windows Desktop\"\n" +
+            "export_path=\"build/GodotGame.exe\"\n" +
+            "include_filter=\"\"\n" +
+            "exclude_filter=\"\"\n" +
+            "patches=\"\"\n";
 
     static string GodotScene(bool is3D) =>
         @"[gd_scene load_steps=2 format=3 uid=""uid://b" + (is3D ? "3d" : "2d") + @"game""]

@@ -30,7 +30,7 @@ public sealed class WorkspaceService
                     "-runTests", "-testPlatform", "EditMode"], "test"),
                 "run" => new("Unity", ["-batchmode", "-quit", "-projectPath", root], "run"),
                 "game" => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
-                    "-buildWindowsPlayer", Path.Combine(root, "build", "GameTest.exe")], "game"),
+                    "-buildWindowsPlayer", Path.Combine(root, "build", Path.GetFileName(root.TrimEnd('/', '\\')) + ".exe")], "game"),
                 _ => new("Unity", ["-batchmode", "-quit", "-projectPath", root,
                     "-buildTarget", "Win64"], "build"),
             };
