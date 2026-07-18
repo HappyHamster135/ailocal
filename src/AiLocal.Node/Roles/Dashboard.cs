@@ -1754,13 +1754,14 @@ internal static class Dashboard
               <div class="panel-title">Skapa nytt spel</div>
             </div>
             <div class="content">
-              <p class="small">Agenten genererar ett komplett Unity/Godot-projekt från din prompt - sen bygger du det med "Bygg spel".</p>
-              <label class="field"><span>Motor</span>
-                <select id="newGameEngine">
-                  <option value="unity">Unity</option>
-                  <option value="godot">Godot</option>
-                </select>
-              </label>
+              <p class="small">Agenten genererar ett komplett spel från din prompt. <b>HTML5</b> = en färdig, spelbar 2D-plattformare (ingen installation, öppna index.html). Unity/Godot = projekt du bygger i motorn.</p>
+                <label class="field"><span>Motor</span>
+                  <select id="newGameEngine">
+                    <option value="html5">HTML5 (spelbar direkt, rekommenderas)</option>
+                    <option value="unity">Unity</option>
+                    <option value="godot">Godot</option>
+                  </select>
+                </label>
               <label class="field"><span>Mapp</span>
                 <input id="newGameRoot" placeholder="D:\\spel\\MittSpel" />
               </label>

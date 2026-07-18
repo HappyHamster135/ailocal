@@ -224,7 +224,7 @@ public static class SessionApi
 
         sb.Append("\n\nYOUR JOB: When the user asks you to CREATE something (a game, an app, a script, a document, a fix), actually PRODUCE it using your tools - write the files, scaffold the project, build it. Do NOT just describe how it could be done or write a text outline instead of the real artifact. If you cannot do it with the tools you have, say so plainly.");
 
-        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and - via the local API - scaffold a game project (/api/game/scaffold with engine 'unity'|'godot', a prompt and a root folder) and build it (/api/workspace/game with the project root). Prefer producing a runnable result over a description.");
+        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and - via the local API - scaffold a game project (/api/game/scaffold with engine 'html5'|'unity'|'godot', a prompt and a root folder) and build it (/api/workspace/game with the project root). For a playable game with zero setup, prefer engine 'html5' - it writes a complete, runnable 2D platformer (index.html) you can then extend. Prefer producing a runnable result over a description.");
 
         if (!string.IsNullOrWhiteSpace(projectInstructions))
         {
