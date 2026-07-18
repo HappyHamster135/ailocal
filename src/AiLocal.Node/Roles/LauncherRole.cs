@@ -53,11 +53,12 @@ public static class LauncherRole
         app.MapPost("/api/chat", () =>
             Results.BadRequest(new { error = "Start Host or Overseer first." }));
 
-        app.MapGet("/api/providers", (NodeSettings settings) =>
-            Results.Ok(ProviderOrderApi.Read(settings)));
-
-        app.MapPut("/api/providers", (ProviderOrderUpdate req, NodeSettings settings) =>
-            Results.Ok(ProviderOrderApi.Update(req, settings)));
+        // NOTE: /api/providers (GET+PUT) is intentionally NOT mapped here.
+        // NodeWebHost.MapSharedEndpoints already registers it for every role
+        // except Overseer (Launcher included), and its PUT persists via the
+        // settings store. Mapping it again here produced two endpoints on the
+        // same route -> AmbiguousMatchException on every GET/PUT /api/providers
+        // for a Launcher node. Rely on the shared registration.
     }
 
     private static async Task<string?> FetchClusterTokenAsync(
