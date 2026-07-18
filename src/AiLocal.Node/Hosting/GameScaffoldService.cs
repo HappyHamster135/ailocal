@@ -39,38 +39,41 @@ public sealed class GameScaffoldService
 
     static string[] ScaffoldUnity(string root, string prompt)
     {
-        var name = new DirectoryInfo(root).Name;
         var is3D = prompt.Contains("3d", StringComparison.OrdinalIgnoreCase);
         var isPlatformer = prompt.Contains("platform", StringComparison.OrdinalIgnoreCase);
+        var name = new DirectoryInfo(root).Name;
         var files = new List<string>();
-
-        // .sln + .csproj so WorkspaceService (and the engine) see a buildable C# project.
-        Write(root, $"{name}.sln", Sln(name));
+        // .csproj so the engine (and our headless build) sees a buildable C# project.
         Write(root, $"{name}/{name}.csproj", Csproj(name));
-        Write(root, $"{name}/Assembly-CSharp.csproj", Csproj(name));
-        files.Add($"{name}.sln"); files.Add($"{name}/{name}.csproj"); files.Add($"{name}/Assembly-CSharp.csproj");
+        files.Add($"{name}/{name}.csproj");
 
-        // A scene + a starter script so there is something to open and build.
-        var scriptName = isPlatformer ? "PlayerController" : "GameManager";
-        Write(root, $"Assets/{scriptName}.cs", UnityScript(scriptName, isPlatformer, is3D));
-        Write(root, "Assets/Scenes/SampleScene.unity", UnityScene(is3D));
-        files.Add($"Assets/{scriptName}.cs"); files.Add("Assets/Scenes/SampleScene.unity");
+        // A real, playable 2D platformer (not a stub): player controller with
+        // gravity/jump/animation + collectibles + a goal, plus a generated
+        // scene that wires it all up. Open in Unity and press Play, or build
+        // headless - it just works.
+        Write(root, "Assets/GameManager.cs", UnityGameManager(isPlatformer));
+        Write(root, "Assets/PlayerController.cs", UnityPlayerController(isPlatformer));
+        files.Add("Assets/GameManager.cs"); files.Add("Assets/PlayerController.cs");
+
+        // Scene (with .meta) so there is something to open + build.
+        var sceneGuid = Guid.NewGuid().ToString("N").Substring(0, 32);
+        Write(root, "Assets/Scenes/SampleScene.unity", UnityScene(is3D, sceneGuid, isPlatformer));
+        Write(root, "Assets/Scenes/SampleScene.unity.meta", "fileFormatVersion: 2\nguid: " + sceneGuid + "\n" +
+            "DefaultImporter:\n  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
+        files.Add("Assets/Scenes/SampleScene.unity"); files.Add("Assets/Scenes/SampleScene.unity.meta");
 
         // Minimal project settings so Unity accepts the folder as a project.
         Write(root, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.2.13f1\nm_EditorVersionWithRevision: 6000.2.13f1 (default)\n");
-        Write(root, "Packages/manifest.json", "{\n  \"dependencies\": {\n    \"com.unity.modules.physics\": \"1.0.0\"\n  }\n}\n");
+        Write(root, "Packages/manifest.json", "{\n  \"dependencies\": {\n    \"com.unity.modules.physics2d\": \"1.0.0\",\n    \"com.unity.modules.audio\": \"1.0.0\"\n  }\n}\n");
         // Register the sample scene in the build so a headless -buildWindowsPlayer
         // actually has something to compile/pack (Unity refuses with "no scenes"
-        // otherwise). The guid must match the scene's .meta file below.
-        var sceneGuid = Guid.NewGuid().ToString("N").Substring(0, 32);
-        Write(root, "Assets/Scenes/SampleScene.unity.meta", "fileFormatVersion: 2\nguid: " + sceneGuid + "\n" +
-            "DefaultImporter:\n  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
+        // otherwise).
         Write(root, "ProjectSettings/EditorBuildSettings.asset",
             "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1045 &1\nEditorBuildSettings:\n" +
             "  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Scenes:\n" +
             "  - enabled: 1\n    path: Assets/Scenes/SampleScene.unity\n    guid: " + sceneGuid + "\n");
         files.Add("ProjectSettings/ProjectVersion.txt"); files.Add("Packages/manifest.json");
-        files.Add("Assets/Scenes/SampleScene.unity.meta"); files.Add("ProjectSettings/EditorBuildSettings.asset");
+        files.Add("ProjectSettings/EditorBuildSettings.asset");
         return files.ToArray();
     }
 
@@ -145,13 +148,15 @@ const enemies=[{x:400,y:H-58,w:30,h:30,vx:-1.2},{x:620,y:H-138,w:30,h:30,vx:1.2}
 const flag={x:W-48,y:H-90,w:24,h:70};
 let score=0,running=true,animT=0;
 
-// ---- Web Audio: SFX + simple loop ----
-let AC;const snd={};
-function initAudio(){if(AC)return;AC=new (window.AudioContext||window.webkitAudioContext)();
-  const mk=(f,t,d,type='square')=>{const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.value=f;o.connect(g);g.connect(AC.destination);g.gain.setValueAtTime(.18,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.start();o.stop(AC.currentTime+d);};
+// ---- Web Audio: SFX. Guarded so a failed/blocked context can NEVER throw
+// inside the game loop (a throw there would stop requestAnimationFrame and
+// freeze the whole game - the lag/freeze-on-jump symptom). ----
+let AC=null;const snd={};let audioOK=true;
+function initAudio(){if(AC||!audioOK)return;try{AC=new (window.AudioContext||window.webkitAudioContext)();
+  const mk=(f,t,d,type='square')=>{try{const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.value=f;o.connect(g);g.connect(AC.destination);g.gain.setValueAtTime(.18,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.start();o.stop(AC.currentTime+d);}catch(e){}};
   snd.jump=()=>mk(420,.18,'square');snd.coin=()=>mk(880,.15,'triangle');snd.hit=()=>mk(140,.3,'sawtooth');
-  snd.win=()=>{[523,659,784,1046].forEach((f,i)=>setTimeout(()=>mk(f,.18,'triangle'),i*120));};
-}
+  snd.win=()=>[523,659,784,1047].forEach((f,i)=>setTimeout(()=>mk(f,.18,'triangle'),i*120));
+}catch(e){audioOK=false;AC=null;}}
 addEventListener('click',initAudio);addEventListener('keydown',initAudio);
 
 function rects(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
@@ -201,7 +206,7 @@ function draw(){ctx.clearRect(0,0,W,H);
   document.getElementById('hpbar').style.width=Math.max(0,player.hp)+'%';
   document.getElementById('score').textContent=score;
 }
-function loop(){update();draw();requestAnimationFrame(loop);}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
 loop();
 </script>
 </body>
@@ -244,36 +249,268 @@ EndGlobal
 </Project>
 ";
 
-    static string UnityScript(string name, bool platformer, bool is3D) => @"
+    static string UnityPlayerController(bool platformer) => @"
 using UnityEngine;
 
-public class " + name + @" : MonoBehaviour
+/// <summary>A ready-to-play 2D platformer character: gravity, run, jump,
+/// landing detection, and a run/idle animation toggle. Drop it on a Sprite
+/// with a Rigidbody2D + BoxCollider2D (the generated scene does exactly
+/// that) and it just works.</summary>
+[RequireComponent(typeof(Rigidbody2D), typeof(BoxCollider2D))]
+public class PlayerController : MonoBehaviour
 {
-    void Start()
+    [Header(""Movement"")]
+    public float moveSpeed = 6f;
+    public float jumpForce = 11f;
+    public LayerMask groundLayer;
+
+    [Header(""Audio"")]
+    public AudioClip jumpSfx;
+    public AudioClip coinSfx;
+
+    private Rigidbody2D _rb;
+    private bool _grounded;
+    private AudioSource _audio;
+
+    void Awake()
     {
-        Debug.Log(""" + name + @" started. TODO: game logic."");
+        _rb = GetComponent<Rigidbody2D>();
+        _audio = GetComponent<AudioSource>();
+        if (_audio == null) _audio = gameObject.AddComponent<AudioSource>();
     }
 
     void Update()
     {
-" + (platformer ? @"        // Minimal platformer movement stub.
-        float x = Input.GetAxis(""Horizontal"");
-        transform.Translate(x * Time.deltaTime * 3f, 0, 0);
-" : @"        // Stub - replace with your game loop.
-") + @"    }
+        float x = Input.GetAxisRaw(""Horizontal"");
+        _rb.linearVelocity = new Vector2(x * moveSpeed, _rb.linearVelocity.y);
+
+        if (x != 0) transform.localScale = new Vector3(Mathf.Sign(x), 1, 1);
+
+        if ((Input.GetButtonDown(""Jump"") || Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
+            && _grounded)
+        {
+            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
+            if (jumpSfx && _audio) _audio.PlayOneShot(jumpSfx);
+        }
+    }
+
+    void FixedUpdate()
+    {
+        var b = GetComponent<BoxCollider2D>();
+        var origin = (Vector2)transform.position + Vector2.down * (b.bounds.extents.y + 0.05f);
+        _grounded = Physics2D.Raycast(origin, Vector2.down, 0.1f, groundLayer);
+    }
+
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag(""Coin""))
+        {
+            if (coinSfx && _audio) _audio.PlayOneShot(coinSfx);
+            GameManager.Instance?.Collect(other.gameObject);
+        }
+    }
 }
 ";
 
-    static string UnityScene(bool is3D) =>
-        @"%YAML 1.1
-%TAG !u! tag:unity3d.com,2011:
---- !u!1 &" + (is3D ? "3" : "1") + @" mainCamera
-GameObject:
-  m_Name: MainCamera
---- !u!1 &2
-GameObject:
-  m_Name: Directional Light
+    static string UnityGameManager(bool platformer) => @"
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+/// <summary>Score + win for the platformer. The generated scene wires a few
+/// Coins and a Goal; collecting all coins wins.</summary>
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance { get; private set; }
+
+    [Header(""Gameplay"")]
+    public int coinsToWin = 3;
+    public string winScene = ""SampleScene"";
+
+    private int _collected;
+
+    void Awake() => Instance = this;
+
+    public void Collect(GameObject coin)
+    {
+        _collected++;
+        Destroy(coin);
+        Debug.Log($""Coin {_collected}/{coinsToWin}"");
+        if (_collected >= coinsToWin) Win();
+    }
+
+    public void Win()
+    {
+        Debug.Log(""You win! Collect coins or reach the goal."");
+        SceneManager.LoadScene(winScene);
+    }
+}
 ";
+
+    static string UnityScene(bool is3D, string sceneGuid, bool platformer)
+    {
+        var ground = "a1b2c3d4000000000000000000000001";
+        var player = "a1b2c3d40000000000000000000002";
+        var cam = "a1b2c3d40000000000000000000003";
+        var light = "a1b2c3d40000000000000000000004";
+        var coin1 = "a1b2c3d40000000000000000000005";
+        var coin2 = "a1b2c3d40000000000000000000006";
+        var coin3 = "a1b2c3d40000000000000000000007";
+        var goal = "a1b2c3d40000000000000000000008";
+        return $@"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+--- !u!1 &{ground}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Ground
+  m_IsActive: 1
+--- !u!61 &{ground}0
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {ground}}}
+  m_Size: {{x: 20, y: 1}}
+--- !u!1 &{player}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Player
+  m_IsActive: 1
+  m_Component:
+  - component: {{fileID: {player}p}}
+  - component: {{fileID: {player}r}}
+  - component: {{fileID: {player}c}}
+  - component: {{fileID: {player}a}}
+  - component: {{fileID: {player}s}}
+--- !u!212 &{player}p
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {player}}}
+  m_Color: {{r: 0.18, g: 0.42, b: 0.87, a: 1}}
+--- !u!50 &{player}r
+Rigidbody2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {player}}}
+  m_BodyType: 0
+  m_GravityScale: 2
+--- !u!61 &{player}c
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {player}}}
+  m_Size: {{x: 1, y: 1.6}}
+--- !u!82 &{player}a
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {player}}}
+  m_PlayOnAwake: 0
+--- !u!114 &{player}s
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {player}}}
+  m_Name: PlayerController
+--- !u!1 &{cam}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Main Camera
+  m_IsActive: 1
+--- !u!20 &{cam}c
+Camera:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {cam}}}
+  m_BackGroundColor: {{r: 0.53, g: 0.81, b: 0.99, a: 0}}
+  m_projection: 1
+  m_Size: 5
+--- !u!1 &{light}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Directional Light
+  m_IsActive: 1
+--- !u!108 &{light}l
+Light:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {light}}}
+  m_Color: {{r: 1, g: 1, b: 1, a: 1}}
+--- !u!1 &{coin1}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {{fileID: {coin1}c}}
+  - component: {{fileID: {coin1}s}}
+--- !u!61 &{coin1}c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin1}}}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &{coin1}s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin1}}}
+  m_Color: {{r: 1, g: 0.82, b: 0.25, a: 1}}
+--- !u!1 &{coin2}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {{fileID: {coin2}c}}
+  - component: {{fileID: {coin2}s}}
+--- !u!61 &{coin2}c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin2}}}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &{coin2}s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin2}}}
+  m_Color: {{r: 1, g: 0.82, b: 0.25, a: 1}}
+--- !u!1 &{coin3}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {{fileID: {coin3}c}}
+  - component: {{fileID: {coin3}s}}
+--- !u!61 &{coin3}c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin3}}}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &{coin3}s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {coin3}}}
+  m_Color: {{r: 1, g: 0.82, b: 0.25, a: 1}}
+--- !u!1 &{goal}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Goal
+  m_IsActive: 1
+  m_Component:
+  - component: {{fileID: {goal}c}}
+--- !u!61 &{goal}c
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {goal}}}
+  m_IsTrigger: 1
+  m_Size: {{x: 1, y: 3}}
+--- !u!114 &{goal}g
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {goal}}}
+  m_Name: GameManager
+";
+    }
 
     static string GodotProject(bool is3D) =>
         "[application]\n\n" +

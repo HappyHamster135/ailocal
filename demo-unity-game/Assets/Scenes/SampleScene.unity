@@ -1,0 +1,153 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+--- !u!1 &a1b2c3d4000000000000000000000001
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Ground
+  m_IsActive: 1
+--- !u!61 &a1b2c3d40000000000000000000000010
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d4000000000000000000000001}
+  m_Size: {x: 20, y: 1}
+--- !u!1 &a1b2c3d40000000000000000000002
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Player
+  m_IsActive: 1
+  m_Component:
+  - component: {fileID: a1b2c3d40000000000000000000002p}
+  - component: {fileID: a1b2c3d40000000000000000000002r}
+  - component: {fileID: a1b2c3d40000000000000000000002c}
+  - component: {fileID: a1b2c3d40000000000000000000002a}
+  - component: {fileID: a1b2c3d40000000000000000000002s}
+--- !u!212 &a1b2c3d40000000000000000000002p
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000002}
+  m_Color: {r: 0.18, g: 0.42, b: 0.87, a: 1}
+--- !u!50 &a1b2c3d40000000000000000000002r
+Rigidbody2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000002}
+  m_BodyType: 0
+  m_GravityScale: 2
+--- !u!61 &a1b2c3d40000000000000000000002c
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000002}
+  m_Size: {x: 1, y: 1.6}
+--- !u!82 &a1b2c3d40000000000000000000002a
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000002}
+  m_PlayOnAwake: 0
+--- !u!114 &a1b2c3d40000000000000000000002s
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000002}
+  m_Name: PlayerController
+--- !u!1 &a1b2c3d40000000000000000000003
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Main Camera
+  m_IsActive: 1
+--- !u!20 &a1b2c3d40000000000000000000003c
+Camera:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000003}
+  m_BackGroundColor: {r: 0.53, g: 0.81, b: 0.99, a: 0}
+  m_projection: 1
+  m_Size: 5
+--- !u!1 &a1b2c3d40000000000000000000004
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Directional Light
+  m_IsActive: 1
+--- !u!108 &a1b2c3d40000000000000000000004l
+Light:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000004}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+--- !u!1 &a1b2c3d40000000000000000000005
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {fileID: a1b2c3d40000000000000000000005c}
+  - component: {fileID: a1b2c3d40000000000000000000005s}
+--- !u!61 &a1b2c3d40000000000000000000005c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000005}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &a1b2c3d40000000000000000000005s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000005}
+  m_Color: {r: 1, g: 0.82, b: 0.25, a: 1}
+--- !u!1 &a1b2c3d40000000000000000000006
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {fileID: a1b2c3d40000000000000000000006c}
+  - component: {fileID: a1b2c3d40000000000000000000006s}
+--- !u!61 &a1b2c3d40000000000000000000006c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000006}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &a1b2c3d40000000000000000000006s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000006}
+  m_Color: {r: 1, g: 0.82, b: 0.25, a: 1}
+--- !u!1 &a1b2c3d40000000000000000000007
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Coin
+  m_IsActive: 1
+  m_TagString: Coin
+  m_Component:
+  - component: {fileID: a1b2c3d40000000000000000000007c}
+  - component: {fileID: a1b2c3d40000000000000000000007s}
+--- !u!61 &a1b2c3d40000000000000000000007c
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000007}
+  m_IsTrigger: 1
+  m_Radius: 0.4
+--- !u!212 &a1b2c3d40000000000000000000007s
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000007}
+  m_Color: {r: 1, g: 0.82, b: 0.25, a: 1}
+--- !u!1 &a1b2c3d40000000000000000000008
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Goal
+  m_IsActive: 1
+  m_Component:
+  - component: {fileID: a1b2c3d40000000000000000000008c}
+--- !u!61 &a1b2c3d40000000000000000000008c
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000008}
+  m_IsTrigger: 1
+  m_Size: {x: 1, y: 3}
+--- !u!114 &a1b2c3d40000000000000000000008g
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {fileID: a1b2c3d40000000000000000000008}
+  m_Name: GameManager

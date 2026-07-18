@@ -1,0 +1,35 @@
+ScriptsOnlyBuild:
+  usedScripts: {}
+  serializedClasses: {}
+  methodsToPreserve: []
+  sceneClasses:
+    Assets/Scenes/SampleScene.unity:
+    - Class: 21
+      Script: {instanceID: 0}
+    - Class: 28
+      Script: {instanceID: 0}
+    - Class: 48
+      Script: {instanceID: 0}
+    - Class: 104
+      Script: {instanceID: 0}
+    - Class: 157
+      Script: {instanceID: 0}
+    - Class: 196
+      Script: {instanceID: 0}
+  scriptHashData:
+  - hash:
+      serializedVersion: 2
+      Hash: ddb3f460590b1c2ccacdf5ead3499f2b
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: PlayerController
+  - hash:
+      serializedVersion: 2
+      Hash: 142054e7be31a82a15fed0da3a13ae48
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: GameManager
+  platform: 5
+  scenePathNames:
+  - Assets/Scenes/SampleScene.unity
+  playerPath: D:/Claude projekt/AI-Local/demo-unity-game/build/PlatformerGame.exe
