@@ -12,6 +12,7 @@ public sealed record SessionCreateRequest(string FolderPath, string? Title = nul
 public sealed record SessionUpdateRequest(string? Title = null, bool? Pinned = null);
 public sealed record SessionMessageRequest(string Message, string? ModelHint = null);
 public sealed record ChangeDecisionRequest(bool Approve, string? Reason = null);
+public sealed record AnswerInfoRequest(string? Answer = null);
 
 /// <summary>
 /// A session is local-only by design (see SessionStore) - every endpoint
@@ -101,7 +102,7 @@ public static class SessionApi
         app.MapPost("/api/sessions/{id}/run", async (
             string id, SessionMessageRequest req, HttpContext ctx,
             SessionStore store, SessionRunRegistry runs, PendingChangeRegistry pending,
-            FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
+            PendingInfoRegistry info, FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
         {
             var session = store.Get(id);
             if (session is null)
@@ -154,6 +155,29 @@ public static class SessionApi
                     return new FileChangeDecision(decision.Approve, decision.Reason);
                 }
 
+                // ask_user: the agent pauses and asks the operator real
+                // questions mid-run. We emit an "awaiting_info" SSE step so the
+                // dashboard can show the questions and an answer box, then block
+                // on PendingInfoRegistry until the operator replies (or the run
+                // is cancelled). The answer is fed back to the agent as the
+                // tool result.
+                async Task<string> AskUser(string requestJson, CancellationToken ct2)
+                {
+                    await ctx.Response.WriteAsync(
+                        $"data: {JsonSerializer.Serialize(new { step = new AgentStep("awaiting_info", requestJson) })}\n\n",
+                        linked.Token);
+                    await ctx.Response.Body.FlushAsync(linked.Token);
+                    var parsed = JsonDocument.Parse(requestJson);
+                    var questions = new List<InfoQuestion>();
+                    if (parsed.RootElement.TryGetProperty("questions", out var q) && q.ValueKind == JsonValueKind.Array)
+                        foreach (var item in q.EnumerateArray())
+                            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                                questions.Add(new InfoQuestion(item.GetString()!));
+                    var blocking = parsed.RootElement.TryGetProperty("blocking", out var b) && b.ValueKind == JsonValueKind.True;
+                    var answer = await info.RequestAsync(id, new PendingInfoRequest(id, questions) { Blocking = blocking }, ct2);
+                    return answer;
+                }
+
                 var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet,
                     gameScaffolder: (engine, prompt, root, scafCt) =>
                     {
@@ -164,7 +188,29 @@ public static class SessionApi
                     {
                         var r = new AppScaffoldService().Scaffold(tech, prompt, root);
                         return Task.FromResult((r.Success, r.Output));
-                    });
+                    },
+                    askUser: AskUser);
+
+                // Build a short plan first (GoalPlanner) so the operator sees
+                // what the agent intends before it starts writing files. The
+                // plan is shown as a "plan" SSE step; the agent then executes
+                // it. If planning fails (no model / unparseable), we silently
+                // skip it and let the agent work directly.
+                try
+                {
+                    var planner = new GoalPlanner(provider.CompleteAsync);
+                    var plan = await planner.PlanAsync(req.Message, maxParts: 8, ct: linked.Token);
+                    if (plan is { Count: > 0 })
+                    {
+                        var planLines = plan.Select((s, i) => $"{i + 1}. {s.Title} - {s.Description}").ToList();
+                        await ctx.Response.WriteAsync(
+                            $"data: {JsonSerializer.Serialize(new { step = new AgentStep("plan", string.Join("\n", planLines)) })}\n\n",
+                            linked.Token);
+                        await ctx.Response.Body.FlushAsync(linked.Token);
+                    }
+                }
+                catch { /* planning is best-effort; never block the build on it */ }
+
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
                 var result = await loop.RunAsync(req.Message, accessLevel, req.ModelHint, onStep: async step =>
@@ -198,6 +244,18 @@ public static class SessionApi
                             s.TotalUsage.InputTokens + result.TotalUsage.InputTokens,
                             s.TotalUsage.OutputTokens + result.TotalUsage.OutputTokens);
                     });
+    // GET a pending info request (the agent asked the operator a question).
+    app.MapGet("/api/sessions/{id}/pending-info", (string id, PendingInfoRegistry info) =>
+        info.Peek(id) is { } req
+            ? Results.Ok(new { questions = req.Questions.Select(q => q.Text), blocking = req.Blocking })
+            : Results.NotFound());
+
+    // POST the operator's answer to a pending info request, unblocking the run.
+    app.MapPost("/api/sessions/{id}/answer-info", (string id, AnswerInfoRequest req, PendingInfoRegistry info) =>
+        info.Resolve(id, req.Answer ?? "")
+            ? Results.Ok(new { resolved = true })
+            : Results.NotFound());
+
                 }
 
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { final = result })}\n\n", linked.Token);
@@ -208,6 +266,7 @@ public static class SessionApi
             {
                 runs.End(id);
                 pending.RejectAllForSession(id); // clear any stale pending change
+                info.RejectAllForSession(id);    // clear any stale pending info request
             }
         });
     }
@@ -232,9 +291,9 @@ public static class SessionApi
             ? " You have file and shell/command access on this computer; commands run in this folder by default."
             : " You can read, write, and list files within this folder only - you cannot run shell commands at this access level.");
 
-        sb.Append("\n\nYOUR JOB: When the user asks you to CREATE something (a game, an app, a script, a document, a fix), actually PRODUCE it using your tools - write the files, scaffold the project, build it. Do NOT just describe how it could be done or write a text outline instead of the real artifact. If you cannot do it with the tools you have, say so plainly.");
+        sb.Append("\n\nYOUR JOB: You run a small GAME/APP STUDIO. When the user asks you to build something (a game, an app, a tool, a fix), you PRODUCE it - scaffold the real project, write the files, and make it actually runnable, like a studio shipping a real product. Do NOT just describe how it could be done or paste a text outline instead of the artifact. You think like a lead developer: break the work into a plan, then execute it step by step, verifying as you go.\n\nWORKFLOW:\n1. PLAN: For a non-trivial build, first lay out a short plan (what you'll create, the tech you'll use, the milestones). The system shows this to the user before you start writing.\n2. BUILD: scaffold the project with scaffold_game / scaffold_app, then extend it with edit_file until it genuinely works (real gameplay/features, not a stub). Prefer a runnable result over a description. Always pick the technology you judge best fits the project.\n3. ASK ONLY WHEN STUCK: If something is genuinely impossible to guess (contradictory or missing requirements that change the build), use ask_user with 1-3 concrete questions and PAUSE for the answer. Do NOT ask for permission, and do NOT ask about things you can reasonably assume - make a sensible default and keep building. Most prompts need zero questions.\n4. VERIFY: At Full access, run verify (and build/run) to confirm it actually works before you declare done.");
 
-        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and scaffold_game (create a complete, buildable GAME project in ONE call - CHOOSE the engine yourself: 'html5' for a zero-install 2D platformer in the browser, 'unity'/'godot' for a heavier engine, or omit engine to let the tool pick the best fit) and scaffold_app (create a complete, runnable APP in ONE call - CHOOSE the tech yourself: 'python' or 'csharp', or omit tech to let the tool pick). When the user asks for a game, call scaffold_game FIRST to produce the real project, then extend it with edit_file. When they ask for an app/script/tool (not a game), call scaffold_app FIRST. Prefer producing a runnable result over a description. Always pick the technology you judge best fits the project.");
+        sb.Append("\n\nAVAILABLE TOOLS: scaffold_game (create a complete, buildable GAME project in ONE call - CHOOSE the engine: 'html5' for a zero-install 2D platformer in the browser, 'unity'/'godot' for a heavier engine, or omit engine to let the tool pick the best fit), scaffold_app (create a complete, runnable APP in ONE call - CHOOSE the tech: 'python' or 'csharp', or omit to let the tool pick), write_file/create_file, edit_file, read_file, list_files, glob, search, and (when wired) ask_user, verify, run_command, fetch_url, recall, remember. For a game, call scaffold_game FIRST to produce the real project, then extend it. For an app/script/tool, call scaffold_app FIRST. Make every build feel production-quality: handle the obvious edge cases, add a little polish (menus, feedback, game-over/win states for games).");
 
         if (!string.IsNullOrWhiteSpace(projectInstructions))
         {

@@ -63,6 +63,12 @@ public sealed class AgentToolExecutor
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
     // Optional app-scaffold delegate (Node layer wires this to AppScaffoldService).
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _appScaffolder;
+    // Optional "ask the user" delegate (Session layer wires this to
+    // PendingInfoRegistry). Null in Worker/assignment runs and Core tests - a
+    // Worker's autonomous assignment writes immediately and never blocks on a
+    // human, so the tool is simply not advertised there. Args: (questionsJson,
+    // ct) -> the operator's free-text answer.
+    private readonly Func<string, CancellationToken, Task<string>>? _askUser;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -74,7 +80,8 @@ public sealed class AgentToolExecutor
         ProjectMemory? memory = null,
         Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null,
-        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null)
+        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null,
+        Func<string, CancellationToken, Task<string>>? askUser = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -86,6 +93,7 @@ public sealed class AgentToolExecutor
         _provisioner = provisioner;
         _gameScaffolder = gameScaffolder;
         _appScaffolder = appScaffolder;
+        _askUser = askUser;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -95,9 +103,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -167,6 +175,17 @@ public sealed class AgentToolExecutor
         if (appScaffold)
             tools.Add(ScaffoldAppTool.Definition);
 
+        // ask_user: the agent can pause mid-run and ask the operator 1-3
+        // concrete questions when something is genuinely impossible to guess
+        // (e.g. a contradictory or under-specified requirement). Only wired in
+        // an interactive session (not on a Worker's autonomous assignment,
+        // which has no human to answer). The loop blocks on the answer before
+        // continuing - see SessionApi's PendingInfoRegistry wiring.
+        if (canAskUser)
+            tools.Add(new("ask_user",
+                "Ask the operator 1-3 concrete questions when you genuinely cannot proceed without the answer (ambiguous/contradictory requirements, a missing decision that changes the build). Do NOT use this to ask permission or for things you can reasonably assume - make a sensible default and continue. The run pauses until they reply.",
+                "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"1-3 concrete questions (no yes/no).\"},\"blocking\":{\"type\":\"boolean\",\"description\":\"True if you cannot continue at all without the answers (the prompt is too vague). Default false.\"}},\"required\":[\"questions\"]}"));
+
         return tools;
     }
 
@@ -198,6 +217,9 @@ public sealed class AgentToolExecutor
                 "scaffold_app" when _appScaffolder is not null
                     => await ScaffoldAppAsync(call, root, ct),
                 "scaffold_app" => Error(call, "scaffold_app is not available on this Worker (app scaffolder not wired)."),
+                "ask_user" when _askUser is not null
+                    => await AskUserAsync(call, root, ct),
+                "ask_user" => Error(call, "ask_user is not available on this Worker (no interactive operator to answer)."),
                 "recall" when _memory is not null => await RecallAsync(call, root, ct),
                 "remember" when _memory is not null => await RememberAsync(call, root, ct),
                 "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
@@ -662,7 +684,7 @@ public sealed class AgentToolExecutor
     private async Task<ToolResult> ScaffoldAppAsync(ToolCall call, JsonElement args, CancellationToken ct)
     {
         if (_appScaffolder is null)
-            return Error(call, "scaffold_app is not available on this Worker (scaffolder not wired).");
+            return Error(call, "scaffold_app is not available on this Worker (app scaffolder not wired).");
         // tech is OPTIONAL: 'auto'/omitted => the tool picks (python default,
         // csharp when the prompt asks for it). The agent is free to choose.
         var tech = args.TryGetProperty("tech", out var t) && t.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(t.GetString())
@@ -674,6 +696,41 @@ public sealed class AgentToolExecutor
         return success
             ? new ToolResult(call.Id, call.Name, output)
             : Error(call, output);
+    }
+
+    private async Task<ToolResult> AskUserAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_askUser is null)
+            return Error(call, "ask_user is not available on this Worker (no interactive operator to answer).");
+
+        var questions = new List<string>();
+        if (args.TryGetProperty("questions", out var q) && q.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in q.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                    questions.Add(item.GetString()!);
+        }
+        if (questions.Count == 0)
+            return Error(call, "ask_user requires a non-empty 'questions' array of 1-3 concrete strings.");
+        if (questions.Count > 3)
+            questions = questions.Take(3).ToList();
+
+        var blocking = args.TryGetProperty("blocking", out var b) && b.ValueKind == JsonValueKind.True;
+
+        // Serialize the request so the Session layer can render it as an
+        // "awaiting_info" SSE step, then block on the operator's answer.
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            questions,
+            blocking
+        });
+        var answer = await _askUser(requestJson, ct);
+
+        if (string.IsNullOrWhiteSpace(answer))
+            return Error(call, "The operator did not provide an answer (run may have been cancelled).");
+
+        return new ToolResult(call.Id, call.Name,
+            "Operator svarade:\n" + answer, IsError: false);
     }
 
     /// <summary>Crude, dependency-free readable-text extraction: good enough

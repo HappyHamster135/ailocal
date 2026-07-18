@@ -25,6 +25,7 @@ public static class NodeComposition
         services.AddSingleton<GameScaffoldService>();
         services.AddSingleton<DesktopControlService>();
         services.AddSingleton<PendingChangeRegistry>();
+        services.AddSingleton<PendingInfoRegistry>();
         services.AddTransient<ClusterTokenHandler>();
         services.AddHttpClient();
 

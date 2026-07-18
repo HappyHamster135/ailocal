@@ -145,15 +145,20 @@ public sealed class GameScaffoldService
   .bar>i{display:block;height:100%;background:#ff5b5b;transition:width .2s}
   #over{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.82);color:#fff;text-align:center}
   #over h1{font-size:42px;margin:0}#over button{margin-top:18px;padding:10px 28px;font-size:16px;cursor:pointer;background:#4caf50;color:#fff;border:0;border-radius:6px}
+  #start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(10,14,22,.92);color:#fff;text-align:center}
+  #start h1{font-size:46px;margin:0 0 6px;color:#fff}
+  #start p{margin:4px;opacity:.8}
+  #start button{margin-top:22px;padding:12px 36px;font-size:18px;cursor:pointer;background:#4caf50;color:#fff;border:0;border-radius:8px}
   #hint{position:absolute;bottom:10px;left:10px;color:#fff;text-shadow:1px 1px 0 #000;font-size:13px;pointer-events:none}
 </style>
 </head>
 <body>
 <div id=""wrap"">
   <canvas id=""game"" width=""800"" height=""480""></canvas>
-  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Päng <span id=""score"">0</span></div>
-  <div id=""hint"">Piltangenter / WASD rrelse &middot; Mellanslag / W / Upp = hoppa</div>
+  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Nivå <span id=""lvl"">1</span> &middot; Poäng <span id=""score"">0</span></div>
+  <div id=""hint"">Piltangenter / WASD rörelse &middot; Mellanslag / W / Upp = hoppa</div>
   <div id=""over""><h1 id=""title"">Game Over</h1><button onclick=""location.reload()"">Spela igen</button></div>
+  <div id=""start""><h1>2D Plattformspel</h1><p>Samla mynt, undvik fiender, nå flaggan för att vinna.</p><p>Piltangenter / WASD + Mellanslag för att hoppa.</p><button id=""startBtn"">Starta spelet</button></div>
 </div>
 <script>
 const cv=document.getElementById('game'),ctx=cv.getContext('2d');
@@ -166,7 +171,8 @@ const platforms=[{x:0,y:H-20,w:W,h:20},{x:160,y:H-110,w:120,h:18},{x:340,y:H-170
 const coins=[{x:200,y:H-140,r:9},{x:380,y:H-200,r:9},{x:580,y:H-150,r:9},{x:720,y:H-230,r:9}].map(c=>({...c,got:false}));
 const enemies=[{x:400,y:H-58,w:30,h:30,vx:-1.2},{x:620,y:H-138,w:30,h:30,vx:1.2}];
 const flag={x:W-48,y:H-90,w:24,h:70};
-let score=0,running=true,animT=0;
+let score=0,running=false,started=false,level=1,animT=0;
+document.getElementById('startBtn').onclick=()=>{document.getElementById('start').style.display='none';started=true;running=true;initAudio();};
 
 // ---- Web Audio: SFX. Guarded so a failed/blocked context can NEVER throw
 // inside the game loop (a throw there would stop requestAnimationFrame and
@@ -181,7 +187,7 @@ addEventListener('click',initAudio);addEventListener('keydown',initAudio);
 
 function rects(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 
-function update(){if(!running)return;
+function update(){if(!running||!started)return;
   const sp=3.4;
   if(keys['arrowleft']||keys['a']){player.vx=-sp;player.face=-1;}
   else if(keys['arrowright']||keys['d']){player.vx=sp;player.face=1;}
@@ -206,7 +212,17 @@ function update(){if(!running)return;
   animT+=16;if(animT>120){animT=0;player.frame^=1;}
 }
 function end(win){const o=document.getElementById('over');o.style.display='flex';
-  document.getElementById('title').textContent=win?'Du vann! ':'Game Over';snd.win&&snd.win();}
+  document.getElementById('title').textContent=win?('Du vann nivå '+level+'! '):'Game Over';
+  const btn=o.querySelector('button');
+  if(win){btn.textContent='Nästa nivå';btn.onclick=()=>nextLevel();}
+  else{btn.textContent='Spela igen';btn.onclick=()=>location.reload();}
+  snd.win&&snd.win();}
+function nextLevel(){level++;document.getElementById('lvl').textContent=level;
+  // reset positions but keep score; slightly harder each level
+  player.x=40;player.y=H-60;player.vx=0;player.vy=0;player.hp=100;
+  for(const c of coins)c.got=false;
+  for(const e of enemies)e.vx*=(1+level*0.15);
+  const o=document.getElementById('over');o.style.display='none';running=true;}
 function draw(){ctx.clearRect(0,0,W,H);
   for(const p of platforms){ctx.fillStyle='#5a3d2b';ctx.fillRect(p.x,p.y,p.w,p.h);ctx.fillStyle='#3fa34d';ctx.fillRect(p.x,p.y,p.w,6);}
   for(const c of coins)if(!c.got){ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,7);ctx.fill();ctx.strokeStyle='#b8860b';ctx.stroke();}

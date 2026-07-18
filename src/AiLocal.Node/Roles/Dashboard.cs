@@ -1045,6 +1045,23 @@ internal static class Dashboard
           gap: 8px;
           flex-wrap: wrap;
         }
+        .info-box {
+          background: rgba(88,166,255,.12);
+          border: 1px solid rgba(88,166,255,.4);
+          border-radius: 8px;
+          padding: 10px 12px;
+          margin-bottom: 8px;
+        }
+        .info-box.hidden { display: none; }
+        .info-box-head { font-weight: 600; margin-bottom: 6px; color: #58a6ff; }
+        .info-questions { margin: 0 0 8px 18px; padding: 0; }
+        .info-questions li { margin-bottom: 4px; }
+        .info-answer-row { display: flex; gap: 8px; margin-top: 6px; }
+        .info-answer-row input {
+          flex: 1; min-height: 30px; padding: 0 10px;
+          border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
+          background: rgba(0,0,0,.25); color: inherit; font-size: 13px;
+        }
         .composer-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
         .composer-tools select {
           min-height: 28px;
@@ -1816,7 +1833,16 @@ internal static class Dashboard
             <div class="messages" id="sessionMessages"></div>
             <div class="chat-outline" id="sessionOutline" style="display:none"></div>
             <div class="composer" id="sessionComposer">
-              <div class="notice" id="sessionNotice"></div>
+            <div class="notice" id="sessionNotice"></div>
+            <div class="info-box hidden" id="sessionInfoBox">
+              <div class="info-box-head">Agenten behöver info för att fortsätta</div>
+              <ul class="info-questions" id="sessionInfoQuestions"></ul>
+              <span class="small" id="sessionInfoNote"></span>
+              <div class="info-answer-row">
+                <input id="sessionInfoAnswer" placeholder="Skriv ditt svar här...">
+                <button class="primary" id="sessionInfoSend">Skicka svar</button>
+              </div>
+            </div>
               <div class="notice warn" id="sessionAgentOffNotice" style="display:none">⚠ Agentläge är avstängt på den här datorn. Meddelanden besvaras som ren text – inget byggs eller skrivs till disk. Sätt "Behörighet" till minst Begränsad för att appen ska kunna skapa filer/spel.</div>
               <div class="composer-box">
                 <div class="attach-chips" id="sessionAttachChips"></div>
@@ -3212,6 +3238,55 @@ internal static class Dashboard
           }
         }
 
+        // Called from the run-loop when a step of kind "awaiting_info" arrives -
+        // the agent paused to ask the operator real questions. We surface them
+        // and block on an answer (POST /api/sessions/{id}/answer-info) before
+        // the run can continue.
+        async function handleInfoStep(detailJson, sessionId) {
+          let questions = [];
+          let blocking = false;
+          try {
+            const d = JSON.parse(detailJson);
+            questions = Array.isArray(d.questions) ? d.questions : [];
+            blocking = !!d.blocking;
+          } catch { /* malformed request - show nothing extra */ }
+
+          const box = $('sessionInfoBox');
+          if (!box) return;
+          box.style.display = 'block';
+          const list = $('sessionInfoQuestions');
+          list.innerHTML = '';
+          questions.forEach((q, i) => {
+            const li = document.createElement('li');
+            li.textContent = (i + 1) + '. ' + q;
+            list.appendChild(li);
+          });
+          if (blocking) {
+            const note = $('sessionInfoNote');
+            if (note) note.textContent = 'Agenten kan inte fortsätta utan dina svar.';
+          }
+          const answerEl = $('sessionInfoAnswer');
+          if (answerEl) answerEl.focus();
+          const sendBtn = $('sessionInfoSend');
+          if (sendBtn) {
+            sendBtn.onclick = async () => {
+              const answer = (answerEl?.value || '').trim();
+              if (!answer) { showSessionNotice('Skriv ett svar först.', true); return; }
+              try {
+                await fetchJson(`/api/sessions/${sessionId}/answer-info`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ answer })
+                });
+                box.style.display = 'none';
+                if (answerEl) answerEl.value = '';
+              } catch (e) {
+                showSessionNotice('Kunde inte skicka svaret: ' + (e.message || e), true);
+              }
+            };
+          }
+        }
+
         function showSessionNotice(message, isError = false) {
           const box = $('sessionNotice');
           box.textContent = message;
@@ -3274,6 +3349,7 @@ internal static class Dashboard
                 const payload = JSON.parse(dataLine.slice(5).trim());
                 if (payload.step) {
                   if (payload.step.Kind === 'awaiting_approval') handleApprovalStep(payload.step.Detail);
+                  if (payload.step.Kind === 'awaiting_info') await handleInfoStep(payload.step.Detail, id);
                   appendLine(stepLine(payload.step));
                 } else if (payload.final) {
                   success = !!payload.final.Success;
@@ -5151,6 +5227,8 @@ internal static class Dashboard
             tool_call: '>',
             tool_result: '✓',
             tool_error: '!',
+            plan: '▸',
+            awaiting_info: '?',
             done: '✓',
             error: '✗',
             cancelled: '×'
