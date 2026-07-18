@@ -1,20 +1,20 @@
-# .NET
-bin/
-obj/
-*.user
-artifacts/
+# Demo / build output artifacts (not source)
+demo-game/
+demo-unity-game/
 publish/
+
+# Unity generated
 dist/
+**/Library/
+**/Temp/
+**/Logs/
+**/UserSettings/
+**/Packages/packages-lock.json
 
-# Rider / VS
-.vs/
-.idea/
+# .NET
+**/bin/
+**/obj/
 
-# Local secrets & env
-.env
-*.env.local
-appsettings.*.local.json
-
-# OS
-Thumbs.db
+# OS / editor
 .DS_Store
+*.user
