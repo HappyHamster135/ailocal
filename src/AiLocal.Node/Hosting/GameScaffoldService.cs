@@ -113,29 +113,73 @@ public sealed class GameScaffoldService
         // A single, self-contained, immediately-playable 2D platformer.
         // No build step, no engine install - open index.html in any browser.
         // Includes gravity/jump, platforms, collectibles (score), enemies
-        // (damage), a HUD, sprite-frame animation and Web Audio sound so it
-        // satisfies "ljud, animationer" out of the box. The agent (or you)
-        // can then extend index.html instead of starting from nothing.
+        // (damage), a HUD, 3 levels with real progression, sprite-frame
+        // animation and Web Audio sound so it satisfies "ljud, animationer"
+        // out of the box. The agent (or you) can then extend index.html
+        // instead of starting from nothing.
         Write(root, "index.html", Html5Game());
+        Write(root, "DESIGN.md", Html5DesignDoc(prompt));
         Write(root, "README.md",
             "# 2D Platformer (HTML5)\n\n" +
             "Spela: öppna `index.html` i en webbläsare.\n\n" +
             "Styrning: piltangenter / WASD för rörelse, mellanslag / W / upp för att hoppa.\n\n" +
-            "Samla mynt för poäng, undvik fiender. Nå flaggan längst till höger för att vinna.\n");
-        return new[] { "index.html", "README.md" };
+            "Samla mynt för poäng, undvik fiender. Nå flaggan längst till höger för att vinna nivån. " +
+            "Klara alla 3 nivåer för att vinna spelet.\n\n" +
+            "Spelets design: se `DESIGN.md`.\n");
+        return new[] { "index.html", "DESIGN.md", "README.md" };
+    }
+
+    /// <summary>The agent's "plan" for the game, written as a real artefact
+    /// (DESIGN.md) so the build is auditable and the user can see the design
+    /// intent before/while the game is extended.</summary>
+    static string Html5DesignDoc(string prompt)
+    {
+        var p = (prompt ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(p)) p = "ett 2d plattformspel";
+        return
+"# Speldesign: 2D Plattformspel (HTML5)\n\n" +
+"## Koncept\n" +
+"Byggt utifrån prompten: **" + p + "**\n\n" +
+"Ett klassiskt sidoscrollande plattformspel i webbläsaren - ingen installation, inget bygge. " +
+"Målet är att ta sig genom 3 nivåer, samla mynt och nå flaggan.\n\n" +
+"## Målgrupp & känsla\n" +
+"- Casual, snabbt att förstå, svårare för varje nivå.\n" +
+"- Ren, färgglad pixel-stil; webbläsarspelet ska kännas som ett riktigt litet spel.\n\n" +
+"## Spelmekanik\n" +
+"- **Rörelse:** piltangenter / WASD. **Hoppa:** mellanslag / W / upp (endast från marken).\n" +
+"- **Gravitation & kollision:** enklare AABB-fysik mot plattformar; spelaren fastnar inte.\n" +
+"- **Mynt:** +10 poäng var, ljud vid uppplock. Försvinner när de tas.\n" +
+"- **Fiender:** rör sig fram och tillbaka på sin plattform; beröring = -20 HP + knockback.\n" +
+"- **HP:** 100. Vid 0 → Game Over. Vid fall utanför skärmen → Game Over.\n" +
+"- **Flagga:** nå den för att klara nivån (+100 poäng).\n\n" +
+"## Nivåer (progression är riktig, inte bara snabbare)\n" +
+"1. **Intro** - få plattformar, 2 fiender. Lär ut rörelse & hopp.\n" +
+"2. **Vertikalitet** - fler/högre plattformar, 3 fiender, mer luft.\n" +
+"3. **Gauntlet** - trånga plattformar, 4 fiender, hög tempo. Avslutande nivå.\n" +
+"Klarrar alla 3 → \"Du vann spelet!\".\n\n" +
+"## Visuellt & ljud\n" +
+"- Canvas-rendering, 2-frame sprite-bob för löpning (ingen extern asset).\n" +
+"- Web Audio-SFX: hopp, mynt, träff, vinst. Ljud initieras först vid första input (autoplay-regler).\n" +
+"- HUD: HP-bar, nivå och poäng.\n\n" +
+"## Tekniska antaganden\n" +
+"- Ett enda `index.html` (HTML+CSS+JS). Inget externt beroende, inget bygge.\n" +
+"- Agenten (eller användaren) bygger vidare genom att redigera `index.html` - t.ex. fler nivåer " +
+"(lägg till i `levels`-arrayen), nya fiendetyper, power-ups eller en timer.\n";
     }
 
     static string Html5Game()
     {
-        // Keep the body readable as a C# interpolated string; the actual game
-        // is plain HTML/JS/CSS. Sprite animation uses a simple 2-frame
-        // bob so it reads as "animated" without external assets.
+        // Single, self-contained, immediately-playable 2D platformer.
+        // Rendered as a C# verbatim string (quotes doubled) so the
+        // embedded HTML/JS keeps natural newlines. Real gravity/jump,
+        // collectibles, enemies, HUD, 3 levels with genuine layout
+        // progression, sprite-frame animation and Web Audio SFX.
         return @"<!DOCTYPE html>
 <html lang=""sv"">
 <head>
 <meta charset=""UTF-8"">
 <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-<title>2D Platformer</title>
+<title>2D Plattformspel</title>
 <style>
   html,body{margin:0;height:100%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;overflow:hidden}
   #wrap{position:relative}
@@ -146,7 +190,7 @@ public sealed class GameScaffoldService
   #over{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.82);color:#fff;text-align:center}
   #over h1{font-size:42px;margin:0}#over button{margin-top:18px;padding:10px 28px;font-size:16px;cursor:pointer;background:#4caf50;color:#fff;border:0;border-radius:6px}
   #start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(10,14,22,.92);color:#fff;text-align:center}
-  #start h1{font-size:46px;margin:0 0 6px;color:#fff}
+  #start h1{font-size:46px;margin:0 0 6px}
   #start p{margin:4px;opacity:.8}
   #start button{margin-top:22px;padding:12px 36px;font-size:18px;cursor:pointer;background:#4caf50;color:#fff;border:0;border-radius:8px}
   #hint{position:absolute;bottom:10px;left:10px;color:#fff;text-shadow:1px 1px 0 #000;font-size:13px;pointer-events:none}
@@ -155,10 +199,10 @@ public sealed class GameScaffoldService
 <body>
 <div id=""wrap"">
   <canvas id=""game"" width=""800"" height=""480""></canvas>
-  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Nivå <span id=""lvl"">1</span> &middot; Poäng <span id=""score"">0</span></div>
-  <div id=""hint"">Piltangenter / WASD rörelse &middot; Mellanslag / W / Upp = hoppa</div>
+  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Niva <span id=""lvl"">1</span> &middot; Poang <span id=""score"">0</span></div>
+  <div id=""hint"">Piltangenter / WASD rorelse &middot; Mellanslag / W / Upp = hoppa</div>
   <div id=""over""><h1 id=""title"">Game Over</h1><button onclick=""location.reload()"">Spela igen</button></div>
-  <div id=""start""><h1>2D Plattformspel</h1><p>Samla mynt, undvik fiender, nå flaggan för att vinna.</p><p>Piltangenter / WASD + Mellanslag för att hoppa.</p><button id=""startBtn"">Starta spelet</button></div>
+  <div id=""start""><h1>2D Plattformspel</h1><p>Samla mynt, undvik fiender, na flaggan for att vinna.</p><p>Piltangenter / WASD + Mellanslag for att hoppa.</p><button id=""startBtn"">Starta spelet</button></div>
 </div>
 <script>
 const cv=document.getElementById('game'),ctx=cv.getContext('2d');
@@ -167,19 +211,37 @@ const player={x:40,y:H-60,w:28,h:40,vx:0,vy:0,on:false,hp:100,face:1,frame:0,fps
 const keys={};
 addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if([' ','arrowup','w'].includes(e.key.toLowerCase()))e.preventDefault();});
 addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-const platforms=[{x:0,y:H-20,w:W,h:20},{x:160,y:H-110,w:120,h:18},{x:340,y:H-170,w:120,h:18},{x:540,y:H-120,w:120,h:18},{x:680,y:H-200,w:120,h:18}];
-const coins=[{x:200,y:H-140,r:9},{x:380,y:H-200,r:9},{x:580,y:H-150,r:9},{x:720,y:H-230,r:9}].map(c=>({...c,got:false}));
-const enemies=[{x:400,y:H-58,w:30,h:30,vx:-1.2},{x:620,y:H-138,w:30,h:30,vx:1.2}];
-const flag={x:W-48,y:H-90,w:24,h:70};
-let score=0,running=false,started=false,level=1,animT=0;
-document.getElementById('startBtn').onclick=()=>{document.getElementById('start').style.display='none';started=true;running=true;initAudio();};
 
-// ---- Web Audio: SFX. Guarded so a failed/blocked context can NEVER throw
-// inside the game loop (a throw there would stop requestAnimationFrame and
-// freeze the whole game - the lag/freeze-on-jump symptom). ----
+// 3 hand-authored levels: progression is real (new layouts), not just faster.
+const levels=[
+  { platforms:[{x:0,y:H-20,w:W,h:20},{x:160,y:H-110,w:120,h:18},{x:340,y:H-170,w:120,h:18},{x:540,y:H-120,w:120,h:18},{x:680,y:H-200,w:120,h:18}],
+    coins:[{x:200,y:H-140,r:9},{x:380,y:H-200,r:9},{x:580,y:H-150,r:9},{x:720,y:H-230,r:9}],
+    enemies:[{x:400,y:H-58,w:30,h:30,vx:-1.2},{x:620,y:H-138,w:30,h:30,vx:1.2}],
+    flag:{x:W-48,y:H-90,w:24,h:70} },
+  { platforms:[{x:0,y:H-20,w:W,h:20},{x:120,y:H-90,w:90,h:16},{x:260,y:H-150,w:90,h:16},{x:400,y:H-100,w:90,h:16},{x:540,y:H-180,w:90,h:16},{x:680,y:H-240,w:120,h:16}],
+    coins:[{x:160,y:H-120,r:9},{x:300,y:H-180,r:9},{x:440,y:H-130,r:9},{x:580,y:H-210,r:9},{x:730,y:H-270,r:9}],
+    enemies:[{x:300,y:H-58,w:30,h:30,vx:1.4},{x:460,y:H-128,w:30,h:30,vx:-1.4},{x:640,y:H-188,w:30,h:30,vx:1.6}],
+    flag:{x:W-48,y:H-130,w:24,h:70} },
+  { platforms:[{x:0,y:H-20,w:W,h:20},{x:100,y:H-110,w:70,h:14},{x:240,y:H-160,w:70,h:14},{x:380,y:H-120,w:70,h:14},{x:520,y:H-200,w:70,h:14},{x:660,y:H-150,w:70,h:14},{x:740,y:H-250,w:60,h:14}],
+    coins:[{x:130,y:H-140,r:9},{x:270,y:H-190,r:9},{x:410,y:H-150,r:9},{x:550,y:H-230,r:9},{x:690,y:H-180,r:9},{x:765,y:H-280,r:9}],
+    enemies:[{x:200,y:H-58,w:30,h:30,vx:1.8},{x:360,y:H-58,w:30,h:30,vx:-1.8},{x:520,y:H-138,w:30,h:30,vx:2},{x:700,y:H-88,w:30,h:30,vx:-2.2}],
+    flag:{x:W-48,y:H-90,w:24,h:70} }
+];
+const FINAL_LEVEL=levels.length;
+let platforms,coins,enemies,flag;
+function loadLevel(n){const L=levels[Math.min(n,FINAL_LEVEL)-1];
+  platforms=L.platforms.map(p=>({...p}));
+  coins=L.coins.map(c=>({...c,got:false}));
+  enemies=L.enemies.map(e=>({...e}));
+  flag={...L.flag};}
+
+let score=0,running=false,started=false,level=1,animT=0;
+document.getElementById('startBtn').onclick=()=>{document.getElementById('start').style.display='none';loadLevel(level);started=true;running=true;initAudio();};
+
+// Web Audio SFX, guarded so a failed/blocked context can never throw in the loop.
 let AC=null;const snd={};let audioOK=true;
 function initAudio(){if(AC||!audioOK)return;try{AC=new (window.AudioContext||window.webkitAudioContext)();
-  const mk=(f,t,d,type='square')=>{try{const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.value=f;o.connect(g);g.connect(AC.destination);g.gain.setValueAtTime(.18,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.start();o.stop(AC.currentTime+d);}catch(e){}};
+  const mk=(f,d,type)=>{try{const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.value=f;o.connect(g);g.connect(AC.destination);g.gain.setValueAtTime(.18,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.start();o.stop(AC.currentTime+d);}catch(e){}};
   snd.jump=()=>mk(420,.18,'square');snd.coin=()=>mk(880,.15,'triangle');snd.hit=()=>mk(140,.3,'sawtooth');
   snd.win=()=>[523,659,784,1047].forEach((f,i)=>setTimeout(()=>mk(f,.18,'triangle'),i*120));
 }catch(e){audioOK=false;AC=null;}}
@@ -212,22 +274,18 @@ function update(){if(!running||!started)return;
   animT+=16;if(animT>120){animT=0;player.frame^=1;}
 }
 function end(win){const o=document.getElementById('over');o.style.display='flex';
-  document.getElementById('title').textContent=win?('Du vann nivå '+level+'! '):'Game Over';
+  document.getElementById('title').textContent=win?(level>=FINAL_LEVEL?'Du vann spelet! ':'Du vann niva '+level+'! '):'Game Over';
   const btn=o.querySelector('button');
-  if(win){btn.textContent='Nästa nivå';btn.onclick=()=>nextLevel();}
+  if(win&&level<FINAL_LEVEL){btn.textContent='Nasta niva';btn.onclick=()=>nextLevel();}
   else{btn.textContent='Spela igen';btn.onclick=()=>location.reload();}
   snd.win&&snd.win();}
-function nextLevel(){level++;document.getElementById('lvl').textContent=level;
-  // reset positions but keep score; slightly harder each level
+function nextLevel(){level++;document.getElementById('lvl').textContent=level;loadLevel(level);
   player.x=40;player.y=H-60;player.vx=0;player.vy=0;player.hp=100;
-  for(const c of coins)c.got=false;
-  for(const e of enemies)e.vx*=(1+level*0.15);
   const o=document.getElementById('over');o.style.display='none';running=true;}
 function draw(){ctx.clearRect(0,0,W,H);
   for(const p of platforms){ctx.fillStyle='#5a3d2b';ctx.fillRect(p.x,p.y,p.w,p.h);ctx.fillStyle='#3fa34d';ctx.fillRect(p.x,p.y,p.w,6);}
   for(const c of coins)if(!c.got){ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,7);ctx.fill();ctx.strokeStyle='#b8860b';ctx.stroke();}
   for(const e of enemies){ctx.fillStyle='#c0392b';ctx.fillRect(e.x,e.y,e.w,e.h);ctx.fillStyle='#fff';ctx.fillRect(e.x+6,e.y+8,5,5);ctx.fillRect(e.x+18,e.y+8,5,5);}
-  // player: body + animated legs (2-frame bob)
   const px=player.x,py=player.y,bob=player.frame?2:0;
   ctx.fillStyle='#2d6cdf';ctx.fillRect(px,py+bob,player.w,player.h-10);
   ctx.fillStyle='#ffd9a0';ctx.fillRect(px+6,py-8+bob,16,14);
@@ -235,7 +293,6 @@ function draw(){ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#15233f';
   if(player.frame){ctx.fillRect(px+4,py+player.h-6,8,6);ctx.fillRect(px+16,py+player.h-2,8,6);}
   else{ctx.fillRect(px+4,py+player.h-2,8,6);ctx.fillRect(px+16,py+player.h-6,8,6);}
-  // flag
   ctx.fillStyle='#444';ctx.fillRect(flag.x,flag.y,4,flag.h);
   ctx.fillStyle='#27ae60';ctx.beginPath();ctx.moveTo(flag.x+4,flag.y);ctx.lineTo(flag.x+28,flag.y+12);ctx.lineTo(flag.x+4,flag.y+24);ctx.fill();
   document.getElementById('hp').textContent=Math.max(0,player.hp);
@@ -248,7 +305,6 @@ loop();
 </body>
 </html>";
     }
-
     static void Write(string root, string rel, string content)
     {
         var path = Path.Combine(root, rel);

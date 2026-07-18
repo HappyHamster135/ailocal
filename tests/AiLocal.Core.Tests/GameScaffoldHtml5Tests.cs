@@ -41,7 +41,32 @@ public class GameScaffoldHtml5Tests : IDisposable
     }
 
     [Fact]
+    public void Scaffold_Html5_WritesDesignDocAndLevels()
+    {
+        var svc = new GameScaffoldService();
+        var result = svc.Scaffold("html5", "ett 2d plattformspel med 3 nivaer", _dir);
+
+        Assert.True(result.Success, result.Output);
+        // The agent's "plan" is now a real artefact on disk.
+        var design = Path.Combine(_dir, "DESIGN.md");
+        Assert.True(File.Exists(design), "DESIGN.md (plan) was not written");
+        var doc = File.ReadAllText(design);
+        Assert.Contains("Speldesign", doc);
+        Assert.Contains("Niv", doc); // level progression is part of the plan
+
+        // The generated game must have real level progression: 3 level
+        // definitions and a FINAL_LEVEL cap, not an infinite single level.
+        var html = File.ReadAllText(Path.Combine(_dir, "index.html"));
+        Assert.Contains("const levels=[", html);
+        Assert.Contains("FINAL_LEVEL", html);
+        Assert.Contains("loadLevel", html);
+        // Winning the whole game (not just one level) must be reachable.
+        Assert.Contains("Du vann spelet", html);
+    }
+
+    [Fact]
     public void Scaffold_Html5_GeneratedJsParses()
+
     {
         // Strengthen the check: extract the inline script and verify it is at
         // least syntactically valid JS using node if available, otherwise a
