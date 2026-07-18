@@ -506,4 +506,58 @@ public class AgentToolExecutorTests : IDisposable
         Assert.DoesNotContain("compiled.cs", result.Output);
         Assert.DoesNotContain("history.cs", result.Output);
     }
+
+    // --- scaffold_game tool: the whole point is a Worker can PRODUCE a real
+    // game project autonomously (one tool call), not paste code-as-text. ---
+
+    [Fact]
+    public void ToolsFor_WithoutScaffolder_DoesNotAdvertiseScaffoldGame()
+    {
+        var tools = AgentToolExecutor.ToolsFor(AgentAccessLevel.Sandboxed, gameScaffold: false);
+        Assert.DoesNotContain(tools, t => t.Name == "scaffold_game");
+    }
+
+    [Fact]
+    public void ToolsFor_WithScaffolder_AdvertisesScaffoldGame()
+    {
+        var tools = AgentToolExecutor.ToolsFor(AgentAccessLevel.Sandboxed, gameScaffold: true);
+        Assert.Contains(tools, t => t.Name == "scaffold_game");
+    }
+
+    [Fact]
+    public async Task ScaffoldGame_InvokesDelegate_AndReturnsSuccess()
+    {
+        string? seenEngine = null, seenPrompt = null, seenRoot = null;
+        var executor = new AgentToolExecutor(
+            AgentAccessLevel.Sandboxed, _workspace,
+            gameScaffolder: (engine, prompt, root, ct) =>
+            {
+                seenEngine = engine; seenPrompt = prompt; seenRoot = root;
+                return Task.FromResult((true, $"{engine} projekt skapat i {root} (2 filer)."));
+            });
+
+        // The executor must advertise it to the model...
+        Assert.Contains(executor.Tools, t => t.Name == "scaffold_game");
+
+        // ...and executing it must reach the delegate with the args.
+        var result = await executor.ExecuteAsync(
+            Call("scaffold_game", new { engine = "html5", prompt = "en 2d plattformare", root = "mitt-spel" }),
+            CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Equal("html5", seenEngine);
+        Assert.Equal("en 2d plattformare", seenPrompt);
+        Assert.NotNull(seenRoot);
+        Assert.EndsWith("mitt-spel", seenRoot!.Replace('\\', '/'));
+        Assert.Contains("projekt skapat", result.Output);
+    }
+
+    [Fact]
+    public async Task ScaffoldGame_WithoutDelegate_ReturnsError()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace); // no scaffolder
+        var result = await executor.ExecuteAsync(
+            Call("scaffold_game", new { engine = "html5", prompt = "x" }), CancellationToken.None);
+        Assert.True(result.IsError);
+    }
 }

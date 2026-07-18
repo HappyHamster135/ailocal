@@ -56,6 +56,11 @@ public sealed class AgentToolExecutor
     // Optional self-provisioning delegate (Node layer wires this to the
     // ToolProvisioner). Null in Core tests / when not provisioned.
     private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? _provisioner;
+    // Optional game-scaffold delegate (Node layer wires this to
+    // GameScaffoldService). Null in Core tests / when not wired. Args:
+    // (engine, prompt, root) -> (success, output). Core can't reference Node,
+    // so the concrete scaffolder is injected here, same pattern as _provisioner.
+    private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -65,7 +70,8 @@ public sealed class AgentToolExecutor
         CommandGuard? commandGuard = null,
         CodebaseIndex? codeIndex = null,
         ProjectMemory? memory = null,
-        Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null)
+        Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null,
+        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -75,6 +81,7 @@ public sealed class AgentToolExecutor
         _codeIndex = codeIndex;
         _memory = memory;
         _provisioner = provisioner;
+        _gameScaffolder = gameScaffolder;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -84,9 +91,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -144,6 +151,13 @@ public sealed class AgentToolExecutor
                 """{"type":"object","properties":{"note":{"type":"string","description":"The note to remember."}},"required":["note"]}"""));
         }
 
+        // Game scaffolding: produce a real, buildable game project in one
+        // call (Node wires the delegate to GameScaffoldService). This is what
+        // lets a Worker agent PRODUCE a game autonomously instead of pasting
+        // code-as-text or hand-writing thousands of lines.
+        if (gameScaffold)
+            tools.Add(ScaffoldGameTool.Definition);
+
         return tools;
     }
 
@@ -169,6 +183,9 @@ public sealed class AgentToolExecutor
                 "provision" => Error(call, _allowInternet
                     ? "provision requires Full agent access (Inställningar -> Agent & arbetsyta)."
                     : "provision is not available - internet access is disabled on this Worker."),
+                "scaffold_game" when _gameScaffolder is not null
+                    => await ScaffoldGameAsync(call, root, ct),
+                "scaffold_game" => Error(call, "scaffold_game is not available on this Worker (game scaffolder not wired)."),
                 "recall" when _memory is not null => await RecallAsync(call, root, ct),
                 "remember" when _memory is not null => await RememberAsync(call, root, ct),
                 "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
@@ -607,6 +624,23 @@ public sealed class AgentToolExecutor
         var destination = args.TryGetProperty("destination", out var d) && d.ValueKind == JsonValueKind.String
             ? d.GetString()! : _workspaceRoot;
         var (success, output) = await _provisioner(tool, destination, ct);
+        return success
+            ? new ToolResult(call.Id, call.Name, output)
+            : Error(call, output);
+    }
+
+    private async Task<ToolResult> ScaffoldGameAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_gameScaffolder is null)
+            return Error(call, "scaffold_game is not available on this Worker (scaffolder not wired).");
+        var engine = RequireString(args, "engine");
+        var prompt = args.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String
+            ? p.GetString()! : "";
+        // root: default to workspace; a relative path resolves under it, an
+        // absolute path passes through ResolvePath (unconfined only on Full).
+        var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
+            ? ResolvePath(r.GetString()!) : _workspaceRoot;
+        var (success, output) = await _gameScaffolder(engine, prompt, root, ct);
         return success
             ? new ToolResult(call.Id, call.Name, output)
             : Error(call, output);

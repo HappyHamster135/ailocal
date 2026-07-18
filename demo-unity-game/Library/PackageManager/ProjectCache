@@ -5,16 +5,16 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 639199694663400977
-    m_Hash: 2613607820
+      ticks: 639199702760318068
+    m_Hash: 1229385370
   m_LockFileStatus:
     m_FilePath: D:/Claude projekt/AI-Local/demo-unity-game/Packages/packages-lock.json
     m_PathExists: 1
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 639199694687381514
-    m_Hash: 1403944131
+      ticks: 639199702760318068
+    m_Hash: 640414061
 m_EmbeddedPackageManifests:
   m_ManifestsStatus: {}
 m_LocalPackages:

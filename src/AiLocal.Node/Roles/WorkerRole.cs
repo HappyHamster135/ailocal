@@ -166,6 +166,11 @@ public static class WorkerRole
                 {
                     var r = await new ToolProvisioner().ProvisionAsync(tool, dest, provCt);
                     return (r.Success, r.Output);
+                },
+                (engine, prompt, root, scafCt) =>
+                {
+                    var r = new GameScaffoldService().Scaffold(engine, prompt, root);
+                    return Task.FromResult((r.Success, r.Output));
                 });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 

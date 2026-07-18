@@ -154,7 +154,12 @@ public static class SessionApi
                     return new FileChangeDecision(decision.Approve, decision.Reason);
                 }
 
-                var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet);
+                var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet,
+                    gameScaffolder: (engine, prompt, root, scafCt) =>
+                    {
+                        var r = new GameScaffoldService().Scaffold(engine, prompt, root);
+                        return Task.FromResult((r.Success, r.Output));
+                    });
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
                 var result = await loop.RunAsync(req.Message, accessLevel, req.ModelHint, onStep: async step =>
@@ -224,7 +229,7 @@ public static class SessionApi
 
         sb.Append("\n\nYOUR JOB: When the user asks you to CREATE something (a game, an app, a script, a document, a fix), actually PRODUCE it using your tools - write the files, scaffold the project, build it. Do NOT just describe how it could be done or write a text outline instead of the real artifact. If you cannot do it with the tools you have, say so plainly.");
 
-        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and - via the local API - scaffold a game project (/api/game/scaffold with engine 'html5'|'unity'|'godot', a prompt and a root folder) and build it (/api/workspace/game with the project root). For a playable game with zero setup, prefer engine 'html5' - it writes a complete, runnable 2D platformer (index.html) you can then extend. Prefer producing a runnable result over a description.");
+        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and scaffold_game (create a complete, buildable game project in ONE call - engine 'html5'|'unity'|'godot', a prompt, and an optional root folder). When the user asks for a game, call scaffold_game FIRST to produce the real project, then extend it with edit_file. For a playable game with zero setup, prefer engine 'html5' - it writes a complete, runnable 2D platformer you can then extend. Prefer producing a runnable result over a description.");
 
         if (!string.IsNullOrWhiteSpace(projectInstructions))
         {

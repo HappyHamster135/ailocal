@@ -1,6 +1,7 @@
 using AiLocal.Core.Agent;
 using AiLocal.Core.Contracts;
 using AiLocal.Core.Providers;
+using AiLocal.Node.Hosting;
 using Xunit;
 
 namespace AiLocal.Core.Tests;
@@ -384,5 +385,57 @@ public class AgentLoopTests : IDisposable
         // still in flight, not just a summary handed back at the very end.
         Assert.Equal(result.Steps.Select(s => s.Kind), observedLive);
         Assert.True(observedLive.Count > 1);
+    }
+
+    /// <summary>
+    /// The whole point of AiLocal: a Worker agent, driven ONLY by a chat
+    /// message, PRODUCES a real game project on disk via one scaffold_game
+    /// tool call - no human curl, no code-as-text. This drives the full chain
+    /// (scripted model -> real AgentLoop -> real AgentToolExecutor -> real
+    /// GameScaffoldService) and asserts an actual index.html lands on disk.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ModelCallsScaffoldGame_ProducesRealGameOnDisk()
+    {
+        Directory.CreateDirectory(_workspace);
+        // Real scaffolder delegate, exactly as WorkerRole/SessionApi wire it.
+        var executor = new AgentToolExecutor(
+            AgentAccessLevel.Sandboxed, _workspace,
+            gameScaffolder: (engine, prompt, root, ct) =>
+            {
+                var r = new AiLocal.Node.Hosting.GameScaffoldService().Scaffold(engine, prompt, root);
+                return Task.FromResult((r.Success, r.Output));
+            });
+
+        var callCount = 0;
+        var provider = new FakeChatProvider("test", false, _ =>
+        {
+            callCount++;
+            if (callCount == 1)
+                return ProviderResponse.Ok(new ChatResponse
+                {
+                    Content = "Jag skapar spelet.",
+                    Model = "m", Provider = "test",
+                    ToolCalls = [new ToolCall("call_1", "scaffold_game",
+                        """{"engine":"html5","prompt":"en 2d plattformare med hopp","root":"spel"}""")]
+                });
+            return ProviderResponse.Ok(new ChatResponse { Content = "Spelet är klart.", Model = "m", Provider = "test" });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, executor);
+        var result = await loop.RunAsync("bygg ett 2d-spel", AgentAccessLevel.Sandboxed);
+
+        Assert.True(result.Success);
+        // The agent PRODUCED a runnable artifact, autonomously:
+        var indexHtml = Path.Combine(_workspace, "spel", "index.html");
+        Assert.True(File.Exists(indexHtml), "scaffold_game must have written a real index.html on disk");
+        var html = await File.ReadAllTextAsync(indexHtml);
+        Assert.Contains("<canvas", html);
+        Assert.Contains("requestAnimationFrame", html);
+
+        var kinds = result.Steps.Select(s => s.Kind).ToList();
+        Assert.Contains("tool_call", kinds);
+        Assert.Contains("tool_result", kinds);
+        Assert.Contains("done", kinds);
     }
 }
