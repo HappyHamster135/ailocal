@@ -1640,11 +1640,15 @@ internal static class Dashboard
                       <option value="Sandboxed">Begränsad arbetsyta</option>
                       <option value="Full">Full åtkomst (bypass)</option>
                     </select>
-                    <select id="modelSelect" title="Vilken modell Hosten använder - 'Auto' väljer efter uppgiftens komplexitet så du inte alltid betalar för den dyraste.">
-                      <option value="">Auto (efter komplexitet)</option>
-                      <option value="claude-haiku-4-5">Claude Haiku 4.5 (enkel)</option>
-                      <option value="claude-sonnet-5">Claude Sonnet 5 (medel)</option>
-                      <option value="claude-opus-4-8">Claude Opus 4.8 (komplex)</option>
+                    <select id="modelSelect" title="Vilken modell Hosten använder - 'Auto' väljer efter uppgiftens komplexitet så du inte alltid betalar för den dyraste. Standard är billiga OpenRouter-modeller (DeepSeek/Kimi/Tencent), inte dyra Claude.">
+                      <option value="">Auto (efter komplexitet - billiga modeller)</option>
+                      <option value="deepseek/deepseek-chat">DeepSeek V3 (billig, generellt)</option>
+                      <option value="deepseek/deepseek-coder">DeepSeek Coder (billig, kod)</option>
+                      <option value="moonshotai/kimi-k2">Kimi K2 (billig, stark)</option>
+                      <option value="tencent/hy3:free">Tencent Hunyuan (gratis)</option>
+                      <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5 (betald)</option>
+                      <option value="anthropic/claude-sonnet-5">Claude Sonnet 5 (betald)</option>
+                      <option value="anthropic/claude-opus-4-8">Claude Opus 4.8 (betald, dyr)</option>
                     </select>
                     <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
                     <input id="parallelism" type="number" min="1" max="32" value="4">

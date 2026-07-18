@@ -122,20 +122,21 @@ public sealed record ModelRoute(string Skill, string Provider, string Model, int
 {
     public static List<ModelRoute> Defaults() => new()
     {
-        // Coding favours Claude (strong tool use); harder code -> Opus.
-        new("coding", "anthropic", "claude-sonnet-5", 1),
-        new("coding", "anthropic", "claude-opus-4-8", 4),
-        // Writing/creative favours ChatGPT.
-        new("writing", "openai", "gpt-4o", 1),
-        // Research: Claude, fall back to Gemini for breadth.
-        new("research", "anthropic", "claude-sonnet-5", 1),
-        new("research", "gemini", "gemini-2.5-flash", 3),
-        // Data/vision: OpenAI or Claude.
-        new("data", "openai", "gpt-4o", 1),
-        new("vision", "anthropic", "claude-opus-4-8", 1),
-        // General: local Ollama when available (cheap, private), else Haiku.
+        // Coding favours a cheap, capable coder (DeepSeek V3) - not Claude.
+        new("coding", "openrouter", "deepseek/deepseek-coder", 1),
+        new("coding", "openrouter", "moonshotai/kimi-k2", 4),
+        // Writing/creative favours a cheap open model.
+        new("writing", "openrouter", "deepseek/deepseek-chat", 1),
+        // Research: cheap reasoning model, no paid vendor needed.
+        new("research", "openrouter", "deepseek/deepseek-chat", 1),
+        new("research", "openrouter", "moonshotai/kimi-k2", 3),
+        // Data/vision: cheap multimodal-capable open model.
+        new("data", "openrouter", "deepseek/deepseek-chat", 1),
+        new("vision", "openrouter", "moonshotai/kimi-k2", 1),
+        // General: local Ollama when available (cheap, private), else a free
+        // OpenRouter model (Tencent Hunyuan via OpenRouter, very low cost).
         new("general", "ollama", "", 1),
-        new("general", "anthropic", "claude-haiku-4-5", 1),
+        new("general", "openrouter", "tencent/hy3:free", 1),
     };
 }
 
@@ -145,14 +146,17 @@ public sealed record ModelRoute(string Skill, string Provider, string Model, int
 /// picks a (provider, model) pair per task so multiple models collaborate.</summary>
 public sealed class ModelTiers
 {
-    /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).</summary>
-    public string Simple { get; set; } = "claude-haiku-4-5";
+    /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).
+    /// Cheap by default - a free/low-cost OpenRouter model, not a paid Claude.</summary>
+    public string Simple { get; set; } = "deepseek/deepseek-chat";
 
-    /// <summary>complexity 3-4 (most real work: coding, drafting, analysis).</summary>
-    public string Medium { get; set; } = "claude-sonnet-5";
+    /// <summary>complexity 3-4 (most real work: coding, drafting, analysis).
+    /// A strong-but-cheap model (DeepSeek V3 / Kimi) instead of Claude.</summary>
+    public string Medium { get; set; } = "deepseek/deepseek-chat";
 
-    /// <summary>complexity 5 (hard: architecture, deep research, debugging).</summary>
-    public string Complex { get; set; } = "claude-opus-4-8";
+    /// <summary>complexity 5 (hard: architecture, deep research, debugging).
+    /// Falls back to a capable cheap model; Claude only if you opt in.</summary>
+    public string Complex { get; set; } = "moonshotai/kimi-k2";
 
     /// <summary>Provider-aware routes. The router picks the first route whose
     /// skill matches the task and whose MinComplexity is met; falls back to the
@@ -192,20 +196,29 @@ public sealed class ModelTiers
 
 public sealed class ProviderSettings
 {
-    /// <summary>Order in which providers are tried before falling back.</summary>
-    public List<string> Priority { get; set; } = new() { "anthropic", "openai", "gemini", "openrouter", "ollama" };
+    /// <summary>Order in which providers are tried before falling back.
+    /// OpenRouter is first by default: it proxies cheap models (DeepSeek,
+    /// Kimi, Tencent, etc.) so the cluster runs cost-effectively without
+    /// burning Anthropic credits - Anthropic/OpenAI/Gemini are only reached
+    /// as fallbacks. Flip the order in settings if you'd rather pay for a
+    /// specific vendor.</summary>
+    public List<string> Priority { get; set; } = new() { "openrouter", "ollama", "anthropic", "openai", "gemini" };
 
-    /// <summary>Default remote model when a task gives no hint.</summary>
-    public string DefaultModel { get; set; } = "claude-opus-4-8";
+    /// <summary>Default remote model when a task gives no hint. Kept as a
+    /// cheap Anthropic id ONLY as the absolute last-resort fallback (Anthropic
+    /// is last in Priority); the normal path runs on OpenRouter's cheap
+    /// catalog. Avoid setting this to an expensive model - cost lives in the
+    /// OpenRouterModel / ModelTiers config, not here.</summary>
+    public string DefaultModel { get; set; } = "claude-haiku-4-5";
 
-    public string OpenAIModel { get; set; } = "gpt-4o";
+    public string OpenAIModel { get; set; } = "gpt-4o-mini";
 
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
 
-    /// <summary>OpenRouter's catalog (and model ids) changes far more often
-    /// than the other providers', so the default is the "auto" routing alias
-    /// which lets OpenRouter pick a sensible model - no manual id needed.
-    /// Set explicitly for a specific model (e.g. "anthropic/claude-sonnet-4.5").</summary>
+    /// <summary>OpenRouter is the cost-effective default provider. "auto"
+    /// lets OpenRouter route to a cheap, capable model (DeepSeek/Kimi/Tencent
+    /// etc.) per task - no manual id needed. Set explicitly for a specific
+    /// model (e.g. "deepseek/deepseek-chat" or "tencent/hy3:free").</summary>
     public string OpenRouterModel { get; set; } = "openrouter/auto";
 
     public int MaxTokens { get; set; } = 4096;
