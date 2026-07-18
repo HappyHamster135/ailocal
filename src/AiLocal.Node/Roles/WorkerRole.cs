@@ -171,6 +171,11 @@ public static class WorkerRole
                 {
                     var r = new GameScaffoldService().Scaffold(engine, prompt, root);
                     return Task.FromResult((r.Success, r.Output));
+                },
+                (tech, prompt, root, appCt) =>
+                {
+                    var r = new AppScaffoldService().Scaffold(tech, prompt, root);
+                    return Task.FromResult((r.Success, r.Output));
                 });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 

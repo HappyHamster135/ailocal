@@ -21,8 +21,13 @@ public sealed class GameScaffoldService
     public ScaffoldResult Scaffold(string engine, string prompt, string root)
     {
         engine = (engine ?? "").Trim().ToLowerInvariant();
+        // 'auto' / empty => let the tool pick the best engine for the prompt.
+        // Games default to html5 (zero-install, runs anywhere) unless the
+        // prompt clearly wants a heavier engine (unity/godot/3d).
+        if (engine is "" or "auto")
+            engine = PickEngine(prompt);
         if (engine != "unity" && engine != "godot" && engine != "html5")
-            return new(false, "", "", [], "engine maste vara 'unity', 'godot' eller 'html5'.");
+            return new(false, "", "", [], "engine maste vara 'unity', 'godot', 'html5' eller 'auto' (tomt = automatiskt val).");
         if (string.IsNullOrWhiteSpace(root))
             return new(false, "", engine, [], "root (mapp att skapa projektet i) kravs.");
         if (Directory.Exists(root) && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length > 0)
@@ -35,6 +40,21 @@ public sealed class GameScaffoldService
                 ? ScaffoldGodot(root, prompt)
                 : ScaffoldHtml5(root, prompt);
         return new(true, root, engine, files, $"{engine} projekt skapat i {root} ({files.Length} filer).");
+    }
+
+    /// <summary>Pick the best engine for a game prompt. Defaults to html5
+    /// (runs in any browser, no install). Escalates to unity/godot only when
+    /// the prompt implies a heavy engine is genuinely needed (3D, or the
+    /// words unity/godot appear). The agent can always override by passing an
+    /// explicit engine.</summary>
+    static string PickEngine(string prompt)
+    {
+        var p = (prompt ?? "").ToLowerInvariant();
+        if (p.Contains("unity")) return "unity";
+        if (p.Contains("godot")) return "godot";
+        // 3D games are better in a real engine; 2D stays html5 by default.
+        if (p.Contains("3d")) return "unity";
+        return "html5";
     }
 
     static string[] ScaffoldUnity(string root, string prompt)

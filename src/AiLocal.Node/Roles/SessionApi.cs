@@ -159,6 +159,11 @@ public static class SessionApi
                     {
                         var r = new GameScaffoldService().Scaffold(engine, prompt, root);
                         return Task.FromResult((r.Success, r.Output));
+                    },
+                    appScaffolder: (tech, prompt, root, appCt) =>
+                    {
+                        var r = new AppScaffoldService().Scaffold(tech, prompt, root);
+                        return Task.FromResult((r.Success, r.Output));
                     });
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
@@ -229,7 +234,7 @@ public static class SessionApi
 
         sb.Append("\n\nYOUR JOB: When the user asks you to CREATE something (a game, an app, a script, a document, a fix), actually PRODUCE it using your tools - write the files, scaffold the project, build it. Do NOT just describe how it could be done or write a text outline instead of the real artifact. If you cannot do it with the tools you have, say so plainly.");
 
-        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and scaffold_game (create a complete, buildable game project in ONE call - engine 'html5'|'unity'|'godot', a prompt, and an optional root folder). When the user asks for a game, call scaffold_game FIRST to produce the real project, then extend it with edit_file. For a playable game with zero setup, prefer engine 'html5' - it writes a complete, runnable 2D platformer you can then extend. Prefer producing a runnable result over a description.");
+        sb.Append("\n\nAVAILABLE TOOLS: write_file/create_file (make or edit files here), read_file, list_files, and scaffold_game (create a complete, buildable GAME project in ONE call - CHOOSE the engine yourself: 'html5' for a zero-install 2D platformer in the browser, 'unity'/'godot' for a heavier engine, or omit engine to let the tool pick the best fit) and scaffold_app (create a complete, runnable APP in ONE call - CHOOSE the tech yourself: 'python' or 'csharp', or omit tech to let the tool pick). When the user asks for a game, call scaffold_game FIRST to produce the real project, then extend it with edit_file. When they ask for an app/script/tool (not a game), call scaffold_app FIRST. Prefer producing a runnable result over a description. Always pick the technology you judge best fits the project.");
 
         if (!string.IsNullOrWhiteSpace(projectInstructions))
         {

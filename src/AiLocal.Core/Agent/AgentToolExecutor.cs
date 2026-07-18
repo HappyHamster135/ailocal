@@ -61,6 +61,8 @@ public sealed class AgentToolExecutor
     // (engine, prompt, root) -> (success, output). Core can't reference Node,
     // so the concrete scaffolder is injected here, same pattern as _provisioner.
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
+    // Optional app-scaffold delegate (Node layer wires this to AppScaffoldService).
+    private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _appScaffolder;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -71,7 +73,8 @@ public sealed class AgentToolExecutor
         CodebaseIndex? codeIndex = null,
         ProjectMemory? memory = null,
         Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null,
-        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null)
+        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null,
+        Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -82,6 +85,7 @@ public sealed class AgentToolExecutor
         _memory = memory;
         _provisioner = provisioner;
         _gameScaffolder = gameScaffolder;
+        _appScaffolder = appScaffolder;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -91,9 +95,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -158,6 +162,11 @@ public sealed class AgentToolExecutor
         if (gameScaffold)
             tools.Add(ScaffoldGameTool.Definition);
 
+        // App scaffolding: same idea for non-game apps (Node wires the
+        // delegate to AppScaffoldService) - python / csharp chosen by the tool.
+        if (appScaffold)
+            tools.Add(ScaffoldAppTool.Definition);
+
         return tools;
     }
 
@@ -186,6 +195,9 @@ public sealed class AgentToolExecutor
                 "scaffold_game" when _gameScaffolder is not null
                     => await ScaffoldGameAsync(call, root, ct),
                 "scaffold_game" => Error(call, "scaffold_game is not available on this Worker (game scaffolder not wired)."),
+                "scaffold_app" when _appScaffolder is not null
+                    => await ScaffoldAppAsync(call, root, ct),
+                "scaffold_app" => Error(call, "scaffold_app is not available on this Worker (app scaffolder not wired)."),
                 "recall" when _memory is not null => await RecallAsync(call, root, ct),
                 "remember" when _memory is not null => await RememberAsync(call, root, ct),
                 "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
@@ -633,14 +645,32 @@ public sealed class AgentToolExecutor
     {
         if (_gameScaffolder is null)
             return Error(call, "scaffold_game is not available on this Worker (scaffolder not wired).");
-        var engine = RequireString(args, "engine");
+        // engine is OPTIONAL: the agent chooses, or 'auto'/omitted => the
+        // tool picks (html5 default, unity for 3D). Never required.
+        var engine = args.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString())
+            ? e.GetString()! : "auto";
         var prompt = args.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String
             ? p.GetString()! : "";
-        // root: default to workspace; a relative path resolves under it, an
-        // absolute path passes through ResolvePath (unconfined only on Full).
         var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
             ? ResolvePath(r.GetString()!) : _workspaceRoot;
         var (success, output) = await _gameScaffolder(engine, prompt, root, ct);
+        return success
+            ? new ToolResult(call.Id, call.Name, output)
+            : Error(call, output);
+    }
+
+    private async Task<ToolResult> ScaffoldAppAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_appScaffolder is null)
+            return Error(call, "scaffold_app is not available on this Worker (scaffolder not wired).");
+        // tech is OPTIONAL: 'auto'/omitted => the tool picks (python default,
+        // csharp when the prompt asks for it). The agent is free to choose.
+        var tech = args.TryGetProperty("tech", out var t) && t.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(t.GetString())
+            ? t.GetString()! : "auto";
+        var prompt = RequireString(args, "prompt");
+        var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
+            ? ResolvePath(r.GetString()!) : _workspaceRoot;
+        var (success, output) = await _appScaffolder(tech, prompt, root, ct);
         return success
             ? new ToolResult(call.Id, call.Name, output)
             : Error(call, output);
