@@ -62,50 +62,139 @@ public sealed class GameScaffoldService
         var is3D = prompt.Contains("3d", StringComparison.OrdinalIgnoreCase);
         var isPlatformer = prompt.Contains("platform", StringComparison.OrdinalIgnoreCase);
         var name = new DirectoryInfo(root).Name;
+        Directory.CreateDirectory(root);
         var files = new List<string>();
         // .csproj so the engine (and our headless build) sees a buildable C# project.
         Write(root, $"{name}/{name}.csproj", Csproj(name));
         files.Add($"{name}/{name}.csproj");
 
-        // A real, playable 2D platformer (not a stub): player controller with
-        // gravity/jump/animation + collectibles + a goal, plus a generated
-        // scene that wires it all up. Open in Unity and press Play, or build
-        // headless - it just works.
-        Write(root, "Assets/GameManager.cs", UnityGameManager(isPlatformer));
-        Write(root, "Assets/PlayerController.cs", UnityPlayerController(isPlatformer));
-        files.Add("Assets/GameManager.cs"); files.Add("Assets/PlayerController.cs");
+        // A complete, playable 2D platformer (not a stub): player controller
+        // with gravity/jump + animation, patrolling enemies, collectible
+        // coins, a UI (score/hp/level), 3 levels of progression, win/lose,
+        // and a generated scene that wires it all up. Open in Unity and press
+        // Play, or build headless - it just works.
+        Write(root, "Assets/PlayerController.cs", UnityPlayerController());
+        Write(root, "Assets/Enemy.cs", UnityEnemy());
+        Write(root, "Assets/Coin.cs", UnityCoin());
+        Write(root, "Assets/GameManager.cs", UnityGameManager());
+        Write(root, "Assets/UIManager.cs", UnityUIManager());
+        files.Add("Assets/PlayerController.cs"); files.Add("Assets/Enemy.cs");
+        files.Add("Assets/Coin.cs"); files.Add("Assets/GameManager.cs"); files.Add("Assets/UIManager.cs");
 
         // Scene (with .meta) so there is something to open + build.
         var sceneGuid = Guid.NewGuid().ToString("N").Substring(0, 32);
-        Write(root, "Assets/Scenes/SampleScene.unity", UnityScene(is3D, sceneGuid, isPlatformer));
+        Write(root, "Assets/Scenes/SampleScene.unity", UnityScene(sceneGuid));
         Write(root, "Assets/Scenes/SampleScene.unity.meta", "fileFormatVersion: 2\nguid: " + sceneGuid + "\n" +
             "DefaultImporter:\n  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
         files.Add("Assets/Scenes/SampleScene.unity"); files.Add("Assets/Scenes/SampleScene.unity.meta");
 
         // Minimal project settings so Unity accepts the folder as a project.
         Write(root, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.2.13f1\nm_EditorVersionWithRevision: 6000.2.13f1 (default)\n");
-        Write(root, "Packages/manifest.json", "{\n  \"dependencies\": {\n    \"com.unity.modules.physics2d\": \"1.0.0\",\n    \"com.unity.modules.audio\": \"1.0.0\"\n  }\n}\n");
-        // Register the sample scene in the build so a headless -buildWindowsPlayer
-        // actually has something to compile/pack (Unity refuses with "no scenes"
-        // otherwise).
+        Write(root, "Packages/manifest.json", "{\n  \"dependencies\": {\n    \"com.unity.modules.physics2d\": \"1.0.0\",\n    \"com.unity.modules.audio\": \"1.0.0\",\n    \"com.unity.modules.ui\": \"1.0.0\",\n    \"com.unity.modules.uielements\": \"1.0.0\"\n  }\n}\n");
         Write(root, "ProjectSettings/EditorBuildSettings.asset",
             "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1045 &1\nEditorBuildSettings:\n" +
             "  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Scenes:\n" +
             "  - enabled: 1\n    path: Assets/Scenes/SampleScene.unity\n    guid: " + sceneGuid + "\n");
         files.Add("ProjectSettings/ProjectVersion.txt"); files.Add("Packages/manifest.json");
         files.Add("ProjectSettings/EditorBuildSettings.asset");
+
+        Write(root, "README.md",
+            "# Pixel Rush - 2D Platformer (Unity)\n\n" +
+            "Oppna projektet i Unity 6000.x och tryck Play, eller bygg headless:\n" +
+            "`Unity -batchmode -buildWindows64Player build/PixelRush.exe`.\n\n" +
+            "Styrning: Vänster/Höger eller A/D, Space/Up/W för hopp, Esc för paus.\n" +
+            "Samla mynt, undvik fiender, nå flaggan. Klara 3 nivåer för att vinna.\n");
+        files.Add("README.md");
         return files.ToArray();
     }
 
     static string[] ScaffoldGodot(string root, string prompt)
     {
-        var is3D = prompt.Contains("3d", StringComparison.OrdinalIgnoreCase);
+        // A complete, playable 2D platformer out of the box - open it in Godot
+        // 4 (or run `godot --headless --build` / export) and it just plays.
+        // The agent then extends it via the file API; it is NOT a stub.
         var files = new List<string>();
-        Write(root, "project.godot", GodotProject(is3D));
-        Write(root, "Main.tscn", GodotScene(is3D));
-        Write(root, "Main.cs", GodotScript());
-        files.Add("project.godot"); files.Add("Main.tscn"); files.Add("Main.cs");
+        Write(root, "project.godot", GodotProject());
+        files.Add("project.godot");
+
+        // Game / level controller: score, hp, level progression, win/lose,
+        // pause, HUD, and procedural sound (no external assets needed).
+        Write(root, "Game.cs", GodotGame());
+        files.Add("Game.cs");
+        Write(root, "Player.cs", GodotPlayer());
+        files.Add("Player.cs");
+        Write(root, "Enemy.cs", GodotEnemy());
+        files.Add("Enemy.cs");
+        Write(root, "Coin.cs", GodotCoin());
+        files.Add("Coin.cs");
+
+        // Reusable scenes the Game instantiates per level.
+        Write(root, "Player.tscn", GodotPlayerScene());
+        files.Add("Player.tscn");
+        Write(root, "Enemy.tscn", GodotEnemyScene());
+        files.Add("Enemy.tscn");
+        Write(root, "Coin.tscn", GodotCoinScene());
+        files.Add("Coin.tscn");
+        Write(root, "Goal.tscn", GodotGoalScene());
+        files.Add("Goal.tscn");
+        Write(root, "Platform.tscn", GodotPlatformScene());
+        files.Add("Platform.tscn");
+
+        // The main scene that wires HUD + spawns the first level.
+        Write(root, "Game.tscn", GodotGameScene());
+        files.Add("Game.tscn");
+
+        // Self-contained procedural sound effects (square-wave WAVs written at
+        // scaffold time, so the game has audio with zero downloads).
+        Write(root, "jump.wav", MakeWav(660, 0.12));
+        files.Add("jump.wav");
+        Write(root, "coin.wav", MakeWav(1046, 0.10));
+        files.Add("coin.wav");
+        Write(root, "hurt.wav", MakeWav(180, 0.18));
+        files.Add("hurt.wav");
+        Write(root, "win.wav", MakeWav(880, 0.30));
+        files.Add("win.wav");
+
+        Write(root, "README.md",
+            "# Pixel Rush - 2D Platformer (Godot 4)\n\n" +
+            "Oppna projektet i Godot 4 och tryck Play, eller bygg headless:\n" +
+            "`godot --headless --build .` och exportera via preset 'Windows Desktop'.\n\n" +
+            "Styrning: Vänster/Höger eller A/D för rörelse, Space/Up/W för att hoppa, Esc för paus.\n" +
+            "Samla mynt för poäng, undvik fiender. Nå flaggan för att klara nivån. " +
+            "Klara alla 3 nivåer för att vinna spelet.\n");
+        files.Add("README.md");
         return files.ToArray();
+    }
+
+    /// <summary>Writes a minimal valid mono WAV (square wave) so the game has
+    /// sound effects without downloading anything. 16-bit PCM, 8 kHz.</summary>
+    static byte[] MakeWav(int freqHz, double seconds)
+    {
+        const int sampleRate = 8000;
+        var n = (int)(sampleRate * seconds);
+        var data = new byte[44 + n * 2];
+        // RIFF header
+        var header = System.Text.Encoding.ASCII.GetBytes("RIFF");
+        Array.Copy(header, 0, data, 0, 4);
+        BitConverter.GetBytes(36 + n * 2).CopyTo(data, 4);
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("WAVE"), 0, data, 8, 4);
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("fmt "), 0, data, 12, 4);
+        BitConverter.GetBytes(16).CopyTo(data, 16);
+        BitConverter.GetBytes((short)1).CopyTo(data, 20);   // PCM
+        BitConverter.GetBytes((short)1).CopyTo(data, 22);   // mono
+        BitConverter.GetBytes(sampleRate).CopyTo(data, 24);
+        BitConverter.GetBytes(sampleRate * 2).CopyTo(data, 28);
+        BitConverter.GetBytes((short)2).CopyTo(data, 32);
+        BitConverter.GetBytes((short)16).CopyTo(data, 34);
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("data"), 0, data, 36, 4);
+        BitConverter.GetBytes(n * 2).CopyTo(data, 40);
+        for (var i = 0; i < n; i++)
+        {
+            var t = (double)i / sampleRate;
+            var s = Math.Sign(Math.Sin(2 * Math.PI * freqHz * t));
+            BitConverter.GetBytes((short)(s * 9000)).CopyTo(data, 44 + i * 2);
+        }
+        return data;
     }
 
     static string[] ScaffoldHtml5(string root, string prompt)
@@ -312,6 +401,13 @@ loop();
         File.WriteAllText(path, content);
     }
 
+    static void Write(string root, string rel, byte[] content)
+    {
+        var path = Path.Combine(root, rel);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, content);
+    }
+
     static string Sln(string name) =>
         @"Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
@@ -341,24 +437,25 @@ EndGlobal
 </Project>
 ";
 
-    static string UnityPlayerController(bool platformer) => @"
+    static string UnityPlayerController() => @"
 using UnityEngine;
 
 /// <summary>A ready-to-play 2D platformer character: gravity, run, jump,
-/// landing detection, and a run/idle animation toggle. Drop it on a Sprite
-/// with a Rigidbody2D + BoxCollider2D (the generated scene does exactly
-/// that) and it just works.</summary>
+/// landing detection, screen flip, coin pickup (score), enemy contact
+/// (damage), and goal reach (level clear). Drop on a Sprite with a
+/// Rigidbody2D + BoxCollider2D (the generated scene does exactly that).</summary>
 [RequireComponent(typeof(Rigidbody2D), typeof(BoxCollider2D))]
 public class PlayerController : MonoBehaviour
 {
     [Header(""Movement"")]
     public float moveSpeed = 6f;
-    public float jumpForce = 11f;
+    public float jumpForce = 14f;
     public LayerMask groundLayer;
 
     [Header(""Audio"")]
     public AudioClip jumpSfx;
     public AudioClip coinSfx;
+    public AudioClip hurtSfx;
 
     private Rigidbody2D _rb;
     private bool _grounded;
@@ -375,7 +472,6 @@ public class PlayerController : MonoBehaviour
     {
         float x = Input.GetAxisRaw(""Horizontal"");
         _rb.linearVelocity = new Vector2(x * moveSpeed, _rb.linearVelocity.y);
-
         if (x != 0) transform.localScale = new Vector3(Mathf.Sign(x), 1, 1);
 
         if ((Input.GetButtonDown(""Jump"") || Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
@@ -400,54 +496,175 @@ public class PlayerController : MonoBehaviour
             if (coinSfx && _audio) _audio.PlayOneShot(coinSfx);
             GameManager.Instance?.Collect(other.gameObject);
         }
+        else if (other.CompareTag(""Enemy""))
+        {
+            if (hurtSfx && _audio) _audio.PlayOneShot(hurtSfx);
+            GameManager.Instance?.Damage(1);
+        }
+        else if (other.CompareTag(""Goal""))
+        {
+            GameManager.Instance?.LevelCleared();
+        }
     }
 }
 ";
 
-    static string UnityGameManager(bool platformer) => @"
+    static string UnityEnemy() => @"
+using UnityEngine;
+
+/// <summary>Patrols left/right between its start and start+patrolRange and
+/// damages the player on contact (it is tagged ""Enemy"").</summary>
+public class Enemy : MonoBehaviour
+{
+    [Header(""Patrol"")]
+    public float patrolRange = 3f;
+    public float speed = 2.5f;
+
+    private float _minX;
+    private int _dir = 1;
+
+    void Awake() => _minX = transform.position.x;
+
+    void Update()
+    {
+        if (transform.position.x <= _minX || transform.position.x >= _minX + patrolRange) _dir *= -1;
+        transform.position += Vector3.right * (_dir * speed * Time.deltaTime);
+        transform.localScale = new Vector3(_dir, 1, 1);
+    }
+}
+";
+
+    static string UnityCoin() => @"
+using UnityEngine;
+
+/// <summary>Collectible. On player contact it tells GameManager to add score
+/// and removes itself. Tagged ""Coin"" so PlayerController recognizes it.</summary>
+public class Coin : MonoBehaviour
+{
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag(""Player""))
+            GameManager.Instance?.Collect(gameObject);
+    }
+}
+";
+
+    static string UnityGameManager() => @"
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
-/// <summary>Score + win for the platformer. The generated scene wires a few
-/// Coins and a Goal; collecting all coins wins.</summary>
+/// <summary>Score + HP + 3-level progression + win/lose + pause. Holds the
+/// run state; the generated scene wires Coins, Enemies, a Goal and a UI that
+/// UIManager updates from these values.</summary>
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
     [Header(""Gameplay"")]
+    public int totalLevels = 3;
+    public int startHp = 5;
     public int coinsToWin = 3;
-    public string winScene = ""SampleScene"";
 
-    private int _collected;
+    public int Score { get; private set; }
+    public int Hp { get; private set; }
+    public int Level { get; private set; } = 1;
 
-    void Awake() => Instance = this;
+    private Text _hud;
+    private bool _paused;
+
+    void Awake()
+    {
+        Instance = this;
+        Hp = startHp;
+        _hud = GameObject.Find(""UIManager"")?.GetComponent<UIManager>()?.HudText;
+        UpdateHud();
+    }
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Escape)) TogglePause();
+    }
 
     public void Collect(GameObject coin)
     {
-        _collected++;
+        Score += 10;
         Destroy(coin);
-        Debug.Log($""Coin {_collected}/{coinsToWin}"");
-        if (_collected >= coinsToWin) Win();
+        UpdateHud();
+        if (Score / 10 >= coinsToWin) LevelCleared();
     }
 
-    public void Win()
+    public void Damage(int amount)
     {
-        Debug.Log(""You win! Collect coins or reach the goal."");
-        SceneManager.LoadScene(winScene);
+        Hp -= amount;
+        UpdateHud();
+        if (Hp <= 0) GameOver();
+    }
+
+    public void LevelCleared()
+    {
+        if (Level >= totalLevels) { Win(); return; }
+        Level++;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    private void Win()
+    {
+        if (_hud) _hud.text = $""DU VANN! Poang: {Score}"";
+        Debug.Log(""You win!"");
+        enabled = false;
+    }
+
+    private void GameOver()
+    {
+        if (_hud) _hud.text = $""GAME OVER - Poang: {Score}"";
+        Debug.Log(""Game over."");
+        enabled = false;
+    }
+
+    private void TogglePause()
+    {
+        _paused = !_paused;
+        Time.timeScale = _paused ? 0 : 1;
+    }
+
+    private void UpdateHud()
+    {
+        if (_hud) _hud.text = $""Niva {Level}/{totalLevels}   Poang {Score}   HP {Hp}"";
     }
 }
 ";
 
-    static string UnityScene(bool is3D, string sceneGuid, bool platformer)
+    static string UnityUIManager() => @"
+using UnityEngine;
+using UnityEngine.UI;
+
+/// <summary>Screen HUD: a single Text showing score / hp / level, updated by
+/// GameManager. Place on a Canvas with a Text child named ""Hud"".</summary>
+public class UIManager : MonoBehaviour
+{
+    public Text HudText;
+
+    void Awake()
     {
-        var ground = "a1b2c3d4000000000000000000000001";
-        var player = "a1b2c3d40000000000000000000002";
-        var cam = "a1b2c3d40000000000000000000003";
-        var light = "a1b2c3d40000000000000000000004";
-        var coin1 = "a1b2c3d40000000000000000000005";
-        var coin2 = "a1b2c3d40000000000000000000006";
-        var coin3 = "a1b2c3d40000000000000000000007";
-        var goal = "a1b2c3d40000000000000000000008";
+        if (HudText == null) HudText = GetComponentInChildren<Text>();
+    }
+}
+";
+
+    static string UnityScene(string sceneGuid)
+    {
+        var ground = "a1b2c3d400000000000000000000001";
+        var player = "a1b2c3d400000000000000000000002";
+        var cam = "a1b2c3d400000000000000000000003";
+        var light = "a1b2c3d400000000000000000000004";
+        var coin1 = "a1b2c3d400000000000000000000005";
+        var coin2 = "a1b2c3d400000000000000000000006";
+        var coin3 = "a1b2c3d400000000000000000000007";
+        var enemy1 = "a1b2c3d400000000000000000000008";
+        var goal = "a1b2c3d400000000000000000000009";
+        var canvas = "a1b2c3d40000000000000000000000a";
+        var hud = "a1b2c3d40000000000000000000000b";
         return $@"%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!29 &1
@@ -469,6 +686,7 @@ GameObject:
   m_ObjectHideFlags: 0
   m_Name: Player
   m_IsActive: 1
+  m_TagString: Player
   m_Component:
   - component: {{fileID: {player}p}}
   - component: {{fileID: {player}r}}
@@ -583,11 +801,32 @@ SpriteRenderer:
   m_ObjectHideFlags: 0
   m_GameObject: {{fileID: {coin3}}}
   m_Color: {{r: 1, g: 0.82, b: 0.25, a: 1}}
+--- !u!1 &{enemy1}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Enemy
+  m_IsActive: 1
+  m_TagString: Enemy
+  m_Component:
+  - component: {{fileID: {enemy1}c}}
+  - component: {{fileID: {enemy1}s}}
+--- !u!61 &{enemy1}c
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {enemy1}}}
+  m_IsTrigger: 1
+  m_Size: {{x: 1, y: 1}}
+--- !u!114 &{enemy1}s
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {enemy1}}}
+  m_Name: Enemy
 --- !u!1 &{goal}
 GameObject:
   m_ObjectHideFlags: 0
   m_Name: Goal
   m_IsActive: 1
+  m_TagString: Goal
   m_Component:
   - component: {{fileID: {goal}c}}
 --- !u!61 &{goal}c
@@ -596,49 +835,407 @@ BoxCollider2D:
   m_GameObject: {{fileID: {goal}}}
   m_IsTrigger: 1
   m_Size: {{x: 1, y: 3}}
---- !u!114 &{goal}g
+--- !u!1 &{canvas}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: UIManager
+  m_IsActive: 1
+  m_Component:
+  - component: {{fileID: {canvas}c}}
+  - component: {{fileID: {canvas}h}}
+--- !u!223 &{canvas}c
+Canvas:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {canvas}}}
+  m_RenderMode: 0
+--- !u!114 &{canvas}h
 MonoBehaviour:
   m_ObjectHideFlags: 0
-  m_GameObject: {{fileID: {goal}}}
-  m_Name: GameManager
+  m_GameObject: {{fileID: {canvas}}}
+  m_Name: UIManager
+--- !u!1 &{hud}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name: Hud
+  m_IsActive: 1
+  m_Parent: {{fileID: {canvas}}}
+  m_Component:
+  - component: {{fileID: {hud}t}}
+--- !u!114 &{hud}t
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_GameObject: {{fileID: {hud}}}
+  m_Name: Hud
+  m_Text: Pixel Rush
+  m_FontData:
+    m_FontSize: 24
 ";
     }
 
-    static string GodotProject(bool is3D) =>
-        "[application]\n\n" +
-            "config/name=\"GodotGame\"\n" +
-            "run/main_scene=\"res://Main.tscn\"\n" +
-            (is3D ? "[rendering]\nrenderer/rendering_method=\"forward_plus\"\n" : "[display]\nwindow/size/viewport_width=1280\nwindow/size/viewport_height=720\n") +
-            // Export preset named "Windows Desktop" - matches the --export-release
-            // target used by WorkspaceService, so the Godot "Bygg spel" button
-            // actually produces a .exe instead of erroring "preset not found".
-            "\n[export]\n\n" +
-            "[export_profile]\n" +
-            "name=\"Windows Desktop\"\n" +
-            "platform=\"Windows Desktop\"\n" +
-            "export_path=\"build/GodotGame.exe\"\n" +
-            "include_filter=\"\"\n" +
-            "exclude_filter=\"\"\n" +
-            "patches=\"\"\n";
+    static string GodotProject() =>
+        "[application]\n" +
+        "config/name=\"Pixel Rush\"\n" +
+        "run/main_scene=\"res://Game.tscn\"\n" +
+        "config/features=PackedStringArray(\"4.3\")\n" +
+        "[display]\n" +
+        "window/size/viewport_width=1280\n" +
+        "window/size/viewport_height=720\n" +
+        "[input]\n" +
+        "left={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 65, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
+        "right={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 68, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
+        "jump={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 32, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
+        // Export preset named "Windows Desktop" - matches the --export-release
+        // target so "Bygg spel" produces a .exe instead of erroring.
+        "\n[export]\n\n[export_profile]\n" +
+        "name=\"Windows Desktop\"\nplatform=\"Windows Desktop\"\n" +
+        "export_path=\"build/PixelRush.exe\"\ninclude_filter=\"\"\nexclude_filter=\"\"\npatches=\"\"\n";
 
-    static string GodotScene(bool is3D) =>
-        @"[gd_scene load_steps=2 format=3 uid=""uid://b" + (is3D ? "3d" : "2d") + @"game""]
+    static string GodotGame() =>
+@"using Godot;
+using System.Collections.Generic;
 
-[ext_resource type=""Script"" path=""res://Main.cs"" id=""1""]
-
-[node name=""Main"" type=""Node2D""]
-script = ExtResource(""1"")
-";
-
-    static string GodotScript() =>
-        @"using Godot;
-
-public partial class Main : Node2D
+/// <summary>Level controller + HUD + win/lose + pause + sound. Holds the
+/// score, player hp and the 3 hand-authored levels, spawns them, and listens
+/// for the player's score/hp events.</summary>
+public partial class Game : Node2D
 {
+    [Export] public int Levels = 3;
+    [Export] public int PlayerHp = 5;
+
+    private int _score;
+    private int _hp;
+    private int _level = 1;
+    private bool _paused;
+    private Label _hud;
+    private Node2D _world;
+    private AudioStreamPlayer _sfx;
+
+    // Each level is a small layout: platforms (x,y,w), coins, enemies, goal.
+    private static readonly (float[] Plats, (float x, float y)[] Coins, (float x, float y, float range)[] Enemies, (float x, float y) Goal)[] LevelsData = new[]
+    {
+        (new[] {0f,640f,1280f, 200f,500f,220f, 700f,520f,220f},
+         new[] {(300f,460f),(520f,470f),(820f,540f)},
+         new[] {(560f,440f,120f)},
+         (1180f,540f)),
+        (new[] {0f,640f,1280f, 160f,520f,180f, 460f,460f,180f, 820f,540f,200f},
+         new[] {(260f,480f),(520f,420f),(780f,500f),(1040f,500f)},
+         new[] {(420f,420f,140f),(900f,500f,120f)},
+         (1210f,500f)),
+        (new[] {0f,640f,1280f, 140f,540f,160f, 420f,470f,160f, 700f,540f,160f, 980f,470f,180f},
+         new[] {(240f,500f),(420f,430f),(700f,500f),(980f,430f),(1140f,430f)},
+         new[] {(360f,430f,130f),(620f,480f,150f),(1040f,430f,120f)},
+         (1230f,430f)),
+    };
+
     public override void _Ready()
     {
-        GD.Print(""Godot game started. TODO: game logic."");
+        _hp = PlayerHp;
+        _hud = GetNode<Label>(""HUD/Margin/Label"");
+        _world = GetNode<Node2D>(""World"");
+        _sfx = GetNode<AudioStreamPlayer>(""Sfx"");
+        LoadLevel(_level);
+        UpdateHud();
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (e is InputEventKey k && k.Pressed && k.Keycode == Key.Escape)
+            TogglePause();
+    }
+
+    private void TogglePause()
+    {
+        _paused = !_paused;
+        GetTree().Paused = _paused;
+        _hud.Text = _paused ? ""PAUSED - Esc for fortsatt"" : _hud.Text;
+        if (!_paused) UpdateHud();
+    }
+
+    private void LoadLevel(int lvl)
+    {
+        foreach (Node c in _world.GetChildren()) c.QueueFree();
+        var data = LevelsData[lvl - 1];
+
+        // Ground + platforms.
+        for (var i = 0; i < data.Plats.Length; i += 3)
+            Spawn(""Platform.tscn"", data.Plats[i], data.Plats[i + 1], data.Plats[i + 2]);
+
+        // Coins.
+        foreach (var c in data.Coins) Spawn(""Coin.tscn"", c.x, c.y);
+
+        // Enemies (patrol between x-range and x+range).
+        foreach (var e in data.Enemies) Spawn(""Enemy.tscn"", e.x, e.y, e.range);
+
+        // Player + goal.
+        var player = Spawn(""Player.tscn"", 60, 540);
+        player.Connect(Player.SignalName.Scored, Callable.From<int>(OnScored));
+        player.Connect(Player.SignalName.Hurt, Callable.From<int>(OnHurt));
+        player.Connect(Player.SignalName.LevelCleared, Callable.From(() => OnLevelCleared()));
+        Spawn(""Goal.tscn"", data.Goal.x, data.Goal.y);
+    }
+
+    private Node2D Spawn(string scene, float x, float y, float extra = 0)
+    {
+        var node = (Node2D)GD.Load<PackedScene>(""res://"" + scene).Instantiate();
+        node.Position = new Vector2(x, y);
+        if (extra != 0 && node is Enemy en) en.Range = extra;
+        _world.AddChild(node);
+        return node;
+    }
+
+    private void OnScored(int amount)
+    {
+        _score += amount;
+        Play(""res://coin.wav"");
+        UpdateHud();
+    }
+
+    private void OnHurt(int amount)
+    {
+        _hp -= amount;
+        Play(""res://hurt.wav"");
+        UpdateHud();
+        if (_hp <= 0) GameOver();
+    }
+
+    private void OnLevelCleared()
+    {
+        Play(""res://win.wav"");
+        if (_level >= Levels) Win();
+        else { _level++; LoadLevel(_level); UpdateHud(); }
+    }
+
+    private void Win()
+    {
+        GetTree().Paused = false;
+        _hud.Text = $""DU VANN! Poang: {_score}"";
+    }
+
+    private void GameOver()
+    {
+        GetTree().Paused = false;
+        _hud.Text = $""GAME OVER - Poang: {_score}. Tryck R for nytt forsok."";
+    }
+
+    private void Play(string path)
+    {
+        var stream = GD.Load<AudioStream>(path);
+        if (stream != null) { _sfx.Stream = stream; _sfx.Play(); }
+    }
+
+    private void UpdateHud() =>
+        _hud.Text = $""Niva {_level}/{Levels}   Poang {_score}   HP {_hp}"";
+}
+";
+
+    static string GodotPlayer() =>
+@"using Godot;
+
+/// <summary>Kinematic platformer character: run, jump (coyote-free), gravity,
+/// screen flip, and contact handling for coins / enemies / goal.</summary>
+public partial class Player : CharacterBody2D
+{
+    [Signal] public delegate void ScoredEventHandler(int amount);
+    [Signal] public delegate void HurtEventHandler(int amount);
+    [Signal] public delegate void LevelClearedEventHandler();
+
+    [Export] public float Speed = 260f;
+    [Export] public float Jump = 560f;
+    [Export] public float Gravity = 1400f;
+
+    private Vector2 _vel;
+    private bool _grounded;
+    private AnimatedSprite2D _sprite;
+
+    public override void _Ready()
+    {
+        _sprite = GetNode<AnimatedSprite2D>(""Sprite2D"");
+        var anim = new Animation { SpriteFrames = null };
+    }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        _vel.Y += Gravity * (float)delta;
+        float dir = 0;
+        if (Input.IsActionPressed(""left"")) dir -= 1;
+        if (Input.IsActionPressed(""right"")) dir += 1;
+        _vel.X = dir * Speed;
+
+        if (Input.IsActionJustPressed(""jump"") && IsOnFloor())
+            _vel.Y = -Jump;
+
+        _grounded = IsOnFloor();
+        if (dir != 0) _sprite.FlipH = dir < 0;
+        _sprite.Play(_grounded ? ""idle"" : ""jump"");
+
+        _vel = MoveAndSlide(_vel, Vector2.Up);
+    }
+
+    private void OnCoinBodyEntered(Node body)
+    {
+        if (body is Coin c) { c.Collect(); EmitSignal(SignalName.Scored, 10); }
+    }
+
+    private void OnEnemyBodyEntered(Node body)
+    {
+        if (body is Enemy) EmitSignal(SignalName.Hurt, 1);
+    }
+
+    private void OnGoalBodyEntered(Node body)
+    {
+        if (body.IsInGroup(""goal"")) EmitSignal(SignalName.LevelCleared);
     }
 }
+";
+
+    static string GodotEnemy() =>
+@"using Godot;
+
+/// <summary>Patrols left/right between its start and start+Range, and damages
+/// the player on contact.</summary>
+public partial class Enemy : CharacterBody2D
+{
+    [Export] public float Range = 120f;
+    [Export] public float Speed = 90f;
+
+    private float _minX;
+    private float _dir = 1;
+    private Vector2 _vel;
+
+    public override void _Ready() => _minX = Position.X;
+
+    public override void _PhysicsProcess(double delta)
+    {
+        _vel.Y += 1400f * (float)delta;
+        if (Position.X <= _minX || Position.X >= _minX + Range) _dir *= -1;
+        _vel.X = _dir * Speed;
+        _vel = MoveAndSlide(_vel, Vector2.Up);
+    }
+}
+";
+
+    static string GodotCoin() =>
+@"using Godot;
+
+/// <summary>Collectible: disappears on player contact and reports score.</summary>
+public partial class Coin : Area2D
+{
+    private bool _taken;
+
+    public void Collect()
+    {
+        if (_taken) return;
+        _taken = true;
+        QueueFree();
+    }
+}
+";
+
+    static string GodotGameScene() =>
+@"[gd_scene load_steps=6 format=3 uid=""uid://b2dgame""]
+
+[ext_resource type=""Script"" path=""res://Game.cs"" id=""1""]
+[ext_resource type=""Script"" path=""res://Player.cs"" id=""2""]
+
+[node name=""Game"" type=""Node2D""]
+script = ExtResource(""1"")
+
+[node name=""World"" type=""Node2D"" parent="".""]
+
+[node name=""Sfx"" type=""AudioStreamPlayer"" parent="".""]
+
+[node name=""HUD"" type=""CanvasLayer"" parent="".""]
+[node name=""Margin"" type=""MarginContainer"" parent=""HUD""]
+anchors_preset = 15
+[node name=""Label"" type=""Label"" parent=""Margin""]
+text = ""Pixel Rush""
+horizontal_alignment = 1
+";
+
+    static string GodotPlayerScene() =>
+@"[gd_scene load_steps=4 format=3 uid=""uid://b2dplayer""]
+
+[ext_resource type=""Script"" path=""res://Player.cs"" id=""1""]
+
+[sub_resource type=""RectangleShape2D"" id=""col""]
+size = Vector2(28, 44)
+
+[sub_resource type=""RectangleShape2D"" id=""hurt""]
+size = Vector2(30, 46)
+
+[node name=""Player"" type=""CharacterBody2D""]
+script = ExtResource(""1"")
+
+[node name=""Sprite2D"" type=""AnimatedSprite2D"" parent=""Player""]
+frame = 0
+
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Player""]
+shape = SubResource(""col"")
+
+[node name=""CoinSensor"" type=""Area2D"" parent=""Player""]
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""CoinSensor""]
+shape = SubResource(""hurt"")
+
+[connection signal=""body_entered"" from=""CoinSensor"" to=""Player"" method=""OnCoinBodyEntered""]
+";
+
+    static string GodotEnemyScene() =>
+@"[gd_scene load_steps=3 format=3 uid=""uid://b2denemy""]
+
+[ext_resource type=""Script"" path=""res://Enemy.cs"" id=""1""]
+
+[sub_resource type=""RectangleShape2D"" id=""col""]
+size = Vector2(30, 30)
+
+[node name=""Enemy"" type=""CharacterBody2D""]
+script = ExtResource(""1"")
+
+[node name=""Sprite2D"" type=""Sprite2D"" parent=""Enemy""]
+centered = false
+
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Enemy""]
+shape = SubResource(""col"")
+";
+
+    static string GodotCoinScene() =>
+@"[gd_scene load_steps=3 format=3 uid=""uid://b2dcoin""]
+
+[ext_resource type=""Script"" path=""res://Coin.cs"" id=""1""]
+
+[sub_resource type=""CircleShape2D"" id=""c""]
+radius = 12
+
+[node name=""Coin"" type=""Area2D""]
+script = ExtResource(""1"")
+
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Coin""]
+shape = SubResource(""c"")
+";
+
+    static string GodotGoalScene() =>
+@"[gd_scene load_steps=2 format=3 uid=""uid://b2dgoal""]
+
+[ext_resource type=""Script"" path=""res://Game.cs"" id=""1""]
+
+[sub_resource type=""RectangleShape2D"" id=""c""]
+size = Vector2(30, 60)
+
+[node name=""Goal"" type=""Area2D""]
+groups = [""goal""]
+
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Goal""]
+shape = SubResource(""c"")
+";
+
+    static string GodotPlatformScene() =>
+@"[gd_scene load_steps=2 format=3 uid=""uid://b2dplat""]
+
+[sub_resource type=""RectangleShape2D"" id=""c""]
+size = Vector2(200, 24)
+
+[node name=""Platform"" type=""StaticBody2D""]
+
+[node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Platform""]
+shape = SubResource(""c"")
 ";
 }
