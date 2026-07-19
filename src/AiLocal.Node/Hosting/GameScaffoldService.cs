@@ -1032,7 +1032,8 @@ public partial class Game : Node2D
 @"using Godot;
 
 /// <summary>Kinematic platformer character: run, jump (coyote-free), gravity,
-/// screen flip, and contact handling for coins / enemies / goal.</summary>
+/// screen flip, and contact handling for coins / enemies / goal. The sprite is
+/// a generated solid rectangle (no external art needed) so it just renders.</summary>
 public partial class Player : CharacterBody2D
 {
     [Signal] public delegate void ScoredEventHandler(int amount);
@@ -1045,12 +1046,15 @@ public partial class Player : CharacterBody2D
 
     private Vector2 _vel;
     private bool _grounded;
-    private AnimatedSprite2D _sprite;
+    private Sprite2D _sprite;
 
     public override void _Ready()
     {
-        _sprite = GetNode<AnimatedSprite2D>(""Sprite2D"");
-        var anim = new Animation { SpriteFrames = null };
+        _sprite = GetNode<Sprite2D>(""Sprite2D"");
+        // Solid blue rectangle so the character is visible with zero assets.
+        var img = Image.Create(28, 44, false, Image.Format.Rgba8);
+        img.Fill(Colors.CornflowerBlue);
+        _sprite.Texture = ImageTexture.CreateFromImage(img);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -1066,24 +1070,23 @@ public partial class Player : CharacterBody2D
 
         _grounded = IsOnFloor();
         if (dir != 0) _sprite.FlipH = dir < 0;
-        _sprite.Play(_grounded ? ""idle"" : ""jump"");
 
-        _vel = MoveAndSlide(_vel, Vector2.Up);
+        Velocity = _vel;
+        MoveAndSlide();
+        _vel = Velocity;
     }
 
-    private void OnCoinBodyEntered(Node body)
+    // The CoinSensor Area2D fires these for overlapping areas (coins, goal)
+    // and bodies (enemies, ground).
+    private void _OnSensorAreaEntered(Area2D area)
     {
-        if (body is Coin c) { c.Collect(); EmitSignal(SignalName.Scored, 10); }
+        if (area is Coin c) { c.Collect(); EmitSignal(SignalName.Scored, 10); }
+        else if (area.IsInGroup(""goal"")) EmitSignal(SignalName.LevelCleared);
     }
 
-    private void OnEnemyBodyEntered(Node body)
+    private void _OnSensorBodyEntered(Node body)
     {
         if (body is Enemy) EmitSignal(SignalName.Hurt, 1);
-    }
-
-    private void OnGoalBodyEntered(Node body)
-    {
-        if (body.IsInGroup(""goal"")) EmitSignal(SignalName.LevelCleared);
     }
 }
 ";
@@ -1109,7 +1112,10 @@ public partial class Enemy : CharacterBody2D
         _vel.Y += 1400f * (float)delta;
         if (Position.X <= _minX || Position.X >= _minX + Range) _dir *= -1;
         _vel.X = _dir * Speed;
-        _vel = MoveAndSlide(_vel, Vector2.Up);
+
+        Velocity = _vel;
+        MoveAndSlide();
+        _vel = Velocity;
     }
 }
 ";
@@ -1166,8 +1172,7 @@ size = Vector2(30, 46)
 [node name=""Player"" type=""CharacterBody2D""]
 script = ExtResource(""1"")
 
-[node name=""Sprite2D"" type=""AnimatedSprite2D"" parent=""Player""]
-frame = 0
+[node name=""Sprite2D"" type=""Sprite2D"" parent=""Player""]
 
 [node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Player""]
 shape = SubResource(""col"")
@@ -1176,7 +1181,8 @@ shape = SubResource(""col"")
 [node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""CoinSensor""]
 shape = SubResource(""hurt"")
 
-[connection signal=""body_entered"" from=""CoinSensor"" to=""Player"" method=""OnCoinBodyEntered""]
+[connection signal=""area_entered"" from=""CoinSensor"" to=""Player"" method=""_OnSensorAreaEntered""]
+[connection signal=""body_entered"" from=""CoinSensor"" to=""Player"" method=""_OnSensorBodyEntered""]
 ";
 
     static string GodotEnemyScene() =>
