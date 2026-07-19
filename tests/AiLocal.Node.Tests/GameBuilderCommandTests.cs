@@ -91,6 +91,26 @@ public class GameBuilderCommandTests
     }
 
     [Fact]
+    public async Task BuildAsync_AutoOnHtml5Project_ReportsNoBuildNeeded()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "index.html"), "<canvas></canvas>");
+
+        var builder = new GameBuilder();
+        var (success, output, exePath) = await builder.BuildAsync("auto", root,
+            (c, dir, ct) => Task.FromResult((0, "")), CancellationToken.None);
+
+        // The most common project type must not error with "okant motor" -
+        // an html5 game needs no engine build, and 'auto' should know that.
+        Assert.True(success, output);
+        Assert.Null(exePath);
+        Assert.Contains("webblasare", output);
+
+        Directory.Delete(root, recursive: true);
+    }
+
+    [Fact]
     public async Task BuildAsync_GodotNotFound_ReturnsActionableError()
     {
         var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));

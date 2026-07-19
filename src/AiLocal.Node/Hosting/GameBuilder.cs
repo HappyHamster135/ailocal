@@ -52,6 +52,10 @@ public sealed class GameBuilder
         if (File.Exists(Path.Combine(root, "project.godot"))) return "godot";
         if (File.Exists(Path.Combine(root, "ProjectSettings", "ProjectVersion.txt"))
             || Directory.Exists(Path.Combine(root, "Assets"))) return "unity";
+        // A scaffolded HTML5 game IS the artifact - 'auto' must recognize it
+        // instead of erroring with "okant motor 'unknown'" on the most common
+        // project type (BuildAsync then reports that no build is needed).
+        if (File.Exists(Path.Combine(root, "index.html"))) return "html5";
         return "unknown";
     }
 
