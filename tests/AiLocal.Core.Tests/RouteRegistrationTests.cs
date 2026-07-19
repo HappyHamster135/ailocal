@@ -106,4 +106,32 @@ public sealed class RouteRegistrationTests
             "Duplicate route registrations (would throw AmbiguousMatchException at runtime):\n" +
             string.Join("\n", problems));
     }
+
+    /// <summary>Guards the ask_user endpoint fix: pending-info/answer-info were
+    /// once registered INSIDE the /run handler's success branch (a merge
+    /// accident), which 404'd every answer until some earlier run had succeeded
+    /// - and then double-registered the route on the next success. The /run
+    /// registration is the last Map* call in SessionApi.MapEndpoints and spans
+    /// to the end of the method, so "registered before /run in the source" is
+    /// exactly "registered at startup".</summary>
+    [Fact]
+    public void SessionInfoEndpoints_AreRegisteredAtStartup_NotInsideTheRunHandler()
+    {
+        var sessionApi = Path.Combine(RepoRoot(), "src", "AiLocal.Node", "Roles", "SessionApi.cs");
+        Assert.True(File.Exists(sessionApi), $"SessionApi.cs not found at {sessionApi}");
+        var lines = File.ReadAllLines(sessionApi);
+
+        int LineOf(string fragment) => Array.FindIndex(lines, l => l.Contains(fragment)) + 1;
+        var pendingInfo = LineOf("\"/api/sessions/{id}/pending-info\"");
+        var answerInfo = LineOf("\"/api/sessions/{id}/answer-info\"");
+        var run = LineOf("\"/api/sessions/{id}/run\"");
+
+        Assert.True(pendingInfo > 0, "pending-info endpoint is not registered at all");
+        Assert.True(answerInfo > 0, "answer-info endpoint is not registered at all");
+        Assert.True(run > 0, "run endpoint not found (test anchor broke - update this test)");
+        Assert.True(pendingInfo < run,
+            "pending-info is registered after /run begins - it has been re-nested inside the run handler");
+        Assert.True(answerInfo < run,
+            "answer-info is registered after /run begins - it has been re-nested inside the run handler");
+    }
 }

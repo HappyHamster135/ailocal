@@ -80,6 +80,26 @@ public sealed class AgentToolExecutor
     // human, so the tool is simply not advertised there. Args: (questionsJson,
     // ct) -> the operator's free-text answer.
     private readonly Func<string, CancellationToken, Task<string>>? _askUser;
+    // Optional asset-generator delegate (Node layer wires this to AssetGenerator).
+    // Args: (type, prompt, width, height, outputPath, ct) -> (success, output, filePath).
+    private readonly Func<string, string, int?, int?, string, CancellationToken, Task<(bool Success, string Output, string? FilePath)>>? _assetGenerator;
+    // Optional screenshot delegate (Node layer wires this to ScreenshotTool).
+    // Args: (windowTitle, outputPath, ct) -> (success, output, filePath).
+    private readonly Func<string?, string, CancellationToken, Task<(bool Success, string Output, string? FilePath)>>? _screenshotTool;
+    // Optional playtest delegate (Node layer wires this to GamePlaytester).
+    // Args: (projectRoot, engine, ct) -> PlaytestResult.
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output, double Fps, double PeakMemoryMb, TimeSpan Duration)>>? _playtester;
+    // Optional package delegate (Node layer wires this to PackageService).
+    // Args: (projectRoot, engine, gameName, outputDir, ct) -> (success, output, packagePath, size).
+    private readonly Func<string, string, string, string?, CancellationToken, Task<(bool Success, string Output, string? PackagePath, long SizeBytes)>>? _packager;
+    // Optional knowledge lookup delegate (Node layer wires this to GameKnowledgeBase).
+    // Args: (engine, errorText) -> (found, fixes, bestPractices).
+    private readonly Func<string, string, Task<(bool Found, string Fixes, string BestPractices)>>? _knowledgeBase;
+    // Optional game-module delegate (Node layer wires this to GameModuleLibrary):
+    // ready-made production systems (inventory, dialog, quest, save, ...) the
+    // agent can pull in per engine instead of hand-writing them. Args:
+    // (action 'list'|'get', moduleName, engine) -> (success, output).
+    private readonly Func<string, string?, string?, Task<(bool Success, string Output)>>? _gameModules;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -94,7 +114,13 @@ public sealed class AgentToolExecutor
         Func<string, string, CancellationToken, Task<(bool Success, string Output, string? ExePath)>>? gameBuilder = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null,
         Func<string, string?, CancellationToken, Task<(bool Success, string Output)>>? taskDelegator = null,
-        Func<string, CancellationToken, Task<string>>? askUser = null)
+                Func<string, CancellationToken, Task<string>>? askUser = null,
+                Func<string, string, int?, int?, string, CancellationToken, Task<(bool Success, string Output, string? FilePath)>>? assetGenerator = null,
+                Func<string?, string, CancellationToken, Task<(bool Success, string Output, string? FilePath)>>? screenshotTool = null,
+                Func<string, string, CancellationToken, Task<(bool Success, string Output, double Fps, double PeakMemMb, TimeSpan Duration)>>? playtester = null,
+                Func<string, string, string, string?, CancellationToken, Task<(bool Success, string Output, string? PackagePath, long SizeBytes)>>? packager = null,
+                Func<string, string, Task<(bool Found, string Fixes, string BestPractices)>>? knowledgeBase = null,
+                Func<string, string?, string?, Task<(bool Success, string Output)>>? gameModules = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -108,7 +134,13 @@ public sealed class AgentToolExecutor
         _gameBuilder = gameBuilder;
         _appScaffolder = appScaffolder;
         _taskDelegator = taskDelegator;
-        _askUser = askUser;
+                _askUser = askUser;
+                _assetGenerator = assetGenerator;
+                _screenshotTool = screenshotTool;
+                _playtester = playtester;
+                _packager = packager;
+                _knowledgeBase = knowledgeBase;
+                _gameModules = gameModules;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -118,9 +150,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null, _gameBuilder is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null, _gameBuilder is not null, _assetGenerator is not null, _screenshotTool is not null, _playtester is not null, _packager is not null, _knowledgeBase is not null, _gameModules is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false, bool gameBuild = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false, bool gameBuild = false, bool hasAssetGen = false, bool hasScreenshot = false, bool hasPlaytest = false, bool hasPackage = false, bool hasKnowledge = false, bool hasGameModules = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -215,9 +247,45 @@ public sealed class AgentToolExecutor
         // Keeps the main agent's context focused on orchestration instead of
         // drowning in every sub-file. Only wired where a delegator is available.
         if (canDelegate)
-            tools.Add(new("delegate_task",
-                "Hand a self-contained sub-task to a fresh sub-agent run and get its result back. Use to parallelize or isolate a piece of work (e.g. 'implement the save-system module', 'write unit tests for X') so the main conversation stays focused. Give a COMPLETE, self-contained prompt - the sub-agent has no memory of this conversation. Returns the sub-agent's final answer.",
-                "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"A complete, self-contained task description for the sub-agent.\"},\"system\":{\"type\":\"string\",\"description\":\"Optional extra system instructions for the sub-agent (e.g. 'only write tests, do not edit game logic').\"}},\"required\":[\"prompt\"]}"));
+                    tools.Add(new("delegate_task",
+                        "Hand a self-contained sub-task to a fresh sub-agent run and get its result back. Use to parallelize or isolate a piece of work (e.g. 'implement the save-system module', 'write unit tests for X') so the main conversation stays focused. Give a COMPLETE, self-contained prompt - the sub-agent has no memory of this conversation. Returns the sub-agent's final answer.",
+                        """{"type":"object","properties":{"prompt":{"type":"string","description":"A complete, self-contained task description for the sub-agent."},"system":{"type":"string","description":"Optional extra system instructions for the sub-agent (e.g. 'only write tests, do not edit game logic')."}},"required":["prompt"]}"""));
+
+                // ---- P0: Asset pipeline -----------------------------------------------
+                if (hasAssetGen)
+                    tools.Add(new("generate_asset",
+                        "Generate a game/app asset using AI. Creates images (sprites, textures, backgrounds, UI), audio (sound effects, music), or 3D models. Saves directly to the project files. type: 'image'/'sprite'/'texture'/'background'/'ui'/'sfx'/'music'/'model3d'. width/height default to 512x512 for images. prompt describes what to generate. Returns the saved file path.",
+                        """{"type":"object","properties":{"type":{"type":"string","description":"Asset type: 'image', 'sprite', 'texture', 'background', 'ui', 'sfx', 'music', 'model3d'."},"prompt":{"type":"string","description":"Description of the asset to generate, e.g. 'a pixel-art hero character, 64x64'."},"width":{"type":"integer","description":"Image width (default 512)."},"height":{"type":"integer","description":"Image height (default 512)."},"output":{"type":"string","description":"Relative path for the output file (default: auto-generated name in assets/)."}},"required":["type","prompt"]}"""));
+
+                // ---- P0: Visual feedback ----------------------------------------------
+                if (hasScreenshot)
+                    tools.Add(new("screenshot",
+                        "Take a screenshot of the screen (or a specific window) and save it as a PNG. Use this to SEE your game/app and check for visual bugs.",
+                        """{"type":"object","properties":{"windowTitle":{"type":"string","description":"Optional partial window title to capture a specific window."},"output":{"type":"string","description":"Where to save the PNG (default: screenshots/screenshot-{timestamp}.png)."}},"required":[]}"""));
+
+                // ---- P2: Playtesting --------------------------------------------------
+                if (hasPlaytest)
+                    tools.Add(new("playtest",
+                        "Run the built game and analyze it for issues: performance (FPS, memory), crashes, errors. For HTML5 games, performs static code analysis. For .exe builds, runs the process and monitors it. Use after build_game to verify the game actually works.",
+                        """{"type":"object","properties":{"root":{"type":"string","description":"Project root directory. Defaults to workspace root."},"engine":{"type":"string","description":"Engine: 'html5', 'unity', 'godot', or 'auto'."}},"required":[]}"""));
+
+                // ---- P3: Packaging ----------------------------------------------------
+                if (hasPackage)
+                    tools.Add(new("package",
+                        "Package the built game/app into a distributable .zip file with auto-generated README and metadata. Includes all .exe, assets, and dependencies. Use when the game/app is fully built and tested to create a release artifact.",
+                        """{"type":"object","properties":{"root":{"type":"string","description":"Project root directory."},"engine":{"type":"string","description":"Engine: 'html5', 'unity', 'godot', 'python', 'csharp'."},"name":{"type":"string","description":"Human-readable name for the release package."},"outputDir":{"type":"string","description":"Output directory for the .zip (default: {root}/release)."}},"required":[]}"""));
+
+                // ---- Ready-made game modules ------------------------------------------
+                if (hasGameModules)
+                    tools.Add(new("game_module",
+                        "Fetch READY-MADE, production-quality game systems instead of hand-writing them: inventory, dialog, quest, save/load, health/combat, XP/progression, enemy AI, particle effects. Call with action='list' to see what exists, then action='get' with name and engine ('html5'|'godot'|'unity') to receive drop-in code to adapt into the project. Prefer these over writing the same system from scratch.",
+                        """{"type":"object","properties":{"action":{"type":"string","description":"'list' to enumerate available modules, 'get' to fetch one module's code."},"name":{"type":"string","description":"Module name for 'get', e.g. 'InventorySystem' or the short alias 'inventory'."},"engine":{"type":"string","description":"Engine for 'get': 'html5', 'godot', or 'unity'."}},"required":["action"]}"""));
+
+                // ---- Knowledge base lookup --------------------------------------------
+                if (hasKnowledge)
+                    tools.Add(new("lookup_knowledge",
+                        "Look up known errors and best practices for a game engine. Pass an error message and the engine name to get matching fixes and best practices. Use when you hit a build/runtime error you don't understand.",
+                        """{"type":"object","properties":{"engine":{"type":"string","description":"Engine: 'unity', 'godot', or 'html5'."},"error":{"type":"string","description":"The error message or problem description to look up."}},"required":["engine","error"]}"""));
 
         return tools;
     }
@@ -266,6 +334,18 @@ public sealed class AgentToolExecutor
                 "run_command" => Error(call, "run_command is not available at this Worker's current access level (Sandboxed allows file access only)."),
                 "fetch_url" when _allowInternet => await FetchUrlAsync(call, root, ct),
                 "fetch_url" => Error(call, "fetch_url is not available - internet access is disabled on this Worker (Inställningar -> Agent & arbetsyta)."),
+                "generate_asset" when _assetGenerator is not null => await GenerateAssetAsync(call, root, ct),
+                "generate_asset" => Error(call, "generate_asset is not available on this Worker (asset generator not wired)."),
+                "screenshot" when _screenshotTool is not null => await ScreenshotAsync(call, root, ct),
+                "screenshot" => Error(call, "screenshot is not available on this Worker (screenshot tool not wired)."),
+                "playtest" when _playtester is not null => await PlaytestAsync(call, root, ct),
+                "playtest" => Error(call, "playtest is not available on this Worker (playtester not wired)."),
+                "package" when _packager is not null => await PackageAsync(call, root, ct),
+                "package" => Error(call, "package is not available on this Worker (packager not wired)."),
+                "lookup_knowledge" when _knowledgeBase is not null => await LookupKnowledgeAsync(call, root, ct),
+                "lookup_knowledge" => Error(call, "lookup_knowledge is not available on this Worker (knowledge base not wired)."),
+                "game_module" when _gameModules is not null => await GameModuleAsync(call, root, ct),
+                "game_module" => Error(call, "game_module is not available on this Worker (module library not wired)."),
                 _ => Error(call, $"unknown tool: {call.Name}")
             };
         }
@@ -935,4 +1015,107 @@ public sealed class AgentToolExecutor
         s.Length > MaxOutputChars ? s[..MaxOutputChars] + $"\n...(truncated, {s.Length} characters total)" : s;
 
     private static ToolResult Error(ToolCall call, string message) => new(call.Id, call.Name, message, IsError: true);
-}
+
+        // ---- New tool PeakMemoryMb (P0-P3) ------------------------------------------
+
+        private async Task<ToolResult> GenerateAssetAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_assetGenerator is null)
+                return Error(call, "generate_asset is not wired.");
+            var type = RequireString(args, "type");
+            var prompt = RequireString(args, "prompt");
+            var width = args.TryGetProperty("width", out var w) && w.ValueKind == JsonValueKind.Number ? (int?)w.GetInt32() : null;
+            var height = args.TryGetProperty("height", out var h) && h.ValueKind == JsonValueKind.Number ? (int?)h.GetInt32() : null;
+            var output = args.TryGetProperty("output", out var o) && o.ValueKind == JsonValueKind.String ? o.GetString()! : "";
+            // The tool promises "default: auto-generated name in assets/" -
+            // resolve it HERE so the generated file lands inside the agent's
+            // workspace (and respects sandbox confinement), not wherever this
+            // node's process happens to have its current directory. An empty
+            // path passed straight through used to throw in Path.GetFullPath.
+            var extension = type.Trim().ToLowerInvariant() switch
+            {
+                "sfx" or "music" or "audio" => ".wav",
+                "model3d" => ".glb",
+                _ => ".png"
+            };
+            output = string.IsNullOrWhiteSpace(output)
+                ? ResolvePath(Path.Combine("assets", $"{type.Trim().ToLowerInvariant()}-{Guid.NewGuid().ToString("n")[..8]}{extension}"))
+                : ResolvePath(output);
+            var (success, result, filePath) = await _assetGenerator(type, prompt, width, height, output, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name, filePath is not null ? $"Asset created: {filePath}\n{result}" : result)
+                : Error(call, result);
+        }
+
+        private async Task<ToolResult> ScreenshotAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_screenshotTool is null)
+                return Error(call, "screenshot is not wired.");
+            var windowTitle = args.TryGetProperty("windowTitle", out var wt) && wt.ValueKind == JsonValueKind.String ? wt.GetString() : null;
+            var output = args.TryGetProperty("output", out var o) && o.ValueKind == JsonValueKind.String ? o.GetString()! : "";
+            // Same default-path contract as generate_asset: an omitted output
+            // must land inside the workspace, not be passed through as "" (the
+            // tool would try Directory.CreateDirectory(GetDirectoryName(""))).
+            output = string.IsNullOrWhiteSpace(output)
+                ? ResolvePath(Path.Combine("screenshots", $"screenshot-{Guid.NewGuid().ToString("n")[..8]}.png"))
+                : ResolvePath(output);
+            var (success, result, filePath) = await _screenshotTool(windowTitle, output, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name, filePath is not null ? $"Screenshot saved: {filePath}\n{result}" : result)
+                : Error(call, result);
+        }
+
+        private async Task<ToolResult> PlaytestAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_playtester is null)
+                return Error(call, "playtest is not wired.");
+            var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } rp
+                ? rp : _workspaceRoot;
+            var engine = args.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString()! : "auto";
+            var (success, output, fps, peakMem, duration) = await _playtester(root, engine, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name, output)
+                : Error(call, output);
+        }
+
+        private async Task<ToolResult> PackageAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_packager is null)
+                return Error(call, "package is not wired.");
+            var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } rp
+                ? rp : _workspaceRoot;
+            var engine = args.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString()! : "auto";
+            var name = args.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()! : "Game";
+            var outputDir = args.TryGetProperty("outputDir", out var od) && od.ValueKind == JsonValueKind.String ? od.GetString() : null;
+            var (success, output, packagePath, size) = await _packager(root, engine, name, outputDir, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name, output)
+                : Error(call, output);
+        }
+
+        private async Task<ToolResult> GameModuleAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_gameModules is null)
+                return Error(call, "game_module is not wired.");
+            var action = RequireString(args, "action");
+            var name = args.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+            var engine = args.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() : null;
+            var (success, output) = await _gameModules(action, name, engine);
+            return success
+                ? new ToolResult(call.Id, call.Name, Truncate(output))
+                : Error(call, output);
+        }
+
+        private async Task<ToolResult> LookupKnowledgeAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_knowledgeBase is null)
+                return Error(call, "lookup_knowledge is not wired.");
+            var engine = RequireString(args, "engine");
+            var error = RequireString(args, "error");
+            var (found, fixes, bestPractices) = await _knowledgeBase(engine, error);
+            var result = found
+                ? $"## Hittade lösningar för: {error}\n\n{fixes}\n\n## Best Practices ({engine})\n{bestPractices}"
+                : $"Inga matchande fel hittades för '{error}'.\n\n## Best Practices ({engine})\n{bestPractices}";
+            return new ToolResult(call.Id, call.Name, result);
+        }
+    }

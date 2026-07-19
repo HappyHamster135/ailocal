@@ -1,5 +1,6 @@
 using AiLocal.Core.Agent;
 using AiLocal.Core.Contracts;
+using AiLocal.Node.Hosting;
 using Xunit;
 
 namespace AiLocal.Core.Tests;
@@ -72,5 +73,81 @@ public class GameBuilderTests
         var tools = AgentToolExecutor.ToolsFor(
             AgentAccessLevel.Full, gameBuild: false);
         Assert.DoesNotContain(tools, t => t.Name == "build_game");
+    }
+
+    // ---- GameBuilder itself: lock the engine command form (no real engine) ----
+
+    [Fact]
+    public async Task BuildGodot_CallsCorrectExportCommand()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gbtest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "build"));
+        File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
+
+        var capturedCmd = (string?)null;
+        var godotFinder = () => @"C:\Program Files\Godot\godot.exe";
+        Func<string, string, CancellationToken, Task<(int, string)>> runCommand =
+            (cmd, workDir, ct) =>
+            {
+                capturedCmd = cmd;
+                // godot --export-release would write the exe; simulate it.
+                File.WriteAllText(Path.Combine(root, "build", "PixelRush.exe"), "MZ");
+                return Task.FromResult((0, ""));
+            };
+
+        var result = await new GameBuilder().BuildAsync(
+            "godot", root, runCommand, CancellationToken.None, godotFinder);
+
+        Assert.True(result.Success);
+        Assert.Contains(@"C:\Program Files\Godot\godot.exe", capturedCmd);
+        Assert.Contains("--headless", capturedCmd);
+        Assert.Contains("--export-release", capturedCmd);
+        Assert.Contains("Windows Desktop", capturedCmd);
+        Assert.Contains(@"build\PixelRush.exe", capturedCmd);
+        // CRITICAL: Godot 4 exits before exporting if --quit precedes --export-release.
+        Assert.DoesNotContain("--quit", capturedCmd);
+        Assert.Equal(Path.Combine(root, "build", "PixelRush.exe"), result.ExePath);
+    }
+
+    [Fact]
+    public async Task BuildGodot_ExportFailure_SurfacesExitError()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gbtest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
+
+        var capturedCmd = (string?)null;
+        Func<string, string, CancellationToken, Task<(int, string)>> runCommand =
+            (cmd, workDir, ct) =>
+            {
+                capturedCmd = cmd;
+                return Task.FromResult((1, "ERROR: export preset not found"));
+            };
+
+        var result = await new GameBuilder().BuildAsync(
+            "godot", root, runCommand, CancellationToken.None,
+            godotFinder: () => @"C:\godot.exe");
+
+        Assert.False(result.Success);
+        Assert.Contains("export misslyckades", result.Output);
+        Assert.Contains("export preset not found", result.Output);
+        // the exact command that failed must reference the Windows preset
+        Assert.Contains("Windows Desktop", capturedCmd);
+    }
+
+    [Fact]
+    public async Task BuildGodot_NoEngine_ReportsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gbtest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
+
+        var result = await new GameBuilder().BuildAsync(
+            "godot", root,
+            (cmd, dir, ct) => Task.FromResult((0, "")), CancellationToken.None,
+            godotFinder: () => null);
+
+        Assert.False(result.Success);
+        Assert.Contains("inte installerat", result.Output);
     }
 }

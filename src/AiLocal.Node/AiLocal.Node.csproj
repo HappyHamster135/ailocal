@@ -7,6 +7,9 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="AiLocal.Node.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\AiLocal.Core\AiLocal.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

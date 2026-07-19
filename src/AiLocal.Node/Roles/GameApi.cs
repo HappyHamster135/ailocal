@@ -13,6 +13,13 @@ public static class GameApi
 {
     public static void MapEndpoints(WebApplication app, GameBuilder? builder = null)
     {
+        // Captured by the build endpoint's closure. GameBuilder is NOT a DI
+        // service, so declaring it as a handler parameter (the previous shape)
+        // made minimal-API binding treat it as the JSON request body - which
+        // both ignored the instance passed in here and consumed the body
+        // stream before the handler's own ReadFromJsonAsync could run.
+        var gameBuilder = builder ?? new GameBuilder();
+
         // Scaffold a fresh, buildable game project in an (empty) folder.
         app.MapPost("/api/game/scaffold", async (
             GameScaffoldService scaffold, HttpContext ctx, CancellationToken ct) =>
@@ -29,10 +36,8 @@ public static class GameApi
 
         // Build the scaffolded (or hand-written) project into a standalone .exe.
         app.MapPost("/api/game/build", async (
-            GameBuilder gameBuilder, HttpContext ctx, CancellationToken ct) =>
+            HttpContext ctx, CancellationToken ct) =>
         {
-            if (gameBuilder is null)
-                return Results.Problem(detail: "game builder not configured on this node", statusCode: StatusCodes.Status404NotFound);
             var body = await ctx.Request.ReadFromJsonAsync<GameBuildRequest>(ct);
             if (body is null)
                 return Results.Problem(detail: "engine + root krävs", statusCode: StatusCodes.Status400BadRequest);

@@ -99,6 +99,22 @@ public static class SessionApi
                 ? Results.Ok(new { resolved = true })
                 : Results.NotFound());
 
+        // GET a pending info request (the agent asked the operator a question).
+        // Registered here at startup like every other session endpoint - these
+        // two briefly lived INSIDE the run handler's success branch (a merge
+        // accident), which 404'd every ask_user answer until a prior run had
+        // succeeded and then double-registered the route on the next one.
+        app.MapGet("/api/sessions/{id}/pending-info", (string id, PendingInfoRegistry info) =>
+            info.Peek(id) is { } req
+                ? Results.Ok(new { questions = req.Questions.Select(q => q.Text), blocking = req.Blocking })
+                : Results.NotFound());
+
+        // POST the operator's answer to a pending info request, unblocking the run.
+        app.MapPost("/api/sessions/{id}/answer-info", (string id, AnswerInfoRequest req, PendingInfoRegistry info) =>
+            info.Resolve(id, req.Answer ?? "")
+                ? Results.Ok(new { resolved = true })
+                : Results.NotFound());
+
         app.MapPost("/api/sessions/{id}/run", async (
             string id, SessionMessageRequest req, HttpContext ctx,
             SessionStore store, SessionRunRegistry runs, PendingChangeRegistry pending,
@@ -130,7 +146,7 @@ public static class SessionApi
                 ctx.Response.ContentType = "text/event-stream";
 
                 var instructions = await ProjectInstructionsReader.TryReadAsync(session.FolderPath, linked.Token);
-                var system = BuildSystemPrompt(session.FolderPath, accessLevel, instructions);
+                var system = AgentSystemPrompt.Build(session.FolderPath, accessLevel, instructions);
 
                 // Each file the agent wants to write is surfaced to the
                 // operator for review before it lands on disk: emit an
@@ -216,9 +232,14 @@ public static class SessionApi
                     gameBuilder: (engine, root, buildCt) => gameBuilder.BuildAsync(engine, root, runCmd, buildCt),
                     taskDelegator: (subPrompt, subSystem, delCt) =>
                         {
+                            // Sub-agents write through the SAME operator gate as
+                            // the lead agent - delegate_task must not be a side
+                            // door around change approval. The lead's tool call
+                            // is awaiting this delegation, so the SSE stream is
+                            // free for the sub-agent's awaiting_approval step.
                             var delegator = new TaskDelegator(provider.CompleteAsync, accessLevel,
                                 session.FolderPath, settings.Worker.AllowInternet,
-                                approvalGate: null, commandGuard: new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
+                                approvalGate: Gate, commandGuard: new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
                                 provisioner: (tool, dest, provCt) => new ToolProvisioner().ProvisionAsync(tool, dest, provCt).ContinueWith(t => (t.Result.Success, t.Result.Output), TaskContinuationOptions.OnlyOnRanToCompletion),
                                 gameScaffolder: (engine, p, root, scafCt) => { var r = new GameScaffoldService().Scaffold(engine, p, root); return Task.FromResult((r.Success, r.Output)); },
                                 appScaffolder: (tech, p, root, appCt) => { var r = new AppScaffoldService().Scaffold(tech, p, root); return Task.FromResult((r.Success, r.Output)); },
@@ -226,7 +247,42 @@ public static class SessionApi
                                 askUser: null);
                             return delegator.DelegateAsync(subPrompt, subSystem, delCt);
                         },
-                        askUser: AskUser);
+                        askUser: AskUser,
+                assetGenerator: async (type, prompt, width, height, output, act) =>
+                {
+                    var gen = new AssetGenerator();
+                    var r = await gen.GenerateAsync(type, prompt, width, height, output, act);
+                    return (r.Success, r.Output, r.FilePath);
+                },
+                screenshotTool: async (windowTitle, output, sct) =>
+                {
+                    var tool = new ScreenshotTool();
+                    var r = await tool.CaptureAsync(windowTitle, output, sct);
+                    return (r.Success, r.Output, r.FilePath);
+                },
+                playtester: async (root, engine, ptCt) =>
+                {
+                    var tester = new GamePlaytester();
+                    var r = await tester.FullTestAsync(root, engine, TimeSpan.FromSeconds(15), ptCt);
+                    return (r.Success, r.Summary, r.AverageFps, r.PeakMemoryMb, r.Duration);
+                },
+                packager: async (root, engine, name, outputDir, pkgCt) =>
+                {
+                    var pkg = new PackageService();
+                    var r = await pkg.PackageAsync(root, engine, name, outputDir, pkgCt);
+                    return (r.Success, r.Output, r.PackagePath, r.SizeBytes);
+                },
+                knowledgeBase: (engine, error) =>
+                {
+                    var fixes = GameKnowledgeBase.Lookup(engine, error);
+                    var bestPractices = GameKnowledgeBase.GetBestPractices(engine);
+                    var found = fixes.Count > 0;
+                    var fixText = found
+                        ? string.Join(Environment.NewLine, fixes.Select(f => $"**{f.ErrorPattern}**: {f.Fix}"))
+                        : "No matching errors found.";
+                    return Task.FromResult((found, fixText, bestPractices));
+                },
+                gameModules: GameModuleTool.Handle);
 
                 // Build a short plan first (GoalPlanner) so the operator sees
                 // what the agent intends before it starts writing files. The
@@ -281,18 +337,6 @@ public static class SessionApi
                             s.TotalUsage.InputTokens + result.TotalUsage.InputTokens,
                             s.TotalUsage.OutputTokens + result.TotalUsage.OutputTokens);
                     });
-    // GET a pending info request (the agent asked the operator a question).
-    app.MapGet("/api/sessions/{id}/pending-info", (string id, PendingInfoRegistry info) =>
-        info.Peek(id) is { } req
-            ? Results.Ok(new { questions = req.Questions.Select(q => q.Text), blocking = req.Blocking })
-            : Results.NotFound());
-
-    // POST the operator's answer to a pending info request, unblocking the run.
-    app.MapPost("/api/sessions/{id}/answer-info", (string id, AnswerInfoRequest req, PendingInfoRegistry info) =>
-        info.Resolve(id, req.Answer ?? "")
-            ? Results.Ok(new { resolved = true })
-            : Results.NotFound());
-
                 }
 
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { final = result })}\n\n", linked.Token);
@@ -320,26 +364,4 @@ public static class SessionApi
         s.TotalUsage
     };
 
-    private static string BuildSystemPrompt(string folderPath, AgentAccessLevel level, string? projectInstructions)
-    {
-        var sb = new StringBuilder();
-        sb.Append($"You are an autonomous coding agent working inside the folder \"{folderPath}\".");
-        sb.Append(level == AgentAccessLevel.Full
-            ? " You have file and shell/command access on this computer; commands run in this folder by default."
-            : " You can read, write, and list files within this folder only - you cannot run shell commands at this access level.");
-
-        sb.Append("\n\nWORKFLOW:\n1. PLAN: For a non-trivial build, first lay out a short plan (what you'll create, the tech you'll use, the milestones). The system shows this to the user before you start writing.\n2. BUILD: scaffold the project with scaffold_game / scaffold_app, then extend it with edit_file until it genuinely works (real gameplay/features, not a stub). Prefer a runnable result over a description. Always pick the technology you judge best fits the project.\n3. ASK ONLY WHEN STUCK: If something is genuinely impossible to guess (contradictory or missing requirements that change the build), use ask_user with 1-3 concrete questions and PAUSE for the answer. Do NOT ask for permission, and do NOT ask about things you can reasonably assume - make a sensible default and keep building. Most prompts need zero questions.\n4. VERIFY: At Full access, run verify (and build/run) to confirm it actually works before you declare done.\n5. BUILD A REAL SHIPPABLE ARTIFACT: When the user wants a finished game/app, do not stop at \"open it in the editor\". For engine-based games, after scaffolding, provision the engine if it is missing (provision \"godot\" or provision \"unity\") and then produce a buildable/exported result:\n   - GODOT (recommended, free): `godot --headless --build .` to refresh imports, then `godot --headless --export-release \"Windows Desktop\" build/PixelRush.exe` (the project ships with that export preset). You may also use fetch_url to grab art/audio if needed.\n   - UNITY: open the generated project; build headless with `Unity -batchmode -buildWindows64Player build/PixelRush.exe` (the scene is pre-registered in EditorBuildSettings).\n   - HTML5 / apps: scaffold already produces a runnable artifact; just verify it.\n   Keep the user informed of each build step. The goal is a product they can run or publish, not a project they have to finish themselves.");
-
-        sb.Append("\n\nAVAILABLE TOOLS: scaffold_game (create a complete, buildable GAME project in ONE call - CHOOSE the engine: 'html5' for a zero-install 2D platformer in the browser, 'unity'/'godot' for a heavier engine, or omit engine to let the tool pick the best fit), scaffold_app (create a complete, runnable APP in ONE call - CHOOSE the tech: 'python' or 'csharp', or omit to let the tool pick), write_file/create_file, edit_file, read_file, list_files, glob, search, and (when wired) ask_user, verify, run_command, fetch_url, recall, remember. For a game, call scaffold_game FIRST to produce the real project, then extend it. For an app/script/tool, call scaffold_app FIRST. Make every build feel production-quality: handle the obvious edge cases, add a little polish (menus, feedback, game-over/win states for games).");
-
-        if (!string.IsNullOrWhiteSpace(projectInstructions))
-        {
-            sb.Append("\n\nPROJECT INSTRUCTIONS (from AILOCAL.md in this folder - follow these priorities and context):\n");
-            sb.Append(projectInstructions);
-        }
-
-        sb.Append("\n\nReply in the same language the user writes in (e.g. Swedish if they write Swedish). Keep the user informed of what you are building, step by step.");
-
-        return sb.ToString();
-    }
 }

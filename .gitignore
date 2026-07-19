@@ -18,3 +18,6 @@ dist/
 # OS / editor
 .DS_Store
 *.user
+
+# Captured agent logs
+_remote_assignment.log

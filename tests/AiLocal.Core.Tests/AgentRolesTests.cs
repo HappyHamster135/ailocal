@@ -24,7 +24,7 @@ public class AgentRolesTests
     public void Defaults_ContainTheFourCompanyRoles()
     {
         var roles = AgentRoles.Defaults();
-        Assert.Equal(4, roles.Count);
+        Assert.Equal(9, roles.Count);
         Assert.Contains(roles, r => r.Id == "architect");
         Assert.Contains(roles, r => r.Id == "developer");
         Assert.Contains(roles, r => r.Id == "tester");

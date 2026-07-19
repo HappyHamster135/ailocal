@@ -560,4 +560,85 @@ public class AgentToolExecutorTests : IDisposable
             Call("scaffold_game", new { engine = "html5", prompt = "x" }), CancellationToken.None);
         Assert.True(result.IsError);
     }
+
+    // ---- game_module (ready-made production systems) -----------------------
+
+    [Fact]
+    public async Task GameModule_WhenWired_IsAdvertisedAndReachesDelegate()
+    {
+        string? seenAction = null, seenName = null, seenEngine = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            gameModules: (action, name, engine) =>
+            {
+                seenAction = action; seenName = name; seenEngine = engine;
+                return Task.FromResult((true, "// module code here"));
+            });
+
+        Assert.Contains(executor.Tools, t => t.Name == "game_module");
+
+        var result = await executor.ExecuteAsync(
+            Call("game_module", new { action = "get", name = "inventory", engine = "html5" }),
+            CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Equal("get", seenAction);
+        Assert.Equal("inventory", seenName);
+        Assert.Equal("html5", seenEngine);
+        Assert.Contains("module code here", result.Output);
+    }
+
+    [Fact]
+    public async Task GameModule_WithoutDelegate_IsNotAdvertisedAndRefuses()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        Assert.DoesNotContain(executor.Tools, t => t.Name == "game_module");
+        var result = await executor.ExecuteAsync(
+            Call("game_module", new { action = "list" }), CancellationToken.None);
+        Assert.True(result.IsError);
+    }
+
+    // ---- generate_asset / screenshot default output paths ------------------
+
+    [Fact]
+    public async Task GenerateAsset_OmittedOutput_DefaultsIntoWorkspaceAssetsFolder()
+    {
+        string? seenOutput = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            assetGenerator: (type, prompt, w, h, output, ct) =>
+            {
+                seenOutput = output;
+                return Task.FromResult((true, "ok", (string?)output));
+            });
+
+        var result = await executor.ExecuteAsync(
+            Call("generate_asset", new { type = "sprite", prompt = "a hero" }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.NotNull(seenOutput);
+        // The old behavior passed "" straight through, which blew up in
+        // Path.GetFullPath before the generator could run.
+        Assert.StartsWith(_workspace, seenOutput!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("assets", seenOutput!, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".png", seenOutput!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Screenshot_OmittedOutput_DefaultsIntoWorkspaceScreenshotsFolder()
+    {
+        string? seenOutput = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            screenshotTool: (windowTitle, output, ct) =>
+            {
+                seenOutput = output;
+                return Task.FromResult((true, "ok", (string?)output));
+            });
+
+        var result = await executor.ExecuteAsync(
+            Call("screenshot", new { }), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.NotNull(seenOutput);
+        Assert.StartsWith(_workspace, seenOutput!, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".png", seenOutput!, StringComparison.OrdinalIgnoreCase);
+    }
 }

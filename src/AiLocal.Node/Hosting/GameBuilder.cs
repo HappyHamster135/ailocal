@@ -18,14 +18,17 @@ namespace AiLocal.Node.Hosting;
 public sealed class GameBuilder
 {
     /// <summary>Build the game in <paramref name="root"/>. engine may be "godot",
-    /// "unity", or "auto" (detect by project files). Returns (success, output, exePath).</summary>
+    /// "unity", or "auto" (detect by project files). Returns (success, output, exePath).
+    /// godotFinder/unityFinder override engine detection (used by tests).</summary>
     public async Task<(bool Success, string Output, string? ExePath)> BuildAsync(
         string engine, string root,
         Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string?>? godotFinder = null,
+        Func<string?>? unityFinder = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-            return (false, "root (mapp) kravs och maste finnas.", null);
+            return (false, "root ([ADDRESS]) kravs och maste finnas.", null);
 
         engine = (engine ?? "auto").Trim().ToLowerInvariant();
         if (engine == "auto")
@@ -40,8 +43,8 @@ public sealed class GameBuilder
         }
 
         return engine == "godot"
-            ? await BuildGodot(root, runCommand, ct)
-            : await BuildUnity(root, runCommand, ct);
+            ? await BuildGodot(root, runCommand, ct, godotFinder)
+            : await BuildUnity(root, runCommand, ct, unityFinder);
     }
 
     static string DetectEngine(string root)
@@ -54,19 +57,22 @@ public sealed class GameBuilder
 
     // ---- Godot -----------------------------------------------------------
     async Task<(bool, string, string?)> BuildGodot(string root,
-        Func<string, string, CancellationToken, Task<(int, string)>> runCommand, CancellationToken ct)
+        Func<string, string, CancellationToken, Task<(int, string)>> runCommand, CancellationToken ct,
+        Func<string?>? godotFinder = null)
     {
-        var godot = FindGodot();
+        var godot = (godotFinder ?? FindGodot)();
         if (godot is null)
             return (false,
-                "Godox ar inte installerat pa denna maskin. Installera Godot 4.3 (https://godotengine.org) " +
-                "och se till att 'godot' eller 'Godot_v4.3-stable_mono_win64.exe' finns i PATH eller " +
+                "Godot ar inte installerat pa denna maskin. Installera Godot 4.3 (https://godotengine.org) " +
+                "och se till att 'godot' eller '[ADDRESS]' finns i PATH eller " +
                 "C:/Program Files/Godot/. 'Bygg spel' kan inte ladda ner motorn sjalv.", null);
 
         // project.godot already names the preset "Windows Desktop" (ScaffoldGodot writes export_presets.cfg).
+        // NOTE: do NOT pass --quit before --export-release - Godot 4 would exit before exporting.
+        // --export-release performs the import+export and then exits on its own.
         var preset = "Windows Desktop";
         var outExe = Path.Combine(root, "build", "PixelRush.exe");
-        var cmd = $"\"{godot}\" --headless --quit --export-release \"{preset}\" \"{outExe}\"";
+        var cmd = MakeGodotCommand(godot, preset, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);
         if (exit != 0)
             return (false, $"godot export misslyckades (exit {exit}):\n{output}", null);
@@ -74,6 +80,9 @@ public sealed class GameBuilder
             return (false, $"godot avslutade utan fel men .exe saknas: {outExe}\n{output}", null);
         return (true, $"Byggde {outExe} ({new FileInfo(outExe).Length} bytes).", outExe);
     }
+
+    internal static string MakeGodotCommand(string godotPath, string preset, string outExe)
+        => $"\"{godotPath}\" --headless --export-release \"{preset}\" \"{outExe}\"";
 
     static string? FindGodot()
     {
@@ -93,9 +102,10 @@ public sealed class GameBuilder
 
     // ---- Unity ------------------------------------------------------------
     async Task<(bool, string, string?)> BuildUnity(string root,
-        Func<string, string, CancellationToken, Task<(int, string)>> runCommand, CancellationToken ct)
+        Func<string, string, CancellationToken, Task<(int, string)>> runCommand, CancellationToken ct,
+        Func<string?>? unityFinder = null)
     {
-        var unity = FindUnity();
+        var unity = (unityFinder ?? FindUnity)();
         if (unity is null)
             return (false,
                 "Unity ar inte installerat pa denna maskin. Installera Unity 6000.x " +
@@ -104,7 +114,7 @@ public sealed class GameBuilder
 
         var outExe = Path.Combine(root, "build", "PixelRush.exe");
         // -buildWindows64Player respects the scenes registered in EditorBuildSettings.asset.
-        var cmd = $"\"{unity}\" -batchmode -quit -projectPath \"{root}\" -buildWindows64Player \"{outExe}\"";
+        var cmd = MakeUnityCommand(unity, root, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);
         if (exit != 0)
             return (false, $"unity build misslyckades (exit {exit}):\n{output}", null);
@@ -112,6 +122,9 @@ public sealed class GameBuilder
             return (false, $"unity avslutade utan fel men .exe saknas: {outExe}\n{output}", null);
         return (true, $"Byggde {outExe} ({new FileInfo(outExe).Length} bytes).", outExe);
     }
+
+    internal static string MakeUnityCommand(string unityPath, string projectRoot, string outExe)
+        => $"\"{unityPath}\" -batchmode -quit -projectPath \"{projectRoot}\" -buildWindows64Player \"{outExe}\"";
 
     static string? FindUnity()
     {

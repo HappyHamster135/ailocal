@@ -14,7 +14,7 @@ namespace AiLocal.Node.Hosting;
 /// platformer / topdown) to pick sensible defaults; anything else falls back
 /// to a minimal but valid project of the chosen engine.
 /// </summary>
-public sealed class GameScaffoldService
+public sealed partial class GameScaffoldService
 {
     public record ScaffoldResult(bool Success, string Path, string Engine, string[] Files, string Output);
 

@@ -212,14 +212,57 @@ public static class WorkerRole
                         gameBuilder: (engine, root, buildCt) => { var res = gameBuilder.BuildAsync(engine, root, runCmd, buildCt); return res.ContinueWith(t => (t.Result.Success, t.Result.Output, t.Result.ExePath), TaskContinuationOptions.OnlyOnRanToCompletion); },
                         askUser: null);
                     return delegator.DelegateAsync(subPrompt, subSystem, delCt);
-                });
+                },
+                assetGenerator: async (type, prompt, width, height, output, act) =>
+                {
+                    var gen = new AssetGenerator(httpFactory);
+                    var r = await gen.GenerateAsync(type, prompt, width, height, output, act);
+                    return (r.Success, r.Output, r.FilePath);
+                },
+                screenshotTool: async (windowTitle, output, sct) =>
+                {
+                    var tool = new ScreenshotTool();
+                    var r = await tool.CaptureAsync(windowTitle, output, sct);
+                    return (r.Success, r.Output, r.FilePath);
+                },
+                playtester: async (root, engine, ptCt) =>
+                {
+                    var tester = new GamePlaytester(httpFactory);
+                    var r = await tester.FullTestAsync(root, engine, TimeSpan.FromSeconds(15), ptCt);
+                    return (r.Success, r.Summary, r.AverageFps, r.PeakMemoryMb, r.Duration);
+                },
+                packager: async (root, engine, name, outputDir, pkgCt) =>
+                {
+                    var pkg = new PackageService(httpFactory);
+                    var r = await pkg.PackageAsync(root, engine, name, outputDir, pkgCt);
+                    return (r.Success, r.Output, r.PackagePath, r.SizeBytes);
+                },
+                knowledgeBase: (engine, error) =>
+                {
+                    var fixes = GameKnowledgeBase.Lookup(engine, error);
+                    var bestPractices = GameKnowledgeBase.GetBestPractices(engine);
+                    var found = fixes.Count > 0;
+                    var fixText = found
+                        ? string.Join(Environment.NewLine, fixes.Select(f => $"**{f.ErrorPattern}**: {f.Fix}"))
+                        : "No matching errors found.";
+                    return Task.FromResult((found, fixText, bestPractices));
+                },
+                gameModules: GameModuleTool.Handle);
             var loop = new AgentLoop(provider.CompleteAsync, executor);
+
+            // Same production-grade system prompt as interactive sessions -
+            // an assignment dispatched through the cluster used to run with NO
+            // system prompt at all, so the same goal came out far worse than
+            // when typed into a session. AILOCAL.md in the workspace is
+            // honored here too.
+            var instructions = await ProjectInstructionsReader.TryReadAsync(workspaceRoot, ct);
+            var system = AgentSystemPrompt.Build(workspaceRoot, accessLevel, instructions);
 
             var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>
             {
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
-            }, ct);
+            }, ct, system: system);
 
             await ctx.Response.WriteAsync(
                 $"data: {JsonSerializer.Serialize(new { final = result })}\n\n", ct);

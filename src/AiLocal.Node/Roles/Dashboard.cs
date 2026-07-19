@@ -5822,7 +5822,7 @@ internal static class Dashboard
           const testBtn = $('studioTestBtn');
           if (testBtn) testBtn.onclick = () => runStudioCommand('test');
           const gameBtn = $('studioGameBtn');
-          if (gameBtn) gameBtn.onclick = () => runStudioCommand('game');
+          if (gameBtn) gameBtn.onclick = () => buildGame();
 
           const tabNewGame = $('studioTabNewGame');
           if (tabNewGame) tabNewGame.onclick = () => studioTabSwitch('newgame');
@@ -6065,6 +6065,27 @@ internal static class Dashboard
         }
 
         // ---- Studio: Build / Run / Test (P2) ----
+        async function buildGame() {
+          if (!studio.root) { showGlobalNotice('Skapa/öppna ett spelprojekt först.', true); return; }
+          const out = $('studioOutput'), state = $('studioRunState');
+          if (!out) return;
+          out.style.display = 'block';
+          out.className = 'studio-output';
+          out.textContent = 'Bygger .exe (letar upp installerad motor)...';
+          state.textContent = 'körs';
+          try {
+            const r = await fetchJson('/api/game/build', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ engine: 'auto', root: studio.root })
+            });
+            out.textContent = r.output || '(ingen output)';
+            if (!r.success) out.className = 'studio-output err';
+            state.textContent = r.success ? 'klar: ' + (r.exe || '') : 'misslyckades';
+          } catch (e) {
+            out.textContent = e.message; out.className = 'studio-output err'; state.textContent = 'fel';
+          }
+        }
+
         async function runStudioCommand(kind) { // 'build' | 'run' | 'test'
           if (!studio.root) { showGlobalNotice('Välj en arbetsmapp först.', true); return; }
           const out = $('studioOutput'), state = $('studioRunState');
