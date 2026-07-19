@@ -32,6 +32,7 @@ public sealed class TaskDelegator
     private readonly Func<string, string, string, CancellationToken, Task<(bool, string)>>? _gameScaffolder;
     private readonly Func<string, string, string, CancellationToken, Task<(bool, string)>>? _appScaffolder;
     private readonly Func<string, CancellationToken, Task<string>>? _askUser;
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output, string? ExePath)>>? _gameBuilder;
 
     public TaskDelegator(
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
@@ -45,7 +46,8 @@ public sealed class TaskDelegator
         Func<string, string, CancellationToken, Task<(bool, string)>>? provisioner = null,
         Func<string, string, string, CancellationToken, Task<(bool, string)>>? gameScaffolder = null,
         Func<string, string, string, CancellationToken, Task<(bool, string)>>? appScaffolder = null,
-        Func<string, CancellationToken, Task<string>>? askUser = null)
+        Func<string, CancellationToken, Task<string>>? askUser = null,
+        Func<string, string, CancellationToken, Task<(bool Success, string Output, string? ExePath)>>? gameBuilder = null)
     {
         _complete = complete;
         _level = level;
@@ -59,6 +61,7 @@ public sealed class TaskDelegator
         _gameScaffolder = gameScaffolder;
         _appScaffolder = appScaffolder;
         _askUser = askUser;
+        _gameBuilder = gameBuilder;
     }
 
     public async Task<(bool Success, string Output)> DelegateAsync(
@@ -69,8 +72,10 @@ public sealed class TaskDelegator
         // agents) and no ask_user (the sub-run is unattended; if it needs the
         // human it should surface that in its result text for the lead agent).
         var subExecutor = new AgentToolExecutor(
-            _level, _workspaceRoot, _approvalGate, _allowInternet, _commandGuard,
-            _codeIndex, _memory, _provisioner, _gameScaffolder, _appScaffolder,
+            level: _level, workspaceRoot: _workspaceRoot, approvalGate: _approvalGate,
+            allowInternet: _allowInternet, commandGuard: _commandGuard,
+            codeIndex: _codeIndex, memory: _memory, provisioner: _provisioner,
+            gameScaffolder: _gameScaffolder, gameBuilder: _gameBuilder, appScaffolder: _appScaffolder,
             askUser: null);
 
         var loop = new AgentLoop(_complete, subExecutor);

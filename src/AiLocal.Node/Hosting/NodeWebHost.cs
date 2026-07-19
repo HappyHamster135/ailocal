@@ -370,7 +370,7 @@ public static class NodeWebHost
         GitApi.MapEndpoints(app);
         FilesApi.MapEndpoints(app);
         TerminalApi.MapEndpoints(app);
-        GameApi.MapEndpoints(app);
+        GameApi.MapEndpoints(app, new GameBuilder());
         DesktopApi.MapEndpoints(app);
     }
 

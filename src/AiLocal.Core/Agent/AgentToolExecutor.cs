@@ -61,6 +61,11 @@ public sealed class AgentToolExecutor
     // (engine, prompt, root) -> (success, output). Core can't reference Node,
     // so the concrete scaffolder is injected here, same pattern as _provisioner.
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
+    // Optional game-BUILDER delegate (Node layer wires this to GameBuilder,
+    // same inject pattern as _gameScaffolder). Takes (engine, root) and
+    // produces a standalone .exe via the engine's headless build; returns
+    // (success, output, exePath). Null => build_game not advertised.
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output, string? ExePath)>>? _gameBuilder;
     // Optional app-scaffold delegate (Node layer wires this to AppScaffoldService).
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _appScaffolder;
     // Optional "delegate a sub-task" delegate (Node layer wires this to a
@@ -86,6 +91,7 @@ public sealed class AgentToolExecutor
         ProjectMemory? memory = null,
         Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null,
+        Func<string, string, CancellationToken, Task<(bool Success, string Output, string? ExePath)>>? gameBuilder = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null,
         Func<string, string?, CancellationToken, Task<(bool Success, string Output)>>? taskDelegator = null,
         Func<string, CancellationToken, Task<string>>? askUser = null)
@@ -99,6 +105,7 @@ public sealed class AgentToolExecutor
         _memory = memory;
         _provisioner = provisioner;
         _gameScaffolder = gameScaffolder;
+        _gameBuilder = gameBuilder;
         _appScaffolder = appScaffolder;
         _taskDelegator = taskDelegator;
         _askUser = askUser;
@@ -111,9 +118,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null, _gameBuilder is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false, bool gameBuild = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -183,6 +190,14 @@ public sealed class AgentToolExecutor
         if (appScaffold)
             tools.Add(ScaffoldAppTool.Definition);
 
+        // Game BUILD: takes a scaffolded (or hand-written) Godot/Unity
+        // project and produces a standalone .exe via the engine's headless
+        // build. The agent calls this after scaffold_game to ship a real
+        // playable artifact - not just written files.
+        if (gameBuild)
+            tools.Add(new("build_game",
+                "Build a GAME project into a standalone Windows .exe via the engine's headless build (godot --export-release / unity -buildWindows64Player). Auto-detects the engine from the project if 'engine' is omitted. Requires the engine to be installed on this machine (it is NOT downloaded for you - install Godot 4.3 or Unity 6000.x first). Returns the produced .exe path on success.",
+                "{\"type\":\"object\",\"properties\":{\"engine\":{\"type\":\"string\",\"description\":\"Optional: 'godot', 'unity', or 'auto' (detect from project files).\"},\"root\":{\"type\":\"string\",\"description\":\"Directory containing the game project (defaults to the workspace root).\"}},\"required\":[]}"));
         // ask_user: the agent can pause mid-run and ask the operator 1-3
         // concrete questions when something is genuinely impossible to guess
         // (e.g. a contradictory or under-specified requirement). Only wired in
@@ -235,6 +250,9 @@ public sealed class AgentToolExecutor
                 "scaffold_app" when _appScaffolder is not null
                     => await ScaffoldAppAsync(call, root, ct),
                 "scaffold_app" => Error(call, "scaffold_app is not available on this Worker (app scaffolder not wired)."),
+                "build_game" when _gameBuilder is not null
+                    => await BuildGameAsync(call, args.RootElement, ct),
+                "build_game" => Error(call, "build_game is not available on this Worker (game builder not wired)."),
                 "ask_user" when _askUser is not null
                     => await AskUserAsync(call, root, ct),
                 "ask_user" => Error(call, "ask_user is not available on this Worker (no interactive operator to answer)."),
@@ -728,6 +746,21 @@ public sealed class AgentToolExecutor
         var verifyNote = await AutoVerifyIfFullAsync(ct);
         return new ToolResult(call.Id, call.Name,
             output + (verifyNote is null ? "" : "\n\n" + verifyNote));
+    }
+
+    private async Task<ToolResult> BuildGameAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_gameBuilder is null)
+            return Error(call, "build_game is not available on this Worker (game builder not wired).");
+        var engine = args.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString())
+            ? e.GetString()! : "auto";
+        var reqRoot = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
+            ? ResolvePath(r.GetString()!) : _workspaceRoot;
+        var (success, output, exePath) = await _gameBuilder(engine, reqRoot, ct);
+        if (!success)
+            return Error(call, output);
+        return new ToolResult(call.Id, call.Name,
+            output + (exePath is null ? "" : $"\nexe: {exePath}"), IsError: false);
     }
 
     private async Task<ToolResult> AskUserAsync(ToolCall call, JsonElement args, CancellationToken ct)

@@ -178,6 +178,30 @@ public static class SessionApi
                     return answer;
                 }
 
+                var gameBuilder = new GameBuilder();
+                Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCmd =
+                    (cmd, dir, rcCt) =>
+                    {
+                        var psi = OperatingSystem.IsWindows()
+                            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c {cmd}")
+                            : new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{cmd.Replace("\"", "\\\"")}\"");
+                        psi.WorkingDirectory = Directory.Exists(dir) ? dir : Environment.CurrentDirectory;
+                        psi.RedirectStandardOutput = true;
+                        psi.RedirectStandardError = true;
+                        psi.UseShellExecute = false;
+                        psi.CreateNoWindow = true;
+                        using var proc = new System.Diagnostics.Process { StartInfo = psi };
+                        var so = new System.Text.StringBuilder();
+                        var se = new System.Text.StringBuilder();
+                        proc.OutputDataReceived += (_, e) => { if (e.Data is not null) so.AppendLine(e.Data); };
+                        proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) se.AppendLine(e.Data); };
+                        proc.Start();
+                        proc.BeginOutputReadLine();
+                        proc.BeginErrorReadLine();
+                        proc.WaitForExit((int)TimeSpan.FromMinutes(30).TotalMilliseconds);
+                        return Task.FromResult((proc.ExitCode, $"exit code: {proc.ExitCode}\n{so}\n{se}"));
+                    };
+
                 var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet,
                     gameScaffolder: (engine, prompt, root, scafCt) =>
                     {
@@ -189,7 +213,8 @@ public static class SessionApi
                             var r = new AppScaffoldService().Scaffold(tech, prompt, root);
                             return Task.FromResult((r.Success, r.Output));
                         },
-                        taskDelegator: (subPrompt, subSystem, delCt) =>
+                    gameBuilder: (engine, root, buildCt) => gameBuilder.BuildAsync(engine, root, runCmd, buildCt),
+                    taskDelegator: (subPrompt, subSystem, delCt) =>
                         {
                             var delegator = new TaskDelegator(provider.CompleteAsync, accessLevel,
                                 session.FolderPath, settings.Worker.AllowInternet,
@@ -197,6 +222,7 @@ public static class SessionApi
                                 provisioner: (tool, dest, provCt) => new ToolProvisioner().ProvisionAsync(tool, dest, provCt).ContinueWith(t => (t.Result.Success, t.Result.Output), TaskContinuationOptions.OnlyOnRanToCompletion),
                                 gameScaffolder: (engine, p, root, scafCt) => { var r = new GameScaffoldService().Scaffold(engine, p, root); return Task.FromResult((r.Success, r.Output)); },
                                 appScaffolder: (tech, p, root, appCt) => { var r = new AppScaffoldService().Scaffold(tech, p, root); return Task.FromResult((r.Success, r.Output)); },
+                                gameBuilder: (engine, root, buildCt) => { var res = gameBuilder.BuildAsync(engine, root, runCmd, buildCt); return res.ContinueWith(t => (t.Result.Success, t.Result.Output, t.Result.ExePath), TaskContinuationOptions.OnlyOnRanToCompletion); },
                                 askUser: null);
                             return delegator.DelegateAsync(subPrompt, subSystem, delCt);
                         },
