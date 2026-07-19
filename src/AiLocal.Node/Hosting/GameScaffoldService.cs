@@ -98,12 +98,20 @@ public sealed class GameScaffoldService
         files.Add("ProjectSettings/ProjectVersion.txt"); files.Add("Packages/manifest.json");
         files.Add("ProjectSettings/EditorBuildSettings.asset");
 
+        // App icon (embedded into the built EXE via PlayerSettings) + a Steam
+        // appid placeholder so the project is one edit away from a store page.
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "steam_appid.txt", "4800000\n");  // placeholder; replace with your real Steam app id
+        files.Add("steam_appid.txt");
+
         Write(root, "README.md",
             "# Pixel Rush - 2D Platformer (Unity)\n\n" +
             "Oppna projektet i Unity 6000.x och tryck Play, eller bygg headless:\n" +
             "`Unity -batchmode -buildWindows64Player build/PixelRush.exe`.\n\n" +
             "Styrning: Vänster/Höger eller A/D, Space/Up/W för hopp, Esc för paus.\n" +
-            "Samla mynt, undvik fiender, nå flaggan. Klara 3 nivåer för att vinna.\n");
+            "Samla mynt, undvik fiender, nå flaggan. Klara 3 nivåer för att vinna.\n" +
+            "App-ikon: icon.ico (satt i PlayerSettings > Icon). Steam: ersatt steam_appid.txt med ditt app-id.\n");
         files.Add("README.md");
         return files.ToArray();
     }
@@ -157,6 +165,10 @@ public sealed class GameScaffoldService
         Write(root, "win.wav", MakeWav(880, 0.30));
         files.Add("win.wav");
 
+        // App icon (embedded into the exported EXE). No external art.
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+
         Write(root, "README.md",
             "# Pixel Rush - 2D Platformer (Godot 4)\n\n" +
             "Oppna projektet i Godot 4 och tryck Play, eller bygg headless:\n" +
@@ -199,6 +211,55 @@ public sealed class GameScaffoldService
         return data;
     }
 
+    /// <summary>Writes a minimal valid 32x32 RGBA Windows .ico (no external
+    /// art) so the exported game/EXE has its own icon - a step toward a
+    /// publishable build (e.g. Steam).</summary>
+    static byte[] MakeIco()
+    {
+        const int sz = 32;
+        const int px = sz * sz;
+        // Pixel data: BGRA, bottom-up.
+        var bgra = new byte[px * 4];
+        for (var y = 0; y < sz; y++)
+            for (var x = 0; x < sz; x++)
+            {
+                var i = (y * sz + x) * 4;
+                // Cornflower-blue rounded-ish square on transparent bg.
+                var inside = x >= 3 && x < sz - 3 && y >= 3 && y < sz - 3;
+                if (inside)
+                {
+                    bgra[i] = 0x87; bgra[i + 1] = 0x42; bgra[i + 2] = 0x2d; bgra[i + 3] = 0xff;
+                }
+                else { bgra[i] = 0; bgra[i + 1] = 0; bgra[i + 2] = 0; bgra[i + 3] = 0; }
+            }
+
+        var dib = new byte[40 + bgra.Length];
+        BitConverter.GetBytes(40).CopyTo(dib, 0);                  // header size
+        BitConverter.GetBytes((int)sz).CopyTo(dib, 4);             // width
+        BitConverter.GetBytes(-sz).CopyTo(dib, 8);                 // height (neg = top-down)
+        dib[12] = 1;                                              // planes
+        dib[14] = 32;                                             // bpp
+        BitConverter.GetBytes(bgra.Length).CopyTo(dib, 20);       // pixel data size
+        Array.Copy(bgra, 0, dib, 40, bgra.Length);
+
+        var outp = new System.IO.MemoryStream();
+        using var bw = new System.IO.BinaryWriter(outp);
+        // ICONDIR
+        bw.Write((short)0);      // reserved
+        bw.Write((short)1);      // type = icon
+        bw.Write((short)1);      // count
+        // ICONDIRENTRY
+        bw.Write((byte)sz);      // width
+        bw.Write((byte)sz);      // height
+        bw.Write((byte)0);       // colors
+        bw.Write((byte)0);       // reserved
+        bw.Write((short)1);      // planes
+        bw.Write((short)32);     // bpp
+        bw.Write((int)dib.Length);
+        bw.Write((int)(6 + 16)); // offset to DIB
+        bw.Write(dib);
+        return outp.ToArray();
+    }
     static string[] ScaffoldHtml5(string root, string prompt)
     {
         // A single, self-contained, immediately-playable 2D platformer.
@@ -877,6 +938,7 @@ MonoBehaviour:
     static string GodotProject() =>
         "[application]\n" +
         "config/name=\"Pixel Rush\"\n" +
+        "config/icon=\"res://icon.ico\"\n" +
         "run/main_scene=\"res://Game.tscn\"\n" +
         "config/features=PackedStringArray(\"4.3\")\n" +
         "[display]\n" +
