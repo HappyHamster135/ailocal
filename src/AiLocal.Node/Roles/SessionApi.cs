@@ -185,11 +185,22 @@ public static class SessionApi
                         return Task.FromResult((r.Success, r.Output));
                     },
                     appScaffolder: (tech, prompt, root, appCt) =>
-                    {
-                        var r = new AppScaffoldService().Scaffold(tech, prompt, root);
-                        return Task.FromResult((r.Success, r.Output));
-                    },
-                    askUser: AskUser);
+                        {
+                            var r = new AppScaffoldService().Scaffold(tech, prompt, root);
+                            return Task.FromResult((r.Success, r.Output));
+                        },
+                        taskDelegator: (subPrompt, subSystem, delCt) =>
+                        {
+                            var delegator = new TaskDelegator(provider.CompleteAsync, accessLevel,
+                                session.FolderPath, settings.Worker.AllowInternet,
+                                approvalGate: null, commandGuard: new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
+                                provisioner: (tool, dest, provCt) => new ToolProvisioner().ProvisionAsync(tool, dest, provCt).ContinueWith(t => (t.Result.Success, t.Result.Output), TaskContinuationOptions.OnlyOnRanToCompletion),
+                                gameScaffolder: (engine, p, root, scafCt) => { var r = new GameScaffoldService().Scaffold(engine, p, root); return Task.FromResult((r.Success, r.Output)); },
+                                appScaffolder: (tech, p, root, appCt) => { var r = new AppScaffoldService().Scaffold(tech, p, root); return Task.FromResult((r.Success, r.Output)); },
+                                askUser: null);
+                            return delegator.DelegateAsync(subPrompt, subSystem, delCt);
+                        },
+                        askUser: AskUser);
 
                 // Build a short plan first (GoalPlanner) so the operator sees
                 // what the agent intends before it starts writing files. The

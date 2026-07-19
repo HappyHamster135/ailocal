@@ -176,6 +176,17 @@ public static class WorkerRole
                 {
                     var r = new AppScaffoldService().Scaffold(tech, prompt, root);
                     return Task.FromResult((r.Success, r.Output));
+                },
+                taskDelegator: (subPrompt, subSystem, delCt) =>
+                {
+                    var delegator = new TaskDelegator(provider.CompleteAsync, accessLevel,
+                        workspaceRoot, settings.Worker.AllowInternet,
+                        approvalGate: gate, commandGuard: new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
+                        provisioner: (tool, dest, provCt) => new ToolProvisioner().ProvisionAsync(tool, dest, provCt).ContinueWith(t => (t.Result.Success, t.Result.Output), TaskContinuationOptions.OnlyOnRanToCompletion),
+                        gameScaffolder: (engine, p, root, scafCt) => { var r = new GameScaffoldService().Scaffold(engine, p, root); return Task.FromResult((r.Success, r.Output)); },
+                        appScaffolder: (tech, p, root, appCt) => { var r = new AppScaffoldService().Scaffold(tech, p, root); return Task.FromResult((r.Success, r.Output)); },
+                        askUser: null);
+                    return delegator.DelegateAsync(subPrompt, subSystem, delCt);
                 });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 

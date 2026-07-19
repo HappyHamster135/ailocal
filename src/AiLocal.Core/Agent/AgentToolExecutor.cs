@@ -63,6 +63,12 @@ public sealed class AgentToolExecutor
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
     // Optional app-scaffold delegate (Node layer wires this to AppScaffoldService).
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _appScaffolder;
+    // Optional "delegate a sub-task" delegate (Node layer wires this to a
+    // local sub-agent run: it runs <prompt> as a fresh AgentLoop pass and
+    // returns the result). Lets the lead agent parallelize/break work into
+    // sub-tasks without the user micromanaging. Null => tool not advertised.
+    // Args: (subPrompt, optionalSystem, ct) -> (success, output).
+    private readonly Func<string, string?, CancellationToken, Task<(bool Success, string Output)>>? _taskDelegator;
     // Optional "ask the user" delegate (Session layer wires this to
     // PendingInfoRegistry). Null in Worker/assignment runs and Core tests - a
     // Worker's autonomous assignment writes immediately and never blocks on a
@@ -81,6 +87,7 @@ public sealed class AgentToolExecutor
         Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? provisioner = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? gameScaffolder = null,
         Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? appScaffolder = null,
+        Func<string, string?, CancellationToken, Task<(bool Success, string Output)>>? taskDelegator = null,
         Func<string, CancellationToken, Task<string>>? askUser = null)
     {
         _level = level;
@@ -93,6 +100,7 @@ public sealed class AgentToolExecutor
         _provisioner = provisioner;
         _gameScaffolder = gameScaffolder;
         _appScaffolder = appScaffolder;
+        _taskDelegator = taskDelegator;
         _askUser = askUser;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
@@ -103,9 +111,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -186,6 +194,16 @@ public sealed class AgentToolExecutor
                 "Ask the operator 1-3 concrete questions when you genuinely cannot proceed without the answer (ambiguous/contradictory requirements, a missing decision that changes the build). Do NOT use this to ask permission or for things you can reasonably assume - make a sensible default and continue. The run pauses until they reply.",
                 "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"1-3 concrete questions (no yes/no).\"},\"blocking\":{\"type\":\"boolean\",\"description\":\"True if you cannot continue at all without the answers (the prompt is too vague). Default false.\"}},\"required\":[\"questions\"]}"));
 
+        // delegate_task: the lead agent can break a large build into sub-tasks
+        // (e.g. "write the enemy AI", "build the settings screen") and have
+        // them run as their own agent passes, then fold the results back in.
+        // Keeps the main agent's context focused on orchestration instead of
+        // drowning in every sub-file. Only wired where a delegator is available.
+        if (canDelegate)
+            tools.Add(new("delegate_task",
+                "Hand a self-contained sub-task to a fresh sub-agent run and get its result back. Use to parallelize or isolate a piece of work (e.g. 'implement the save-system module', 'write unit tests for X') so the main conversation stays focused. Give a COMPLETE, self-contained prompt - the sub-agent has no memory of this conversation. Returns the sub-agent's final answer.",
+                "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"A complete, self-contained task description for the sub-agent.\"},\"system\":{\"type\":\"string\",\"description\":\"Optional extra system instructions for the sub-agent (e.g. 'only write tests, do not edit game logic').\"}},\"required\":[\"prompt\"]}"));
+
         return tools;
     }
 
@@ -220,6 +238,9 @@ public sealed class AgentToolExecutor
                 "ask_user" when _askUser is not null
                     => await AskUserAsync(call, root, ct),
                 "ask_user" => Error(call, "ask_user is not available on this Worker (no interactive operator to answer)."),
+                "delegate_task" when _taskDelegator is not null
+                    => await DelegateTaskAsync(call, root, ct),
+                "delegate_task" => Error(call, "delegate_task is not available on this Worker (no delegator wired)."),
                 "recall" when _memory is not null => await RecallAsync(call, root, ct),
                 "remember" when _memory is not null => await RememberAsync(call, root, ct),
                 "recall" => Error(call, "recall is not enabled on this Worker (Inställningar -> Agent & arbetsyta -> Projektminne)."),
@@ -676,9 +697,16 @@ public sealed class AgentToolExecutor
         var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
             ? ResolvePath(r.GetString()!) : _workspaceRoot;
         var (success, output) = await _gameScaffolder(engine, prompt, root, ct);
-        return success
-            ? new ToolResult(call.Id, call.Name, output)
-            : Error(call, output);
+        if (!success)
+            return Error(call, output);
+        // A: after scaffolding, verify the produced project actually builds /
+        // runs (Full mode only). For html5 this confirms the file is present
+        // and well-formed; for engine projects it compiles. The build status
+        // is surfaced to the agent so it (and the user) sees a finished,
+        // verified artifact rather than just "files written".
+        var verifyNote = await AutoVerifyIfFullAsync(ct);
+        return new ToolResult(call.Id, call.Name,
+            output + (verifyNote is null ? "" : "\n\n" + verifyNote));
     }
 
     private async Task<ToolResult> ScaffoldAppAsync(ToolCall call, JsonElement args, CancellationToken ct)
@@ -693,9 +721,13 @@ public sealed class AgentToolExecutor
         var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
             ? ResolvePath(r.GetString()!) : _workspaceRoot;
         var (success, output) = await _appScaffolder(tech, prompt, root, ct);
-        return success
-            ? new ToolResult(call.Id, call.Name, output)
-            : Error(call, output);
+        if (!success)
+            return Error(call, output);
+        // A: verify the produced app actually builds/runs (Full mode), so the
+        // studio ships a verified artifact rather than just written files.
+        var verifyNote = await AutoVerifyIfFullAsync(ct);
+        return new ToolResult(call.Id, call.Name,
+            output + (verifyNote is null ? "" : "\n\n" + verifyNote));
     }
 
     private async Task<ToolResult> AskUserAsync(ToolCall call, JsonElement args, CancellationToken ct)
@@ -731,6 +763,35 @@ public sealed class AgentToolExecutor
 
         return new ToolResult(call.Id, call.Name,
             "Operator svarade:\n" + answer, IsError: false);
+    }
+
+    private async Task<ToolResult> DelegateTaskAsync(ToolCall call, JsonElement args, CancellationToken ct)
+    {
+        if (_taskDelegator is null)
+            return Error(call, "delegate_task is not available on this Worker (no delegator wired).");
+
+        var prompt = RequireString(args, "prompt");
+        if (string.IsNullOrWhiteSpace(prompt))
+            return Error(call, "delegate_task requires a non-empty 'prompt'.");
+        // Optional extra system context for the sub-agent (e.g. "only write
+        // tests"). The sub-agent starts fresh with no memory of this run, so
+        // the prompt must be fully self-contained.
+        var system = args.TryGetProperty("system", out var s) && s.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(s.GetString())
+            ? s.GetString()! : null;
+
+        try
+        {
+            var (success, output) = await _taskDelegator(prompt, system, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name,
+                    "SUB-TASK RESULT:\n" + Truncate(output),
+                    IsError: false)
+                : Error(call, "Sub-task failed:\n" + output);
+        }
+        catch (Exception ex)
+        {
+            return Error(call, $"delegate_task failed: {ex.Message}");
+        }
     }
 
     /// <summary>Crude, dependency-free readable-text extraction: good enough
