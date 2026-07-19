@@ -2,4 +2,7 @@
   <PropertyGroup>
     <RootNamespace>AiLocal.Core</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Acornima" Version="1.6.2" />
+  </ItemGroup>
 </Project>

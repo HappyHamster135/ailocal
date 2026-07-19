@@ -167,15 +167,22 @@ public sealed class PackageService
                 var installerDir = Path.Combine(buildDir, "installer");
                 Directory.CreateDirectory(installerDir);
 
-                // Använd PowerShell för att skapa en enkel self-extracting installer
+                // Kör via en temporär .ps1-fil i stället för -Command "..." -
+                // det eliminerar två buggar i den gamla varianten: (1) enkla
+                // citattecken expanderar inte $source/$dest i PowerShell, så
+                // den arkiverade den bokstavliga sökvägen '$source\*'; (2)
+                // inbäddade citattecken i ett flerradigt -Command-argument
+                // krockar med kommandoradens egen quoting.
                 var psScript = $@"
 $source = '{buildDir.Replace("'", "''")}'
 $dest = '{outputPath.Replace("'", "''")}'
-Compress-Archive -Path '$source\*' -DestinationPath '$dest' -Force
+Compress-Archive -Path ""$source\*"" -DestinationPath ""$dest"" -Force
 ";
+                var scriptPath = Path.Combine(Path.GetTempPath(), $"ailocal-installer-{Guid.NewGuid():n}.ps1");
+                await File.WriteAllTextAsync(scriptPath, psScript, ct);
                 var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe")
                 {
-                    Arguments = $"-NoProfile -Command \"{psScript}\"",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -189,6 +196,7 @@ Compress-Archive -Path '$source\*' -DestinationPath '$dest' -Force
                 var output = await proc.StandardOutput.ReadToEndAsync(ct);
                 var error = await proc.StandardError.ReadToEndAsync(ct);
                 await proc.WaitForExitAsync(ct);
+                try { File.Delete(scriptPath); } catch { /* temp cleanup - best effort */ }
 
                 if (proc.ExitCode != 0)
                     return new PackageResult(false, $"PowerShell misslyckades: {error}", null, 0);
@@ -288,7 +296,7 @@ Compress-Archive -Path '$source\*' -DestinationPath '$dest' -Force
         sb.AppendLine("- 4 GB RAM");
         sb.AppendLine();
         sb.AppendLine("## Byggd med");
-        sb.AppendLine($"- AiLocal v{"1.19.23"}");
+        sb.AppendLine($"- AiLocal v{typeof(PackageService).Assembly.GetName().Version?.ToString(3) ?? "?"}");
         sb.AppendLine($"- Motor: {engine}");
         sb.AppendLine();
         sb.AppendLine("## Innehåll");

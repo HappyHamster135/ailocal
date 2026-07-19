@@ -55,6 +55,16 @@ public sealed class GameBuilder
         return "unknown";
     }
 
+    /// <summary>Output exe name derived from the project folder ("mitt-spel"
+    /// -> "mitt-spel.exe") so every built game isn't shipped as PixelRush.exe.
+    /// Falls back to "Game" when the folder name has no usable characters.</summary>
+    internal static string DeriveExeName(string root)
+    {
+        var raw = Path.GetFileName(Path.TrimEndingDirectorySeparator(root ?? "")) ?? "";
+        var name = new string(raw.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ' or '.').ToArray()).Trim().TrimEnd('.');
+        return name.Length == 0 ? "Game" : name;
+    }
+
     // ---- Godot -----------------------------------------------------------
     async Task<(bool, string, string?)> BuildGodot(string root,
         Func<string, string, CancellationToken, Task<(int, string)>> runCommand, CancellationToken ct,
@@ -70,8 +80,10 @@ public sealed class GameBuilder
         // project.godot already names the preset "Windows Desktop" (ScaffoldGodot writes export_presets.cfg).
         // NOTE: do NOT pass --quit before --export-release - Godot 4 would exit before exporting.
         // --export-release performs the import+export and then exits on its own.
+        // The CLI output path overrides the preset's export_path, so the exe
+        // is named after the project folder rather than a hardcoded PixelRush.
         var preset = "Windows Desktop";
-        var outExe = Path.Combine(root, "build", "PixelRush.exe");
+        var outExe = Path.Combine(root, "build", DeriveExeName(root) + ".exe");
         var cmd = MakeGodotCommand(godot, preset, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);
         if (exit != 0)
@@ -112,7 +124,7 @@ public sealed class GameBuilder
                 "(https://unity.com) och se till att 'Unity.exe' finns under C:/Program Files/Unity/Hub/Editor/<version>/Editor/. " +
                 "'Bygg spel' kan inte ladda ner motorn sjalv.", null);
 
-        var outExe = Path.Combine(root, "build", "PixelRush.exe");
+        var outExe = Path.Combine(root, "build", DeriveExeName(root) + ".exe");
         // -buildWindows64Player respects the scenes registered in EditorBuildSettings.asset.
         var cmd = MakeUnityCommand(unity, root, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);

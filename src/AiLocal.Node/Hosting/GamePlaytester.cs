@@ -206,12 +206,15 @@ public sealed class GamePlaytester
         var summary = new StringBuilder();
         var allIssues = new List<string>();
 
-        // Hitta spelet
+        // Hitta spelet. Motorbyggen doper .exe:n efter projektmappen
+        // (GameBuilder.DeriveExeName), sa leta upp vad som än ligger i build/.
+        var buildDir = Path.Combine(projectRoot, "build");
         string? gamePath = engine.ToLowerInvariant() switch
         {
             "html5" => Path.Combine(projectRoot, "index.html"),
-            "godot" => Path.Combine(projectRoot, "build", "PixelRush.exe"),
-            "unity" => Path.Combine(projectRoot, "build", "PixelRush.exe"),
+            "godot" or "unity" => Directory.Exists(buildDir)
+                ? Directory.GetFiles(buildDir, "*.exe").FirstOrDefault()
+                : null,
             _ => null
         };
 
@@ -240,6 +243,11 @@ public sealed class GamePlaytester
     private static (List<string> Issues, string[] Warnings) AnalyzeHtml5Game(string html, string path)
     {
         var issues = new List<string>();
+
+        // Riktig JS-parsning först (Acornima) - ett syntaxfel betyder svart
+        // skärm oavsett hur bra allt annat ser ut, så det rapporteras överst.
+        foreach (var error in AiLocal.Core.Agent.JsSyntaxChecker.CheckHtml(html))
+            issues.Add($"JS-SYNTAXFEL (spelet startar inte): {error}");
 
         // Saknas canvas?
         if (!html.Contains("<canvas"))

@@ -84,6 +84,8 @@ public class GameBuilderTests
         Directory.CreateDirectory(Path.Combine(root, "build"));
         File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
 
+        // The exe is named after the project folder (DeriveExeName).
+        var exeName = GameBuilder.DeriveExeName(root) + ".exe";
         var capturedCmd = (string?)null;
         var godotFinder = () => @"C:\Program Files\Godot\godot.exe";
         Func<string, string, CancellationToken, Task<(int, string)>> runCommand =
@@ -91,7 +93,7 @@ public class GameBuilderTests
             {
                 capturedCmd = cmd;
                 // godot --export-release would write the exe; simulate it.
-                File.WriteAllText(Path.Combine(root, "build", "PixelRush.exe"), "MZ");
+                File.WriteAllText(Path.Combine(root, "build", exeName), "MZ");
                 return Task.FromResult((0, ""));
             };
 
@@ -103,10 +105,10 @@ public class GameBuilderTests
         Assert.Contains("--headless", capturedCmd);
         Assert.Contains("--export-release", capturedCmd);
         Assert.Contains("Windows Desktop", capturedCmd);
-        Assert.Contains(@"build\PixelRush.exe", capturedCmd);
+        Assert.Contains(@"build\" + exeName, capturedCmd);
         // CRITICAL: Godot 4 exits before exporting if --quit precedes --export-release.
         Assert.DoesNotContain("--quit", capturedCmd);
-        Assert.Equal(Path.Combine(root, "build", "PixelRush.exe"), result.ExePath);
+        Assert.Equal(Path.Combine(root, "build", exeName), result.ExePath);
     }
 
     [Fact]

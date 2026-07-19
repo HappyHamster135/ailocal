@@ -555,8 +555,22 @@ public static class SimpleTaskPlanner
     private static string InferSkill(string text)
     {
         var lower = text.ToLowerInvariant();
-        if (ContainsAny(lower, "code", "coding", "program", "bug", "api", "database", "kod", "utveckl"))
+        // Game skills first: "utveckla ett spel" should land on the game team,
+        // not generic coding - RoleForSkill maps these to the specialist roles.
+        if (ContainsAny(lower, "leveldesign", "level design", "bandesign", "nivådesign", "banbygg"))
+            return "level-design";
+        if (ContainsAny(lower, "sprite", "grafik", "pixel art", "pixelart", "texture", "artwork"))
+            return "art";
+        if (ContainsAny(lower, "ljudeffekt", "sound effect", "sfx", "musik", "music", "ljuddesign"))
+            return "sound-design";
+        if (ContainsAny(lower, "playtest", "speltest", "spelgransk"))
+            return "game-review";
+        // Implementation words beat the broad game words: "implementera
+        // spelets kollisionslogik" is coding work even though it says "spel".
+        if (ContainsAny(lower, "code", "coding", "program", "bug", "api", "database", "kod", "utveckl", "implement"))
             return "coding";
+        if (ContainsAny(lower, "gameplay", "spelmekanik", "game design", "speldesign", "balansering", "spel", "game"))
+            return "game-design";
         if (ContainsAny(lower, "research", "source", "market", "competitor", "undersök", "källa"))
             return "research";
         if (ContainsAny(lower, "write", "copy", "article", "report", "skriv", "text"))

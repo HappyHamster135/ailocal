@@ -17,6 +17,9 @@ public sealed class AiTaskPlanner
         "Break the user's goal into independent subtasks that different workers can run in parallel. " +
         "Each subtask must be self-contained. Rate each subtask's difficulty from 1 (trivial) to 5 (hard reasoning). " +
         "Assign one primary skill to each subtask: general, coding, research, writing, analysis, data, or vision. " +
+        "For GAME goals, prefer the game-team skills so the right specialist role owns the work: " +
+        "game-design (mechanics/balance/progression), level-design (levels/pacing), art (sprites/UI/visuals), " +
+        "sound-design (SFX/music), game-review (playtesting/critique), plus coding for the implementation itself. " +
         "Reply with STRICT JSON only - no prose, no code fences - in exactly this shape: " +
         "{\"subtasks\":[{\"title\":\"short label\",\"prompt\":\"full instruction for one worker\",\"complexity\":3,\"skill\":\"coding\"}]}. " +
         "If the goal is small enough for a single worker, return one subtask.";

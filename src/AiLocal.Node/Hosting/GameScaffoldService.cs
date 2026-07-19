@@ -108,7 +108,7 @@ public sealed partial class GameScaffoldService
         Write(root, "README.md",
             "# Pixel Rush - 2D Platformer (Unity)\n\n" +
             "Oppna projektet i Unity 6000.x och tryck Play, eller bygg headless:\n" +
-            "`Unity -batchmode -buildWindows64Player build/PixelRush.exe`.\n\n" +
+            "`Unity -batchmode -buildWindows64Player build/<mappnamn>.exe` (eller Studio-knappen 'Bygg spel').\n\n" +
             "Styrning: Vänster/Höger eller A/D, Space/Up/W för hopp, Esc för paus.\n" +
             "Samla mynt, undvik fiender, nå flaggan. Klara 3 nivåer för att vinna.\n" +
             "App-ikon: icon.ico (satt i PlayerSettings > Icon). Steam: ersatt steam_appid.txt med ditt app-id.\n");
@@ -265,22 +265,28 @@ public sealed partial class GameScaffoldService
     }
     static string[] ScaffoldHtml5(string root, string prompt)
     {
-        // A single, self-contained, immediately-playable 2D platformer.
-        // No build step, no engine install - open index.html in any browser.
-        // Includes gravity/jump, platforms, collectibles (score), enemies
-        // (damage), a HUD, 3 levels with real progression, sprite-frame
-        // animation and Web Audio sound so it satisfies "ljud, animationer"
-        // out of the box. The agent (or you) can then extend index.html
-        // instead of starting from nothing.
-        Write(root, "index.html", Html5Game());
-        Write(root, "DESIGN.md", Html5DesignDoc(prompt));
-        Write(root, "README.md",
-            "# 2D Platformer (HTML5)\n\n" +
-            "Spela: öppna `index.html` i en webbläsare.\n\n" +
-            "Styrning: piltangenter / WASD för rörelse, mellanslag / W / upp för att hoppa.\n\n" +
-            "Samla mynt för poäng, undvik fiender. Nå flaggan längst till höger för att vinna nivån. " +
-            "Klara alla 3 nivåer för att vinna spelet.\n\n" +
-            "Spelets design: se `DESIGN.md`.\n");
+        // A single, self-contained, immediately-playable game - no build
+        // step, no engine install: open index.html in any browser. The GENRE
+        // is picked from the prompt (rpg / racing / puzzle / tower defense /
+        // shooter, platformer as default), so "bygg ett racingspel" actually
+        // yields a racing game instead of the platformer. Every template
+        // ships at the production bar: title screen, pause, game over/win
+        // overlays with restart, WebAudio SFX, animation and a persistent
+        // highscore - the agent then extends it instead of starting from
+        // nothing.
+        var genre = DetectGenre(prompt);
+        var (game, design) = genre switch
+        {
+            "rpg" => (Html5Rpg(prompt), Html5RpgDesignDoc(prompt)),
+            "racing" => (Html5Racing(prompt), Html5RacingDesignDoc(prompt)),
+            "puzzle" => (Html5Puzzle(prompt), Html5PuzzleDesignDoc(prompt)),
+            "towerdefense" => (Html5TowerDefense(prompt), Html5TdDesignDoc(prompt)),
+            "shooter" => (Html5Shooter(prompt), Html5ShooterDesignDoc(prompt)),
+            _ => (Html5Game(), Html5DesignDoc(prompt))
+        };
+        Write(root, "index.html", game);
+        Write(root, "DESIGN.md", design);
+        Write(root, "README.md", Html5GenreReadme(genre));
         return new[] { "index.html", "DESIGN.md", "README.md" };
     }
 
@@ -315,7 +321,8 @@ public sealed partial class GameScaffoldService
 "## Visuellt & ljud\n" +
 "- Canvas-rendering, 2-frame sprite-bob för löpning (ingen extern asset).\n" +
 "- Web Audio-SFX: hopp, mynt, träff, vinst. Ljud initieras först vid första input (autoplay-regler).\n" +
-"- HUD: HP-bar, nivå och poäng.\n\n" +
+"- HUD: HP-bar, nivå, poäng och sparat rekord (localStorage).\n" +
+"- Titelskärm före start, paus med Esc/P, game over/vinst-skärm med omstart.\n\n" +
 "## Tekniska antaganden\n" +
 "- Ett enda `index.html` (HTML+CSS+JS). Inget externt beroende, inget bygge.\n" +
 "- Agenten (eller användaren) bygger vidare genom att redigera `index.html` - t.ex. fler nivåer " +
@@ -344,6 +351,8 @@ public sealed partial class GameScaffoldService
   .bar>i{display:block;height:100%;background:#ff5b5b;transition:width .2s}
   #over{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.82);color:#fff;text-align:center}
   #over h1{font-size:42px;margin:0}#over button{margin-top:18px;padding:10px 28px;font-size:16px;cursor:pointer;background:#4caf50;color:#fff;border:0;border-radius:6px}
+  #pause{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.7);color:#fff;text-align:center}
+  #pause h1{font-size:42px;margin:0}
   #start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(10,14,22,.92);color:#fff;text-align:center}
   #start h1{font-size:46px;margin:0 0 6px}
   #start p{margin:4px;opacity:.8}
@@ -354,10 +363,11 @@ public sealed partial class GameScaffoldService
 <body>
 <div id=""wrap"">
   <canvas id=""game"" width=""800"" height=""480""></canvas>
-  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Niva <span id=""lvl"">1</span> &middot; Poang <span id=""score"">0</span></div>
-  <div id=""hint"">Piltangenter / WASD rorelse &middot; Mellanslag / W / Upp = hoppa</div>
+  <div id=""hud"">HP <span id=""hp"">100</span><div class=""bar""><i id=""hpbar"" style=""width:100%""></i></div>Niva <span id=""lvl"">1</span> &middot; Poang <span id=""score"">0</span> &middot; Rekord <span id=""high"">0</span></div>
+  <div id=""hint"">Piltangenter / WASD rorelse &middot; Mellanslag / W / Upp = hoppa &middot; Esc / P = paus</div>
   <div id=""over""><h1 id=""title"">Game Over</h1><button onclick=""location.reload()"">Spela igen</button></div>
-  <div id=""start""><h1>2D Plattformspel</h1><p>Samla mynt, undvik fiender, na flaggan for att vinna.</p><p>Piltangenter / WASD + Mellanslag for att hoppa.</p><button id=""startBtn"">Starta spelet</button></div>
+  <div id=""pause""><h1>Paus</h1><p>Tryck Esc eller P for att fortsatta</p></div>
+  <div id=""start""><h1>2D Plattformspel</h1><p>Samla mynt, undvik fiender, na flaggan for att vinna.</p><p>Piltangenter / WASD + Mellanslag for att hoppa. Esc / P pausar.</p><button id=""startBtn"">Starta spelet</button></div>
 </div>
 <script>
 const cv=document.getElementById('game'),ctx=cv.getContext('2d');
@@ -390,8 +400,13 @@ function loadLevel(n){const L=levels[Math.min(n,FINAL_LEVEL)-1];
   enemies=L.enemies.map(e=>({...e}));
   flag={...L.flag};}
 
-let score=0,running=false,started=false,level=1,animT=0;
+let score=0,running=false,started=false,paused=false,level=1,animT=0;
+let high=+(localStorage.getItem('platformer.high')||0);
+document.getElementById('high').textContent=high;
 document.getElementById('startBtn').onclick=()=>{document.getElementById('start').style.display='none';loadLevel(level);started=true;running=true;initAudio();};
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+  if((k==='escape'||k==='p')&&started&&document.getElementById('over').style.display!=='flex'){
+    paused=!paused;document.getElementById('pause').style.display=paused?'flex':'none';}});
 
 // Web Audio SFX, guarded so a failed/blocked context can never throw in the loop.
 let AC=null;const snd={};let audioOK=true;
@@ -404,7 +419,7 @@ addEventListener('click',initAudio);addEventListener('keydown',initAudio);
 
 function rects(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 
-function update(){if(!running||!started)return;
+function update(){if(!running||!started||paused)return;
   const sp=3.4;
   if(keys['arrowleft']||keys['a']){player.vx=-sp;player.face=-1;}
   else if(keys['arrowright']||keys['d']){player.vx=sp;player.face=1;}
@@ -429,6 +444,8 @@ function update(){if(!running||!started)return;
   animT+=16;if(animT>120){animT=0;player.frame^=1;}
 }
 function end(win){const o=document.getElementById('over');o.style.display='flex';
+  if(score>high){high=score;try{localStorage.setItem('platformer.high',high);}catch(e){}}
+  document.getElementById('high').textContent=high;
   document.getElementById('title').textContent=win?(level>=FINAL_LEVEL?'Du vann spelet! ':'Du vann niva '+level+'! '):'Game Over';
   const btn=o.querySelector('button');
   if(win&&level<FINAL_LEVEL){btn.textContent='Nasta niva';btn.onclick=()=>nextLevel();}

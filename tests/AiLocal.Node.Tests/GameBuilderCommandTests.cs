@@ -37,7 +37,9 @@ public class GameBuilderCommandTests
         var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(Path.Combine(root, "build"));
-        var outExe = Path.Combine(root, "build", "PixelRush.exe");
+        // The exe is named after the project folder (DeriveExeName), not a
+        // hardcoded PixelRush - every shipped game gets its own name.
+        var outExe = Path.Combine(root, "build", GameBuilder.DeriveExeName(root) + ".exe");
         File.WriteAllText(outExe, "MZ"); // pretend the export succeeded
 
         string? capturedCmd = null;
