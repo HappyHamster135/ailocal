@@ -37,13 +37,19 @@ public class GameScaffoldCompleteTests
             Assert.True(File.Exists(Path.Combine(dir, "icon.ico")));
             AssertValidIco(Path.Combine(dir, "icon.ico"));
             Assert.Contains("config/icon=\"res://icon.ico\"", File.ReadAllText(Path.Combine(dir, "project.godot")));
+            // Godot 4 export preset so --export-release "Windows Desktop" works.
+            Assert.Contains("export_presets.cfg", files);
+            var preset = File.ReadAllText(Path.Combine(dir, "export_presets.cfg"));
+            Assert.Contains("[preset.0]", preset);
+            Assert.Contains("name=\"Windows Desktop\"", preset);
+            Assert.Contains("application/icon=\"res://icon.ico\"", preset);
             // The C# scripts must be syntactically valid.
             AssertCSharpValid(Path.Combine(dir, "Game.cs"));
             AssertCSharpValid(Path.Combine(dir, "Player.cs"));
             AssertCSharpValid(Path.Combine(dir, "Enemy.cs"));
             AssertCSharpValid(Path.Combine(dir, "Coin.cs"));
-            // project.godot must carry the Windows export preset so --export works.
-            Assert.Contains("Windows Desktop", File.ReadAllText(Path.Combine(dir, "project.godot")));
+            // project.godot wires the icon via config/icon (preset lives in export_presets.cfg).
+            Assert.Contains("config/icon=\"res://icon.ico\"", File.ReadAllText(Path.Combine(dir, "project.godot")));
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }

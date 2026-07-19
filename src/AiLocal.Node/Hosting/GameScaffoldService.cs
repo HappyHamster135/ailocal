@@ -124,6 +124,9 @@ public sealed class GameScaffoldService
         var files = new List<string>();
         Write(root, "project.godot", GodotProject());
         files.Add("project.godot");
+        // Godot 4 Windows Desktop export preset - lets --export-release find it.
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
 
         // Game / level controller: score, hp, level progression, win/lose,
         // pause, HUD, and procedural sound (no external assets needed).
@@ -947,12 +950,55 @@ MonoBehaviour:
         "[input]\n" +
         "left={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 65, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
         "right={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 68, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
-        "jump={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 32, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n" +
-        // Export preset named "Windows Desktop" - matches the --export-release
-        // target so "Bygg spel" produces a .exe instead of erroring.
-        "\n[export]\n\n[export_profile]\n" +
-        "name=\"Windows Desktop\"\nplatform=\"Windows Desktop\"\n" +
-        "export_path=\"build/PixelRush.exe\"\ninclude_filter=\"\"\nexclude_filter=\"\"\npatches=\"\"\n";
+        "jump={ \"deadzone\": 0.5, \"events\": [{\"physical\": false, \"echo\": false, \"event_device\": 0, \"device\": -1, \"alt_pressed\": false, \"shift_pressed\": false, \"ctrl_pressed\": false, \"meta_pressed\": false, \"pressed\": false, \"keycode\": 32, \"location\": 0, \"button_index\": -1, \"button_mask\": 0, \"which\": 0, \"double_click\": false }] }\n";
+
+    /// <summary>Windows Desktop export preset for Godot 4 - a standalone
+    /// export_presets.cfg so `godot --export-release "Windows Desktop"` actually
+    /// finds the preset (the project.godot [export] form is Godot 3 and is
+    /// ignored by Godot 4, which would make the headless build error).</summary>
+    static string GodotExportPresets() =>
+        "[preset.0]\n" +
+        "name=\"Windows Desktop\"\n" +
+        "platform=\"Windows Desktop\"\n" +
+        "runnable=true\n" +
+        "advanced_options=false\n" +
+        "dedicated_server=false\n" +
+        "custom_features=\"\"\n" +
+        "export_filter=\"all_resources\"\n" +
+        "include_filter=\"\"\n" +
+        "exclude_filter=\"\"\n" +
+        "export_path=\"build/PixelRush.exe\"\n" +
+        "patches=\"\"\n" +
+        "encryption_include_filters=\"\"\n" +
+        "encryption_exclude_filters=\"\"\n" +
+        "seed=0\n" +
+        "encrypt_pck=false\n" +
+        "encrypt_directory=false\n" +
+        "\n[preset.0.options]\n" +
+        "custom_template/debug=\"\"\n" +
+        "custom_template/release=\"\"\n" +
+        "variant/extensions_support=false\n" +
+        "variant/threads_support=true\n" +
+        "architectures/architecture=\"x86_64\"\n" +
+        "binary_format/embed_prefix=\"\"\n" +
+        "binary_format/embed_suffix=\"\"\n" +
+        "binary_format/embed_pck=false\n" +
+        "codesign/enable=false\n" +
+        "codesign/timestamp=true\n" +
+        "codesign/timestamp_server_url=\"\"\n" +
+        "codesign/digest_algorithm=\"SHA256\"\n" +
+        "codesign/description=\"\"\n" +
+        "application/modify_resources=false\n" +
+        "application/icon=\"res://icon.ico\"\n" +
+        "application/console_wrapper=2\n" +
+        "application/embedding=PackedStringArray(\"\")\n" +
+        "application/file_version=\"\"\n" +
+        "application/product_version=\"\"\n" +
+        "application/company_name=\"\"\n" +
+        "application/product_name=\"Pixel Rush\"\n" +
+        "application/file_description=\"\"\n" +
+        "application/copyright=\"\"\n" +
+        "application/trademarks=\"\"\n";
 
     static string GodotGame() =>
 @"using Godot;
