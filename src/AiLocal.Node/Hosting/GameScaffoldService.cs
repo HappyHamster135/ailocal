@@ -127,6 +127,8 @@ public sealed class GameScaffoldService
         files.Add("Enemy.cs");
         Write(root, "Coin.cs", GodotCoin());
         files.Add("Coin.cs");
+        Write(root, "SpriteGen.cs", GodotSpriteGen());
+        files.Add("SpriteGen.cs");
 
         // Reusable scenes the Game instantiates per level.
         Write(root, "Player.tscn", GodotPlayerScene());
@@ -971,7 +973,9 @@ public partial class Game : Node2D
         player.Connect(Player.SignalName.Scored, Callable.From<int>(OnScored));
         player.Connect(Player.SignalName.Hurt, Callable.From<int>(OnHurt));
         player.Connect(Player.SignalName.LevelCleared, Callable.From(() => OnLevelCleared()));
-        Spawn(""Goal.tscn"", data.Goal.x, data.Goal.y);
+        var goal = Spawn(""Goal.tscn"", data.Goal.x, data.Goal.y);
+        var goalSprite = goal.GetNodeOrNull<Sprite2D>(""Sprite2D"");
+        if (goalSprite != null) goalSprite.Texture = SpriteGen.Solid(30, 60, Colors.LimeGreen);
     }
 
     private Node2D Spawn(string scene, float x, float y, float extra = 0)
@@ -1105,7 +1109,13 @@ public partial class Enemy : CharacterBody2D
     private float _dir = 1;
     private Vector2 _vel;
 
-    public override void _Ready() => _minX = Position.X;
+    public override void _Ready()
+    {
+        _minX = Position.X;
+        var s = GetNodeOrNull<Sprite2D>(""Sprite2D"");
+        if (s == null) { s = new Sprite2D(); AddChild(s); }
+        s.Texture = SpriteGen.Solid(30, 30, Colors.Crimson);
+    }
 
     public override void _PhysicsProcess(double delta)
     {
@@ -1116,6 +1126,7 @@ public partial class Enemy : CharacterBody2D
         Velocity = _vel;
         MoveAndSlide();
         _vel = Velocity;
+        if (HasNode(""Sprite2D"")) GetNode<Sprite2D>(""Sprite2D"").FlipH = _dir < 0;
     }
 }
 ";
@@ -1128,11 +1139,48 @@ public partial class Coin : Area2D
 {
     private bool _taken;
 
+    public override void _Ready()
+    {
+        var s = GetNodeOrNull<Sprite2D>(""Sprite2D"");
+        if (s == null) { s = new Sprite2D(); AddChild(s); }
+        s.Texture = SpriteGen.Circle(24, Colors.Gold);
+    }
+
     public void Collect()
     {
         if (_taken) return;
         _taken = true;
         QueueFree();
+    }
+}
+";
+
+    /// <summary>Procedural sprite textures so every entity is visible with zero
+    /// external art. Pure Godot Image API - no downloads.</summary>
+    static string GodotSpriteGen() =>
+@"using Godot;
+
+/// <summary>Small helpers that build solid-color Sprite2D textures at runtime,
+/// so the scaffolded game renders without shipping any image files.</summary>
+public static class SpriteGen
+{
+    public static ImageTexture Solid(int w, int h, Color c)
+    {
+        var img = Image.Create(w, h, false, Image.Format.Rgba8);
+        img.Fill(c);
+        return ImageTexture.CreateFromImage(img);
+    }
+
+    public static ImageTexture Circle(int radius, Color c)
+    {
+        var size = radius * 2;
+        var img = Image.Create(size, size, false, Image.Format.Rgba8);
+        img.Fill(Colors.Transparent);
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+                if (Vector2.Distance(new Vector2(x, y), new Vector2(radius, radius)) <= radius)
+                    img.SetPixel(x, y, c);
+        return ImageTexture.CreateFromImage(img);
     }
 }
 ";
@@ -1221,13 +1269,14 @@ shape = SubResource(""c"")
     static string GodotGoalScene() =>
 @"[gd_scene load_steps=2 format=3 uid=""uid://b2dgoal""]
 
-[ext_resource type=""Script"" path=""res://Game.cs"" id=""1""]
-
 [sub_resource type=""RectangleShape2D"" id=""c""]
 size = Vector2(30, 60)
 
 [node name=""Goal"" type=""Area2D""]
 groups = [""goal""]
+
+[node name=""Sprite2D"" type=""Sprite2D"" parent=""Goal""]
+centered = false
 
 [node name=""CollisionShape2D"" type=""CollisionShape2D"" parent=""Goal""]
 shape = SubResource(""c"")
