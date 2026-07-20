@@ -368,6 +368,15 @@ public sealed class AgentToolExecutor
         {
             return Error(call, ex.Message);
         }
+        catch (JsonException ex)
+        {
+            // Nearly always the model's OUTPUT LIMIT truncating a large
+            // write_file mid-string - tell it how to recover instead of
+            // leaving a bare parser error it tends to just retry verbatim.
+            return Error(call,
+                $"tool arguments were not valid JSON ({ex.Message}). Detta beror oftast på att svaret kapades av modellens utdatagräns. " +
+                "Skriv INTE om hela filen i ett anrop - dela upp arbetet: skapa filen med en mindre write_file och bygg vidare med flera edit_file-ändringar.");
+        }
         catch (Exception ex)
         {
             return Error(call, $"tool execution failed: {ex.Message}");

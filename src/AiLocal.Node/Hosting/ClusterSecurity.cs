@@ -17,7 +17,13 @@ public sealed class ClusterTokenHandler : DelegatingHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        if (_settings.GetClusterToken() is { Length: > 0 } token)
+        // Default only - never stack a second value. An Overseer proxy sets
+        // the TARGET Host's own token explicitly before sending; adding ours
+        // on top made HttpClient serialize the header as one combined
+        // "tokenA, tokenB" line, which the receiver compared as a single
+        // string and rejected with 401 on every cross-node proxy.
+        if (!request.Headers.Contains(ClusterSecurity.HeaderName) &&
+            _settings.GetClusterToken() is { Length: > 0 } token)
             request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
         return base.SendAsync(request, cancellationToken);
     }
@@ -60,9 +66,15 @@ public static class ClusterSecurity
         // The header is used by node-to-node calls and same-origin dashboard
         // fetches; the query string is a fallback for EventSource (the browser
         // SSE API cannot set custom headers) and for shareable pairing links.
-        var presented = context.Request.Headers[HeaderName].FirstOrDefault()
-            ?? context.Request.Query["token"].FirstOrDefault();
-        if (SecureEquals(adminToken, presented))
+        // Accept a match on ANY presented value (and comma-split each - a
+        // sender that stacked two tokens serializes them as one "a, b" line):
+        // tokens are hex, so a comma can never be part of a real token.
+        var presentedValues = context.Request.Headers[HeaderName]
+            .SelectMany(v => (v ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Concat(context.Request.Query["token"].Select(v => v ?? ""))
+            .Where(v => v.Length > 0)
+            .ToList();
+        if (presentedValues.Any(v => SecureEquals(adminToken, v)))
         {
             context.Items[AdminTierItemKey] = true;
             await next();
@@ -75,7 +87,7 @@ public static class ClusterSecurity
         // for node-only (node-to-node) endpoints - those need real node identity.
         if (!nodeOnly && !RequiresAdminTier(context.Request.Method, context.Request.Path) &&
             settings.GetOperatorToken() is { Length: > 0 } operatorToken &&
-            SecureEquals(operatorToken, presented))
+            presentedValues.Any(v => SecureEquals(operatorToken, v)))
         {
             context.Items[AdminTierItemKey] = false;
             await next();

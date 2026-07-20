@@ -25,6 +25,10 @@ public static class OverseerRole
         var store = app.Services.GetRequiredService<PersistentSettingsStore>();
         var hosts = app.Services.GetRequiredService<HostRegistry>();
         hosts.OverseerToken = store.GetClusterToken();
+        // Live source too: a token pasted into settings AFTER startup must
+        // take effect immediately - the snapshot above alone meant 401 on
+        // every proxy until the Overseer was restarted.
+        hosts.OverseerTokenSource = store.GetClusterToken;
 
         app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
 
@@ -89,6 +93,60 @@ public static class OverseerRole
         app.MapPost("/api/chat", (SubmitTaskRequest req, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/chat", req, ct));
+        // Uppdrag-flödet från Overseerns dashboard: planeringen är en vanlig
+        // buffrad proxy, men själva assignmenten är en SSE-ström (agentens
+        // steg i realtid) och måste STREAMAS igenom - en buffrad proxy hade
+        // först svarat när hela bygget var klart. Innan dessa två fanns fick
+        // Overseer-vyn HTTP 404 på första planeringsanropet.
+        app.MapPost("/api/goal-plan", (GoalPlanRequest req, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/api/goal-plan", req, ct));
+
+        app.MapPost("/api/assignment", async (AssignmentRequest req, HttpContext ctx,
+            HostLocator locator, HostRegistry hosts, IHttpClientFactory hf, CancellationToken ct) =>
+        {
+            var candidates = PrimaryCandidates(locator, hosts);
+            if (candidates.Count == 0)
+                return Results.Problem("host not yet discovered");
+
+            foreach (var endpoint in candidates)
+            {
+                HttpResponseMessage upstream;
+                try
+                {
+                    var client = hf.CreateClient("cluster");
+                    client.Timeout = Timeout.InfiniteTimeSpan; // agentbyggen tar minuter
+                    var request = new HttpRequestMessage(HttpMethod.Post,
+                        $"{endpoint.TrimEnd('/')}/api/assignment")
+                    { Content = JsonContent.Create(req) };
+                    var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
+                    if (!string.IsNullOrWhiteSpace(token))
+                        request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
+                    upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                }
+                catch
+                {
+                    continue; // denna Host onåbar - prova nästa kandidat
+                }
+
+                using var _ = upstream;
+                if (!upstream.IsSuccessStatusCode)
+                {
+                    var body = await upstream.Content.ReadAsStringAsync(ct);
+                    return Results.Content(body, upstream.Content.Headers.ContentType?.ToString() ?? "application/json",
+                        statusCode: (int)upstream.StatusCode);
+                }
+
+                ctx.Response.Headers.CacheControl = "no-cache";
+                ctx.Response.ContentType = "text/event-stream";
+                await using var upstreamStream = await upstream.Content.ReadAsStreamAsync(ct);
+                await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
+                return Results.Empty;
+            }
+
+            return Results.Problem("ingen Host gick att nå för assignmenten", statusCode: StatusCodes.Status502BadGateway);
+        });
+
         app.MapPost("/api/tasks", (SubmitTaskRequest req, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/tasks", req, ct));
@@ -317,6 +375,23 @@ public static class OverseerRole
         }
     }
 
+    /// <summary>Candidate Host endpoints, best first. locator.HostEndpoint
+    /// only ever gets set ONCE - the first Host beacon this Overseer ever saw
+    /// (see ClusterHostedService.OnBeacon) - and never updates again, so
+    /// betting solely on it can permanently stick to a Host that's since gone
+    /// away or been reconfigured. hosts.All is ordered most-recently-seen
+    /// first and self-updates on every beacon, so it's a much better signal
+    /// for "which Host is actually alive right now" - try it first, and only
+    /// fall back to the sticky locator endpoint (useful for an explicitly-
+    /// configured, cross-subnet Host that LAN discovery would never see).</summary>
+    private static List<string> PrimaryCandidates(HostLocator locator, HostRegistry hosts) =>
+        hosts.All
+            .Select(h => h.Endpoint)
+            .Append(locator.HostEndpoint ?? "")
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     private static async Task<IResult> ProxyPrimary(
         HostLocator locator,
         HostRegistry hosts,
@@ -326,21 +401,7 @@ public static class OverseerRole
         object? body,
         CancellationToken ct)
     {
-        // locator.HostEndpoint only ever gets set ONCE - the first Host
-        // beacon this Overseer ever saw (see ClusterHostedService.OnBeacon) -
-        // and never updates again, so betting solely on it can permanently
-        // stick to a Host that's since gone away or been reconfigured.
-        // hosts.All is ordered most-recently-seen first and self-updates on
-        // every beacon, so it's a much better signal for "which Host is
-        // actually alive right now" - try it first, and only fall back to
-        // the sticky locator endpoint (useful for an explicitly-configured,
-        // cross-subnet Host that LAN discovery would never see) if needed.
-        var candidates = hosts.All
-            .Select(h => h.Endpoint)
-            .Append(locator.HostEndpoint ?? "")
-            .Where(e => !string.IsNullOrWhiteSpace(e))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var candidates = PrimaryCandidates(locator, hosts);
 
         if (candidates.Count == 0)
             return Results.Problem("host not yet discovered");
@@ -390,7 +451,7 @@ public static class OverseerRole
             // 401. Fall back to the Overseer's token only when we have no
             // recorded token for this Host (e.g. a cross-subnet Host added by
             // explicit endpoint that never announced).
-            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.OverseerToken;
+            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
             if (!string.IsNullOrWhiteSpace(token))
                 request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
             if (body is not null)
@@ -436,7 +497,7 @@ public static class OverseerRole
         {
             var client = httpFactory.CreateClient("cluster");
             client.Timeout = TimeSpan.FromSeconds(4);
-            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.OverseerToken;
+            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint.TrimEnd('/')}{path}");
             if (!string.IsNullOrWhiteSpace(token))
                 request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);

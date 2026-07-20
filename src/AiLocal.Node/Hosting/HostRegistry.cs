@@ -56,6 +56,15 @@ public sealed class HostRegistry
     /// anyway, since they share the settings file.</summary>
     public string? OverseerToken { get; set; }
 
+    /// <summary>Live source for this Overseer's own configured cluster token.
+    /// The snapshot property above is captured ONCE at startup, so an
+    /// operator pasting a Host's token into settings afterwards got 401 on
+    /// every proxy until restart. Proxy call sites read
+    /// <see cref="LiveOverseerToken"/>, which prefers this delegate.</summary>
+    public Func<string?>? OverseerTokenSource { get; set; }
+
+    public string? LiveOverseerToken => OverseerTokenSource?.Invoke() ?? OverseerToken;
+
     public void Upsert(DiscoveryBeacon beacon)
     {
         if (beacon.Role != NodeRole.Host)

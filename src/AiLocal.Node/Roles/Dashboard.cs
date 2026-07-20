@@ -840,21 +840,37 @@ internal static class Dashboard
           animation: shimmerSweep 1.4s linear infinite;
           width: fit-content;
         }
-        /* Live assignment (agent-mode) bubble: prominent step-log + worker +
-           ticking elapsed timer, so "delegera till kluster" shows what the
-           agent is actually doing instead of a single "working" word. */
-        .assignment-steps {
-          margin-top: 6px;
-          padding: 8px 10px;
-          background: var(--code-bg, rgba(255,255,255,.04));
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          max-height: 280px;
-          overflow: auto;
-          white-space: pre-wrap;
-          word-break: break-word;
-          line-height: 1.5;
+        /* Agentens live-steg i Claude Code/Hermes-stil: resonemang som
+           löpande text, verktygsanrop som kompakta rader med namn + kort
+           argument, resultat som dämpade enradare - inte en scrollbox. */
+        .step-flow { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+        .step-think {
+          white-space: pre-wrap; line-height: 1.55; opacity: .88;
+          margin: 4px 0; animation: stepIn .18s ease;
         }
+        .step-row {
+          display: flex; align-items: baseline; gap: 8px;
+          font-size: 12.5px; padding: 1px 0; min-width: 0;
+          animation: stepIn .18s ease;
+        }
+        .step-row .k { color: var(--muted); flex: none; width: 14px; text-align: center; }
+        .step-tool-name {
+          font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+          font-weight: 600; flex: none;
+        }
+        .step-tool-args {
+          font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+          color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; min-width: 0;
+        }
+        .step-result {
+          font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+          font-size: 12px; color: var(--muted); opacity: .85;
+          padding-left: 22px; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; animation: stepIn .18s ease;
+        }
+        .step-error, .step-error .step-tool-args { color: var(--bad, #cf2d56); opacity: 1; }
+        @keyframes stepIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
         .elapsed-timer {
           font-variant-numeric: tabular-nums;
           color: var(--accent, #6ea8fe);
@@ -3053,14 +3069,16 @@ internal static class Dashboard
           if (ta) return ta;
           if (m.role === 'user')
             return `<article class="message user"><div class="message-meta"><strong>Du</strong></div><div class="msg-text">${esc(m.content)}</div></article>`;
-          // Innan första steget kommit: visa ett skimrande "Tänker..." så det
-          // syns att agenten arbetar - stegen (resonemang/verktyg) tar över
-          // raden så fort de börjar strömma in.
-          const body = m.content
-            ? `<div class="msg-text">${esc(m.content)}</div>`
-            : `<div class="msg-text"><span class="thinking-shimmer">Tänker...</span></div>`;
+          // Claude Code-stil: agentens resonemang och verktygsanrop strömmar
+          // in som ett steg-flöde (löpande text + kompakta verktygsrader);
+          // slutsvaret läggs som meddelandets egen text under. Innan första
+          // steget visar flödet självt ett skimrande "startar…".
+          const running = m.state === 'Running';
+          const steps = stepRowsHtml(m.steps, running && !m.content);
+          const body = m.content ? `<div class="msg-text">${esc(m.content)}</div>` : '';
           return `<article class="message assistant">
-            <div class="message-meta"><strong>AiLocal</strong>${m.state ? `<span>${esc(m.state)}</span>` : ''}</div>
+            <div class="message-meta"><strong>AiLocal</strong>${m.state && m.state !== 'Running' ? `<span class="small">${esc(m.state === 'Completed' ? '' : m.state)}</span>` : ''}</div>
+            ${steps}
             ${body}
           </article>`;
         }
@@ -3303,14 +3321,14 @@ internal static class Dashboard
           $('sessionRunningIndicator').textContent = 'Kör...';
           $('sessionNotice').className = 'notice';
 
-          const liveAssistant = { role: 'assistant', content: '', state: 'Running' };
+          const liveAssistant = { role: 'assistant', content: '', state: 'Running', steps: [] };
           state.sessionLiveMessages = [{ role: 'user', content: text }, liveAssistant];
           renderSessionMessages();
 
-          const lines = [];
-          const appendLine = line => {
-            lines.push(line);
-            liveAssistant.content = lines.join('\n');
+          // Strukturerade steg (Claude Code-stil) i stället for en radlogg:
+          // resonemang blir lopande text, verktygsanrop kompakta rader.
+          const addStep = step => {
+            liveAssistant.steps.push(step);
             renderSessionMessages();
           };
 
@@ -3350,15 +3368,13 @@ internal static class Dashboard
                 if (payload.step) {
                   if (payload.step.Kind === 'awaiting_approval') handleApprovalStep(payload.step.Detail);
                   if (payload.step.Kind === 'awaiting_info') await handleInfoStep(payload.step.Detail, id);
-                  appendLine(stepLine(payload.step));
+                  addStep(payload.step);
                 } else if (payload.final) {
                   success = !!payload.final.Success;
                   liveAssistant.state = success ? 'Completed' : 'Failed';
-                  if (!lines.length) {
-                    appendLine(payload.final.FinalAnswer || (success ? '(inget svar)' : '(misslyckades)'));
-                  } else {
-                    renderSessionMessages();
-                  }
+                  liveAssistant.content = payload.final.FinalAnswer
+                    || (success ? '(inget svar)' : '(misslyckades)');
+                  renderSessionMessages();
                 }
               }
             }
@@ -3376,7 +3392,7 @@ internal static class Dashboard
             }
           } catch (error) {
             liveAssistant.state = 'Failed';
-            appendLine(`✗ ${error.message}`);
+            addStep({ Kind: 'error', Detail: error.message });
             showSessionNotice(error.message, true);
           } finally {
             $('sessionSendBtn').disabled = false;
@@ -4666,11 +4682,21 @@ internal static class Dashboard
             state.updateInfo = info;
             const box = $('updateBanner');
             if (info?.updateAvailable) {
-              box.innerHTML = `En ny version är tillgänglig: <strong>${esc(info.latestVersion)}</strong> ` +
+              // Enklicks-uppdatering direkt fran bannern nar noden kan
+              // sjalvuppdatera - annars manuell hamtningslank som forut.
+              const action = info.canSelfUpdate
+                ? `<button class="mini-btn" id="updateNowBtn">Uppdatera nu</button>`
+                : (info.downloadUrl ? ` <a href="${esc(info.downloadUrl)}" target="_blank" rel="noopener">Hämta</a>` : '');
+              box.innerHTML = `<span style="flex:1">En ny version är tillgänglig: <strong>${esc(info.latestVersion)}</strong> ` +
                 `(nuvarande ${esc(info.currentVersion)}).` +
-                (info.downloadUrl ? ` <a href="${esc(info.downloadUrl)}" target="_blank" rel="noopener">Hämta</a>` : '') +
-                (info.notes ? ` - ${esc(info.notes)}` : '');
-              box.className = 'notice show';
+                (info.notes ? ` - ${esc(info.notes)}` : '') + `</span>${action}`;
+              box.className = 'notice show banner-flex';
+              const btn = $('updateNowBtn');
+              if (btn) btn.onclick = async () => {
+                await openSettings('updateStatus');
+                await checkUpdateInSettings();
+                applyUpdate();
+              };
             } else {
               box.className = 'notice';
             }
@@ -5238,6 +5264,47 @@ internal static class Dashboard
           return `${marker} ${step.Detail}`;
         }
 
+        function firstLine(s) {
+          const i = (s || '').indexOf('\n');
+          return i < 0 ? (s || '') : s.slice(0, i);
+        }
+
+        // "verktyg({...json...})" -> { name, args } för kompakta verktygsrader.
+        function parseToolCall(detail) {
+          const i = (detail || '').indexOf('(');
+          if (i <= 0) return { name: (detail || '').trim(), args: '' };
+          let args = detail.slice(i + 1).trim();
+          if (args.endsWith(')')) args = args.slice(0, -1);
+          return { name: detail.slice(0, i).trim(), args };
+        }
+
+        // Agentens steg i Claude Code/Hermes-stil: resonemang som löpande
+        // text, verktygsanrop som kompakta rader (namn + trunkerade
+        // argument), resultat som dämpade enradare. 'done' hoppas över -
+        // slutsvaret visas som meddelandets egen text, inte som ett steg.
+        function stepRowsHtml(steps, running) {
+          const rows = (steps || []).map(s => {
+            const kind = s.Kind, d = s.Detail || '';
+            if (kind === 'thinking' || kind === 'plan')
+              return d.trim() ? `<div class="step-think">${esc(d)}</div>` : '';
+            if (kind === 'done' || kind === 'awaiting_info' || kind === 'awaiting_approval')
+              return '';
+            if (kind === 'tool_call') {
+              const t = parseToolCall(d);
+              return `<div class="step-row"><span class="k">›</span><span class="step-tool-name">${esc(t.name)}</span>${t.args ? `<span class="step-tool-args">${esc(trunc(t.args, 140))}</span>` : ''}</div>`;
+            }
+            if (kind === 'tool_error')
+              return `<div class="step-row step-error"><span class="k">!</span><span class="step-tool-args">${esc(trunc(firstLine(d), 160))}</span></div>`;
+            if (kind === 'error' || kind === 'cancelled')
+              return `<div class="step-row step-error"><span class="k">✗</span><span>${esc(trunc(d, 220))}</span></div>`;
+            return `<div class="step-result">${esc(trunc(firstLine(d), 150))}</div>`;
+          }).join('');
+          const tail = running
+            ? `<div class="step-row"><span class="thinking-shimmer">${rows ? 'arbetar…' : 'startar…'}</span></div>`
+            : '';
+          return (rows || tail) ? `<div class="step-flow">${rows}${tail}</div>` : '';
+        }
+
         // Renders an assignment (agent-mode) bubble with live context: a
         // ticking elapsed timer, which Worker it landed on, how many steps
         // have run, and the step-log kept separate from the final answer.
@@ -5259,9 +5326,7 @@ internal static class Dashboard
             ? `<span class="${m.state === 'Completed' ? 'good' : 'bad'}">${esc(m.state === 'Completed' ? 'Klar' : m.state === 'Failed' ? 'Misslyckades' : m.state)}</span>`
             : `<span class="small">${running ? 'arbetar…' : ''}</span>`;
 
-          const stepsHtml = stepCount
-            ? `<div class="assignment-steps mono small">${esc((m.steps || []).join('\n'))}</div>`
-            : (running ? `<div class="msg-text"><span class="thinking-shimmer">startar…</span></div>` : '');
+          const stepsHtml = stepRowsHtml(m.steps, running);
 
           const answer = (!running && m.content && m.content.trim())
             ? `<div class="msg-text">${esc(m.content)}</div>`
@@ -5389,7 +5454,7 @@ internal static class Dashboard
           let success = false;
           let summary = '';
 
-          const addStep = step => { stepMsg.steps.push(stepLine(step)); renderMessages(); };
+          const addStep = step => { stepMsg.steps.push(step); renderMessages(); };
 
           try {
             const headers = { 'content-type': 'application/json' };
