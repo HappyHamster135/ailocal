@@ -56,10 +56,20 @@ public sealed class GamePlaytester
         var analysis = AnalyzeHtml5Game(html, indexPath);
         issues.AddRange(analysis.Issues);
 
+        // Headless RUNTIME-korning: exekvera skripten mot en stubbad DOM och
+        // pumpa spel-loopen ~2 sekunder. Fangar krascher som parsning inte
+        // ser (ReferenceError, null-deref i loopen, id-drift) - utan browser.
+        var smoke = new GameRuntimeSmokeTester().Run(html);
+        foreach (var error in smoke.Errors)
+            issues.Add($"RUNTIME-FEL (headless-korning): {error}");
+        foreach (var warning in smoke.Warnings)
+            issues.Add($"Runtime-varning: {warning}");
+
         var summary = new StringBuilder();
         summary.AppendLine($"## Speltest: {Path.GetFileName(Path.GetDirectoryName(indexPath))}");
         summary.AppendLine();
         summary.AppendLine($"- **Typ:** HTML5");
+        summary.AppendLine($"- **Headless-körning:** {(smoke.Errors.Count == 0 ? $"{smoke.FramesPumped} frames utan fel ✓" : $"{smoke.Errors.Count} runtime-fel ✗")}");
         summary.AppendLine($"- **Storlek:** {html.Length} tecken");
         summary.AppendLine($"- **Canvas:** {(html.Contains("<canvas") ? "Ja ✓" : "Nej ✗ (spelet har ingen canvas!)")}");
         summary.AppendLine($"- **Game loop:** {(html.Contains("requestAnimationFrame") || html.Contains("setInterval") ? "Hittad ✓" : "Saknas ✗")}");

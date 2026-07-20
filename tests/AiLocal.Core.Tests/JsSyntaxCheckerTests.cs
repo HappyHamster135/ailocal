@@ -48,7 +48,10 @@ public class JsSyntaxCheckerTests : IDisposable
             """;
         var errors = JsSyntaxChecker.CheckHtml(html);
         Assert.Single(errors);
-        Assert.Contains("script-block 3", errors[0]);
+        // Numbering counts INLINE blocks only (src= blocks are skipped by the
+        // shared extractor), so the broken block is #2 - same numbering the
+        // runtime smoke tester uses.
+        Assert.Contains("script-block 2", errors[0]);
     }
 
     [Fact]

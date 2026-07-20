@@ -36,20 +36,17 @@ public static class JsSyntaxChecker
         }
     }
 
-    /// <summary>Extracts every inline &lt;script&gt; block from an HTML
-    /// document and parses each. Returns one error line per broken block
-    /// ("script block N: message (line X)" with the line number RELATIVE to
-    /// the block), empty list when all scripts parse. src= scripts and
-    /// non-JS types (importmap/json) are skipped.</summary>
-    public static IReadOnlyList<string> CheckHtml(string html)
+    /// <summary>Every inline JS &lt;script&gt; body in document order. src=
+    /// scripts and non-JS types (importmap/json) are skipped. Shared by the
+    /// syntax check below and the runtime smoke tester so both agree on what
+    /// "the game's scripts" means.</summary>
+    public static IReadOnlyList<string> ExtractInlineScripts(string html)
     {
-        var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(html)) return errors;
+        var scripts = new List<string>();
+        if (string.IsNullOrWhiteSpace(html)) return scripts;
 
-        var index = 0;
         foreach (Match match in ScriptBlock.Matches(html))
         {
-            index++;
             var attrs = match.Groups["attrs"].Value;
             if (attrs.Contains("src=", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -61,9 +58,28 @@ public static class JsSyntaxChecker
 
             var body = match.Groups["body"].Value;
             if (string.IsNullOrWhiteSpace(body)) continue;
+            scripts.Add(body);
+        }
 
-            var error = CheckScript(body, isModule);
-            if (error is not null)
+        return scripts;
+    }
+
+    /// <summary>Extracts every inline &lt;script&gt; block from an HTML
+    /// document and parses each. Returns one error line per broken block
+    /// ("script block N: message (line X)" with the line number RELATIVE to
+    /// the block), empty list when all scripts parse.</summary>
+    public static IReadOnlyList<string> CheckHtml(string html)
+    {
+        var errors = new List<string>();
+        var index = 0;
+        foreach (var body in ExtractInlineScripts(html))
+        {
+            index++;
+            // Module detection is lost by the shared extractor; parse as
+            // script first and fall back to module on failure so neither
+            // form false-positives.
+            var error = CheckScript(body);
+            if (error is not null && CheckScript(body, asModule: true) is not null)
                 errors.Add($"script-block {index}: {error.Message} (rad {error.Line}, kolumn {error.Column} i blocket)");
         }
 

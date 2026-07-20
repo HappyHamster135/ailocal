@@ -13,6 +13,7 @@
     <ProjectReference Include="..\AiLocal.Core\AiLocal.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Jint" Version="4.13.0" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 </Project>
