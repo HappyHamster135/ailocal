@@ -26,8 +26,9 @@ public sealed class AppScaffoldService
             return new(false, "", "", [], "tech maste vara 'python', 'csharp'/'c#' eller 'auto' (tomt = automatiskt val).");
         if (string.IsNullOrWhiteSpace(root))
             return new(false, "", tech, [], "root (mapp att skapa projektet i) kravs.");
-        if (Directory.Exists(root) && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length > 0)
-            return new(false, "", tech, [], "root-mappen ar inte tom - valj en tom mapp.");
+        // Non-empty root -> scaffold into a fresh subfolder derived from the
+        // prompt instead of refusing (same rule as GameScaffoldService).
+        root = ScaffoldPaths.ForProject(root, prompt, "app");
 
         Directory.CreateDirectory(root);
         var files = tech == "python"

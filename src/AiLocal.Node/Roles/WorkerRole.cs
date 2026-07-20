@@ -91,7 +91,14 @@ public static class WorkerRole
         // Worker's OWN AgentAccess setting, which only this Worker's operator
         // can raise (see PersistentSettingsStore.Update) - a Host has no path
         // to turn this on remotely, it can only ever be told no.
-        app.MapPost("/execute/assignment", RunAssignmentAsync);
+        // includePreview:false - klustervagen visar ingen forhandsvisnings-
+        // lank, eftersom filerna ligger pa DEN HAR maskinen medan dashboarden
+        // som startade uppdraget kor pa en annan (lanken vore dod dar).
+        app.MapPost("/execute/assignment", (
+            AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
+            NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
+            PersistentSettingsStore settingsStore, CancellationToken ct)
+            => RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, ct, includePreview: false));
 
         // --- Task isolation (git worktree per task) ---------------------------------
         // Each "employee" (agent run) gets its own worktree+branch so two
@@ -259,7 +266,7 @@ public static class WorkerRole
     internal static async Task<IResult> RunAssignmentAsync(
         AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
         NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-        PersistentSettingsStore settingsStore, CancellationToken ct)
+        PersistentSettingsStore settingsStore, CancellationToken ct, bool includePreview = true)
     {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
@@ -433,8 +440,21 @@ public static class WorkerRole
             // at all. Now the production-bar project always lands on disk and
             // the model's job is to EXTEND it. Never touches a non-empty
             // workspace (existing projects must not be overwritten).
+            Func<AgentStep, Task> emitAgentStep = async step =>
+            {
+                await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            };
+            Task EmitStep(string kind, string detail) => emitAgentStep(new AgentStep(kind, detail));
+
+            // Kvalitetsgrindens "skrevs något alls?"-kontroll jämför mot den
+            // här tidpunkten - tagen FÖRE förskaffolden så även den räknas
+            // som producerat arbete.
+            var runStartUtc = DateTime.UtcNow;
+            var buildIntent = HostRole.IsBuildRequest(req.Assignment);
+
             var assignmentText = req.Assignment;
-            if (HostRole.IsBuildRequest(req.Assignment) && WorkspaceIsEmpty(workspaceRoot))
+            if (buildIntent && WorkspaceIsEmpty(workspaceRoot))
             {
                 var wantsGame = req.Assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
                     || req.Assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
@@ -451,12 +471,6 @@ public static class WorkerRole
                 }
                 if (scaffold.Success)
                 {
-                    async Task EmitStep(string kind, string detail)
-                    {
-                        await ctx.Response.WriteAsync(
-                            $"data: {JsonSerializer.Serialize(new { step = new AgentStep(kind, detail) })}\n\n", ct);
-                        await ctx.Response.Body.FlushAsync(ct);
-                    }
                     await EmitStep("tool_call", wantsGame ? "scaffold_game (automatisk projektgrund)" : "scaffold_app (automatisk projektgrund)");
                     await EmitStep("tool_result", scaffold.Output);
                     assignmentText = req.Assignment +
@@ -473,14 +487,90 @@ public static class WorkerRole
             var instructions = await ProjectInstructionsReader.TryReadAsync(workspaceRoot, ct);
             var system = AgentSystemPrompt.Build(workspaceRoot, accessLevel, instructions);
 
-            var result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: async step =>
+            var result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+
+            // ---- Nodens kvalitetsgrind --------------------------------------
+            // Modellens eget "klart" räcker inte: noden kör verify + playtest
+            // SJÄLV, matar tillbaka konkreta fel som en ny tur (max två
+            // åtgärdsrundor med hela historiken kvar), eskalerar hårda
+            // kvarvarande fel till den starka modelltiern en sista gång, och
+            // underkänner till slut hellre än att rapportera falskt "Klar".
+            QualityFindings? findings = null;
+            async Task<QualityFindings> InspectAsync() => await AssignmentQualityGate.InspectAsync(
+                workspaceRoot, buildIntent, runStartUtc, runCmd,
+                playtest: async (root, engine, gct) =>
+                {
+                    var r = await new GamePlaytester(httpFactory).FullTestAsync(root, engine, TimeSpan.FromSeconds(10), gct);
+                    return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
+                }, ct);
+
+            const int maxFixRounds = 2;
+            for (var round = 0; result.Success; round++)
             {
-                await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
-                await ctx.Response.Body.FlushAsync(ct);
-            }, ct, system: system);
+                await EmitStep("tool_call", "kvalitetskontroll (nodens egen verify + playtest)");
+                findings = await InspectAsync();
+                await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                if (findings.Clean || round >= maxFixRounds) break;
+                result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, req.ModelHint,
+                    onStep: emitAgentStep, ct, history: result.Messages, system: system);
+            }
+
+            if (result.Success && findings is { Clean: false, HardFail: true })
+            {
+                // Kvalitetsbaserad eskalering: den billiga modellen gjorde
+                // grovjobbet men kom inte i mål - låt den starka tiern göra
+                // det sista lyftet med de konkreta bristerna som uppgift.
+                // Saknas providern för tiern faller kedjan ändå tillbaka till
+                // samma lokala modell, vilket bara kostar en extra runda.
+                var strong = settings.Worker.ModelTiers.Complex;
+                if (!string.IsNullOrWhiteSpace(strong) && !string.Equals(strong, req.ModelHint, StringComparison.OrdinalIgnoreCase))
+                {
+                    await EmitStep("thinking", $"Hårda fel kvarstår efter åtgärdsrundorna - eskalerar till starkare modell ({strong}) för en sista runda.");
+                    result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, strong,
+                        onStep: emitAgentStep, ct, history: result.Messages, system: system);
+                    if (result.Success)
+                    {
+                        await EmitStep("tool_call", "kvalitetskontroll efter eskalering");
+                        findings = await InspectAsync();
+                        await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                    }
+                }
+            }
+
+            if (result.Success && findings is not null)
+            {
+                result = findings switch
+                {
+                    { Clean: true } => result with
+                    {
+                        FinalAnswer = result.FinalAnswer + "\n\n---\nKvalitetskontroll: godkänd (noden körde verify + playtest själv)."
+                    },
+                    { HardFail: true } => result with
+                    {
+                        Success = false,
+                        FinalAnswer = result.FinalAnswer + "\n\n---\nKvalitetskontrollen underkände resultatet:\n" + findings.Report
+                    },
+                    _ => result with
+                    {
+                        FinalAnswer = result.FinalAnswer + "\n\n---\nKvarvarande anmärkningar från kvalitetskontrollen:\n" + findings.Report
+                    }
+                };
+            }
+
+            // Förhandsvisningslänk bara för lokala körningar (Launcher eller
+            // fristående Worker) - då kör dashboarden på samma nod som
+            // filerna och /api/preview kan servera projektet direkt.
+            string? previewPath = null;
+            if (includePreview && result.Success)
+            {
+                var projectRoot = findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot);
+                var entry = projectRoot is null ? null : Path.Combine(projectRoot, "index.html");
+                if (entry is not null && File.Exists(entry))
+                    previewPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, entry).Replace('\\', '/');
+            }
 
             await ctx.Response.WriteAsync(
-                $"data: {JsonSerializer.Serialize(new { final = result })}\n\n", ct);
+                $"data: {JsonSerializer.Serialize(new { final = result, previewPath })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
     }
@@ -541,6 +631,74 @@ public static class WorkerRole
             await ctx.Response.Body.FlushAsync(ct);
             return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, ct);
         });
+
+        // "Öppna resultatet": serverar det senast byggda projektet direkt
+        // från nodens arbetsyta så prompt -> spelbart spel blir ETT klick.
+        // Utan entré-redirecten fick användaren själv leta upp mappen på
+        // disk och dubbelklicka index.html.
+        app.MapGet("/api/preview", (NodeSettings settings) => PreviewEntry(settings));
+        app.MapGet("/api/preview/{**path}", (string path, NodeSettings settings) => ServePreviewFile(settings, path));
+    }
+
+    internal static string PreviewWorkspaceRoot(NodeSettings settings) =>
+        string.IsNullOrWhiteSpace(settings.Worker.WorkspacePath)
+            ? Path.Combine(SettingsPaths.DataDirectory, "agent-workspace")
+            : settings.Worker.WorkspacePath;
+
+    static IResult PreviewEntry(NodeSettings settings)
+    {
+        var root = PreviewWorkspaceRoot(settings);
+        var project = ProjectRootDetector.Detect(root);
+        var entry = project is null ? null : Path.Combine(project, "index.html");
+        if (entry is null || !File.Exists(entry))
+            return Results.Problem(
+                detail: "Inget förhandsvisningsbart projekt (index.html) hittades i den här nodens arbetsyta - byggdes projektet på en annan nod?",
+                statusCode: StatusCodes.Status404NotFound);
+        return Results.Redirect("/api/preview/" + Path.GetRelativePath(root, entry).Replace('\\', '/'));
+    }
+
+    // Medveten allowlist: bara filtyper ett HTML5-spel/projekt behöver.
+    // Källkod utanför listan, dolda filer och .ailocal-* (projektminne)
+    // serveras aldrig.
+    private static readonly Dictionary<string, string> PreviewContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".html"] = "text/html; charset=utf-8",
+        [".js"] = "text/javascript; charset=utf-8",
+        [".mjs"] = "text/javascript; charset=utf-8",
+        [".css"] = "text/css; charset=utf-8",
+        [".json"] = "application/json",
+        [".png"] = "image/png",
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif",
+        [".svg"] = "image/svg+xml",
+        [".webp"] = "image/webp",
+        [".ico"] = "image/x-icon",
+        [".wav"] = "audio/wav",
+        [".mp3"] = "audio/mpeg",
+        [".ogg"] = "audio/ogg",
+        [".ttf"] = "font/ttf",
+        [".woff"] = "font/woff",
+        [".woff2"] = "font/woff2",
+        [".txt"] = "text/plain; charset=utf-8",
+        [".md"] = "text/plain; charset=utf-8"
+    };
+
+    static IResult ServePreviewFile(NodeSettings settings, string? path)
+    {
+        var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+        string full;
+        try { full = Path.GetFullPath(Path.Combine(root, path ?? "")); }
+        catch { return Results.NotFound(); }
+        // Traversal-vakt: den upplösta sökvägen MÅSTE ligga under arbetsytan.
+        if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return Results.NotFound();
+        var name = Path.GetFileName(full);
+        if (name.StartsWith('.'))
+            return Results.NotFound();
+        if (!PreviewContentTypes.TryGetValue(Path.GetExtension(full), out var contentType) || !File.Exists(full))
+            return Results.NotFound();
+        return Results.File(full, contentType);
     }
 
     /// <summary>Isolation + auto-merge endpoints, factored out so the Launcher

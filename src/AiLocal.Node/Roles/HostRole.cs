@@ -1696,6 +1696,7 @@ public static class HostRole
     {
         var p = (prompt ?? "").ToLowerInvariant();
         string[] verbs = ["bygg", "skapa", "gör ett", "gör en", "gor ett", "gor en",
+            "göra ett", "göra en", "gora ett", "gora en",
             "implementera", "koda", "utveckla", "programmera", "build", "create", "make", "develop", "implement",
             "börja bygga", "borja bygga", "start building", "start programming", "programmering"];
         return verbs.Any(v => p.Contains(v));
@@ -1709,7 +1710,10 @@ public static class HostRole
     {
         var p = (text ?? "").ToLowerInvariant();
         string[] artifacts = ["app", "spel", "game", "webbsida", "website", "hemsida",
-            "program", "verktyg", "tool", "script", "skript", "bot", "api", "tjänst", "tjanst", "cli", "projekt"];
+            "program", "verktyg", "tool", "script", "skript", "bot", "api", "tjänst", "tjanst", "cli", "projekt",
+            // "fil" fangar "kan du göra en fil av det?" (transkript) - verbet
+            // kravs alltid, sa "profil"/"film"-traffar utan byggverb ar ofarliga.
+            "fil"];
         return artifacts.Any(a => p.Contains(a));
     }
 

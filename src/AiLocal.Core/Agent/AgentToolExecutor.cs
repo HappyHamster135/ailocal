@@ -761,9 +761,13 @@ public sealed class AgentToolExecutor
 
     private async Task<ToolResult> VerifyAsync(ToolCall call, JsonElement args, CancellationToken ct)
     {
+        // No explicit dir -> verify the project the agent is ACTUALLY working
+        // in, not blindly the workspace root. Workspaces accumulate projects
+        // over time, and verify used to grade a stale HTML5 game at the root
+        // while the agent built a Python app in a subfolder.
         var requested = args.TryGetProperty("workingDirectory", out var wd) && wd.ValueKind == JsonValueKind.String && wd.GetString() is { Length: > 0 } p
             ? ResolveDir(p)
-            : _workspaceRoot;
+            : ProjectRootDetector.Detect(_workspaceRoot) ?? _workspaceRoot;
 
         var verifier = new ProjectVerifier();
         var result = await verifier.VerifyAsync(requested,
@@ -779,12 +783,13 @@ public sealed class AgentToolExecutor
     private async Task<string?> AutoVerifyIfFullAsync(CancellationToken ct)
     {
         if (_level != AgentAccessLevel.Full) return null;
-        var verifier = new ProjectVerifier();
-        if (verifier.Detect(_workspaceRoot) == ProjectVerifier.ProjectKind.Unknown) return null;
+        // Same most-recently-active-project rule as the verify tool itself.
+        var target = ProjectRootDetector.Detect(_workspaceRoot);
+        if (target is null) return null;
 
         try
         {
-            var result = await verifier.VerifyAsync(_workspaceRoot,
+            var result = await new ProjectVerifier().VerifyAsync(target,
                 (cmd, dir, c) => RunCommandCoreAsync(cmd, dir, c), ct);
             return result.Success
                 ? "VERIFY AFTER EDIT: project still builds/tests (PASS)."

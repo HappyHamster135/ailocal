@@ -1412,6 +1412,9 @@ internal static class Dashboard
         }
         .key-state { color: var(--ok); font-size: 12px; min-height: 17px; }
         .mini-btn { font-size: 12px; padding: 4px 10px; margin-top: 6px; align-self: flex-start; }
+        a.mini-btn { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); transition: background .15s ease, border-color .15s ease; }
+        a.mini-btn:hover { background: var(--surface-2); border-color: var(--accent); }
+        .msg-preview { margin-top: 8px; }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
@@ -5380,6 +5383,10 @@ internal static class Dashboard
             ? `<div class="msg-text">${esc(m.content)}</div>`
             : '';
 
+          const preview = (!running && m.previewPath)
+            ? `<div class="msg-preview"><a class="mini-btn" href="${esc(m.previewPath)}" target="_blank" rel="noopener">Öppna resultatet i webbläsaren</a></div>`
+            : '';
+
           return `
           <article class="message assistant assignment">
             <div class="message-meta">
@@ -5393,6 +5400,7 @@ internal static class Dashboard
             </div>
             ${stepsHtml}
             ${answer}
+            ${preview}
             ${!running && m.content ? msgActionsHtml : ''}
           </article>`;
         }
@@ -5545,6 +5553,9 @@ internal static class Dashboard
                 } else if (payload.final) {
                   success = !!payload.final.Success;
                   summary = payload.final.FinalAnswer || '';
+                  // Lokala körningar skickar med en förhandsvisningsväg när
+                  // projektet har en index.html - blir "Öppna resultatet".
+                  stepMsg.previewPath = payload.previewPath || null;
                   stepMsg.state = success ? 'Completed' : 'Failed';
                   // The final answer lives in content; the running step-log
                   // stays in steps[]. If the run produced no steps at all

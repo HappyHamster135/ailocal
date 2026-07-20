@@ -47,7 +47,7 @@ public sealed class GameBuilder
             : await BuildUnity(root, runCommand, ct, unityFinder);
     }
 
-    static string DetectEngine(string root)
+    internal static string DetectEngine(string root)
     {
         if (File.Exists(Path.Combine(root, "project.godot"))) return "godot";
         if (File.Exists(Path.Combine(root, "ProjectSettings", "ProjectVersion.txt"))

@@ -89,13 +89,17 @@ public class AppScaffoldTests : IDisposable
     }
 
     [Fact]
-    public void Scaffold_RejectsNonEmptyDir()
+    public void Scaffold_NonEmptyDir_FallsBackToSubfolder_AndKeepsExistingFiles()
     {
+        // v1.29.0: en icke-tom root avvisas inte längre - scaffolden landar i
+        // en härledd undermapp och befintliga filer lämnas orörda.
         Directory.CreateDirectory(_dir);
         File.WriteAllText(Path.Combine(_dir, "existing.txt"), "x");
         var svc = new AppScaffoldService();
         var result = svc.Scaffold("python", "x", _dir);
-        Assert.False(result.Success);
+        Assert.True(result.Success, result.Output);
+        Assert.NotEqual(Path.GetFullPath(_dir), Path.GetFullPath(result.Path));
+        Assert.Equal("x", File.ReadAllText(Path.Combine(_dir, "existing.txt")));
     }
 
     [Fact]

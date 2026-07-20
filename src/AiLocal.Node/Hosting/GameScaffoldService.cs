@@ -30,8 +30,10 @@ public sealed partial class GameScaffoldService
             return new(false, "", "", [], "engine maste vara 'unity', 'godot', 'html5' eller 'auto' (tomt = automatiskt val).");
         if (string.IsNullOrWhiteSpace(root))
             return new(false, "", engine, [], "root (mapp att skapa projektet i) kravs.");
-        if (Directory.Exists(root) && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length > 0)
-            return new(false, "", engine, [], "root-mappen ar inte tom - valj en tom mapp.");
+        // Non-empty root -> scaffold into a fresh subfolder derived from the
+        // prompt instead of refusing. Workspaces are long-lived; the second
+        // build in one used to dead-end on "root-mappen ar inte tom".
+        root = ScaffoldPaths.ForProject(root, prompt, "spelprojekt");
 
         Directory.CreateDirectory(root);
         var files = engine == "unity"
