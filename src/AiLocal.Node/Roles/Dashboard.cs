@@ -846,13 +846,16 @@ internal static class Dashboard
         .step-flow { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
         .step-think {
           white-space: pre-wrap; line-height: 1.55; opacity: .88;
-          margin: 4px 0; animation: stepIn .18s ease;
+          margin: 4px 0;
         }
         .step-row {
           display: flex; align-items: baseline; gap: 8px;
           font-size: 12.5px; padding: 1px 0; min-width: 0;
-          animation: stepIn .18s ease;
         }
+        /* Bara det SENASTE steget animeras in - transkriptet byggs om vid
+           varje nytt steg, och en animation pa alla rader hade fatt hela
+           flodet att flimra om for varje frame. */
+        .step-flow > *:last-child { animation: stepIn .18s ease; }
         .step-row .k { color: var(--muted); flex: none; width: 14px; text-align: center; }
         .step-tool-name {
           font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
@@ -867,7 +870,7 @@ internal static class Dashboard
           font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
           font-size: 12px; color: var(--muted); opacity: .85;
           padding-left: 22px; overflow: hidden; text-overflow: ellipsis;
-          white-space: nowrap; animation: stepIn .18s ease;
+          white-space: nowrap;
         }
         .step-error, .step-error .step-tool-args { color: var(--bad, #cf2d56); opacity: 1; }
         @keyframes stepIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
@@ -1466,6 +1469,9 @@ internal static class Dashboard
           border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
         .update-progress-bar { height: 100%; width: 0%; background: var(--accent);
           transition: width .25s ease; }
+        /* Vy-byte: diskret in-toning (aterspelas per byte via switchView). */
+        .view-enter { animation: viewIn .18s ease; }
+        @keyframes viewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
         .cost-providers { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
         .cost-provider-row { display: flex; justify-content: space-between; font-size: 12px;
@@ -2449,6 +2455,8 @@ internal static class Dashboard
         // palette to maintain.
         const ICONS = {
           key: '<circle cx="7" cy="7" r="4"/><line x1="10" y1="10" x2="21" y2="21"/><line x1="14" y1="14" x2="17" y2="11"/><line x1="17" y1="17" x2="20" y2="14"/>',
+          file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+          cog: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
           monitor: '<rect x="2" y="4" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="18" x2="12" y2="21"/>',
           globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><line x1="3" y1="12" x2="21" y2="12"/>',
           clock: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="15"/>',
@@ -3509,6 +3517,7 @@ internal static class Dashboard
 
         const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office', 'studio'];
         function switchView(view) {
+          const previous = state.activeView;
           state.activeView = knownViews.includes(view) ? view : 'work';
           $('workView').classList.toggle('hidden', state.activeView !== 'work');
           $('networkView').classList.toggle('hidden', state.activeView !== 'network');
@@ -3517,6 +3526,17 @@ internal static class Dashboard
           $('sessionView').classList.toggle('hidden', state.activeView !== 'session');
           $('officeView').classList.toggle('hidden', state.activeView !== 'office');
           $('studioView').classList.toggle('hidden', state.activeView !== 'studio');
+          // Mjuk in-tonings-animation pa den vy som just visades - klassen
+          // tas bort och laggs tillbaka sa animationen spelas om vid varje
+          // byte (inte bara forsta gangen).
+          if (previous !== state.activeView) {
+            const shown = $(state.activeView + 'View');
+            if (shown) {
+              shown.classList.remove('view-enter');
+              void shown.offsetWidth;
+              shown.classList.add('view-enter');
+            }
+          }
           document.querySelectorAll('[data-view]').forEach(button => {
             button.classList.toggle('active', button.dataset.view === state.activeView);
           });
@@ -4075,8 +4095,8 @@ internal static class Dashboard
                 return `<div class="office-card ${w.status === 'Offline' ? 'offline' : ''}">
                   <div class="node-main"><span class="mono">${esc(w.name)}</span><span class="pill ${statusClass}">${esc(w.status)}</span><span class="pill ${accPill}">${esc(acc)}</span>${w.activeTasks ? `<span class="small">${w.activeTasks} aktiva</span>` : ''}</div>
                   ${curHtml}
-                  <div class="small" style="opacity:.6;margin-top:4px">📁 ${wsShort}</div>
-                  <button class="btn-mini" data-wcfg="${esc(w.id)}" style="margin-top:6px">⚙ Inställningar</button>
+                  <div class="small" style="opacity:.6;margin-top:4px">${icon('folder')} ${wsShort}</div>
+                  <button class="btn-mini" data-wcfg="${esc(w.id)}" style="margin-top:6px">${icon('cog')} Inställningar</button>
                   <div class="worker-cfg" id="wcfg-${esc(w.id)}" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px">
                     <label class="small" style="display:block;margin-bottom:2px">Arbetsmapp på workerns dator</label>
                     <input class="inp" id="wcfg-ws-${esc(w.id)}" placeholder="t.ex. C:\\Users\\namn\\Desktop\\TEST" value="${w.workspacePath ? esc(w.workspacePath) : ''}" style="width:100%;margin-bottom:6px">
@@ -4693,7 +4713,10 @@ internal static class Dashboard
               box.className = 'notice show banner-flex';
               const btn = $('updateNowBtn');
               if (btn) btn.onclick = async () => {
-                await openSettings('updateStatus');
+                // openSettings utan argument = DENNA nods installningar -
+                // ett argument tolkas som ett Worker-id och gommer
+                // uppdateringssektionen helt.
+                await openSettings();
                 await checkUpdateInSettings();
                 applyUpdate();
               };
@@ -5316,7 +5339,7 @@ internal static class Dashboard
             ? `<span class="elapsed-timer" data-started="${m.startedAt}">${formatDuration(Date.now() - m.startedAt)}</span>`
             : '';
           const workerPill = m.workerName
-            ? `<span class="pill">⚙ ${esc(m.workerName)}</span>`
+            ? `<span class="pill">${icon('monitor')} ${esc(m.workerName)}</span>`
             : (running ? `<span class="small">väljer worker…</span>` : '');
           const stepCount = (m.steps || []).length;
           const stepMeta = running && stepCount
@@ -6011,8 +6034,8 @@ internal static class Dashboard
               const depth = (it.path.split('/').length - 1);
               const indent = ' '.repeat(Math.min(depth, 8) * 2);
               const cls = it.isDir ? 'node-row dir' : 'node-row';
-              const icon = it.isDir ? '📁' : '📄';
-              return `<div class="${cls}" data-path="${esc(it.path)}" data-dir="${it.isDir}">${indent}${icon} ${esc(it.name)}</div>`;
+              const entryIcon = icon(it.isDir ? 'folder' : 'file');
+              return `<div class="${cls}" data-path="${esc(it.path)}" data-dir="${it.isDir}">${indent}${entryIcon} ${esc(it.name)}</div>`;
             }).join('');
             tree.querySelectorAll('.node-row').forEach(row => {
               row.onclick = () => {
