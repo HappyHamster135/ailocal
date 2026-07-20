@@ -4296,6 +4296,7 @@ internal static class Dashboard
           return `
           <article class="message assistant">
             <div class="message-meta"><strong>AiLocal</strong><span class="pill">${esc(statusLabel)}</span></div>
+            ${m.planNote ? `<div class="small" style="opacity:.75;margin-bottom:6px">${esc(m.planNote)}</div>` : ''}
             <div>${rows}</div>
             ${m.planState === 'reviewing' ? `
               <div class="detail-actions">
@@ -5307,8 +5308,13 @@ internal static class Dashboard
             planMsg.planState = 'reviewing';
             planMsg.subtasks = result.subtasks.map(s => ({ ...s, included: true, status: 'pending' }));
           } catch (error) {
-            planMsg.planState = 'failed';
-            planMsg.error = error.message;
+            // Planeringen kan fallera (t.ex. en svag lokal modell som inte
+            // klarar strikt JSON, eller ingen provider) - fall tillbaka till
+            // att köra målet som ETT uppdrag i stället för att stanna helt.
+            // Agenten planerar ändå själv (DESIGN.md-steget i systemprompten).
+            planMsg.planState = 'reviewing';
+            planMsg.planNote = 'Planeringen misslyckades (' + error.message + ') - målet körs som ett enda uppdrag i stället.';
+            planMsg.subtasks = [{ title: 'Uppdrag', description: goalText, independent: false, included: true, status: 'pending' }];
           } finally {
             renderMessages();
             $('sendBtn').disabled = false;

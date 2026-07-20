@@ -91,11 +91,176 @@ public static class WorkerRole
         // Worker's OWN AgentAccess setting, which only this Worker's operator
         // can raise (see PersistentSettingsStore.Update) - a Host has no path
         // to turn this on remotely, it can only ever be told no.
-        app.MapPost("/execute/assignment", async (
-            AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
-            NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            PersistentSettingsStore settingsStore, CancellationToken ct) =>
+        app.MapPost("/execute/assignment", RunAssignmentAsync);
+
+        // --- Task isolation (git worktree per task) ---------------------------------
+        // Each "employee" (agent run) gets its own worktree+branch so two
+        // tasks on the same repo never overwrite each other. The Host creates
+        // one before dispatching (with useIsolation), then merges or discards
+        // it after the agent reports done - discard is the free undo button.
+
+        app.MapPost("/execute/isolation/create", async (
+            GitIsolationService isolation, NodeSettings settings, CancellationToken ct) =>
         {
+            var repoPath = ResolveRepoPath(settings);
+            if (repoPath is null)
+                return Results.Problem(detail: "Git-isolation kräver att Agentlage -> Arbetsmapp är ett git-repo.", statusCode: StatusCodes.Status400BadRequest);
+            if (!await isolation.CanIsolateAsync(repoPath, ct))
+                return Results.Problem(detail: "Arbetsmappen är inte ett git-repo - kan inte isolera.", statusCode: StatusCodes.Status400BadRequest);
+
+            var task = await isolation.CreateAsync(repoPath, "Uppgift", baseBranch: null, ct);
+            return task is null
+                ? Results.Problem(detail: "Kunde inte skapa isolerad arbetsyta (git worktree misslyckades).", statusCode: StatusCodes.Status500InternalServerError)
+                : Results.Ok(new { taskId = task.TaskId, branch = task.BranchName, worktree = task.WorktreePath });
+        });
+
+        app.MapGet("/execute/isolation/list", (GitIsolationService isolation) =>
+            Results.Ok(isolation.ListActive().Select(t => new
+            {
+                taskId = t.TaskId,
+                branch = t.BranchName,
+                baseBranch = t.BaseBranch,
+                worktree = t.WorktreePath,
+                title = t.Title,
+                createdAt = t.CreatedAt
+            })));
+
+        app.MapPost("/execute/isolation/commit", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationCommitRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var result = await isolation.CommitAsync(body.TaskId, body.Message ?? "Agent-ändringar", ct);
+            return Results.Ok(new { success = result.Success, output = result.Output });
+        });
+
+        app.MapPost("/execute/isolation/diff", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var diff = await isolation.DiffAsync(body.TaskId, ct);
+            return Results.Ok(new { taskId = body.TaskId, diff });
+        });
+
+        app.MapPost("/execute/isolation/merge", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            var (success, output) = await isolation.MergeAsync(body.TaskId, ct);
+            return Results.Ok(new { success, output });
+        });
+
+        app.MapPost("/execute/isolation/discard", async (
+            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
+            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
+                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
+            await isolation.DiscardAsync(body.TaskId, ct);
+            return Results.Ok(new { discarded = true });
+        });
+
+        // Local dashboard mirror of the /execute/isolation/* endpoints so the
+        // in-app Studio "Branches" tab works on a single node without a cluster
+        // token. Sits under /api/ (not /execute/) so it is not node-only and
+        // therefore reachable with ordinary local dashboard auth.
+        MapIsolationEndpoints(app);
+
+        // Uppdrag-flödet (plan + kör) ska fungera direkt på en fristående
+        // Workers egen dashboard - inte bara via en Host.
+        MapLocalAssignmentEndpoints(app);
+
+        app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.InspectAsync(ct)));
+
+        app.MapPost("/runtime/pull", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.PullRecommendedModelAsync(ct)));
+
+        // One click: install Ollama (if missing), start it, and pull the model.
+        app.MapPost("/runtime/setup", async (LocalRuntimeManager runtime, CancellationToken ct) =>
+            Results.Ok(await runtime.SetupLocalAiAsync(ct)));
+
+        // P2: Studio one-click Build / Run / Test against the workspace.
+        MapWorkspaceEndpoints(app);
+
+        // Click-to-pair, no typing: a Host that discovered this Worker via LAN
+        // beacon sends a connect request with a random nonce. This node's own
+        // operator must explicitly accept it (see /pairing/pending/{id}/accept)
+        // before anything is trusted - see PairingCoordinator for the full flow.
+        app.MapPost("/pairing/request", (PairingHandshakePayload req, PairingCoordinator pairing) =>
+        {
+            pairing.AddInbound(req.PeerId, req.PeerName, req.PeerEndpoint, req.Nonce);
+            return Results.Ok(new { received = true });
+        });
+
+        app.MapGet("/pairing/pending", (PairingCoordinator pairing) =>
+            Results.Ok(pairing.PendingInbound()));
+
+        app.MapPost("/pairing/pending/{hostId}/reject", (string hostId, PairingCoordinator pairing) =>
+        {
+            pairing.RejectInbound(hostId);
+            return Results.Ok(new { rejected = true });
+        });
+
+        app.MapPost("/pairing/pending/{hostId}/accept", async (
+            string hostId, PairingCoordinator pairing, PersistentSettingsStore store, HostLocator hostLocator,
+            NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            // Peek, don't consume: only remove the pending request once the
+            // callback below actually succeeds, so a transient network/
+            // firewall failure leaves it available to retry instead of
+            // silently discarding an accept the operator already clicked.
+            var request = pairing.GetInbound(hostId);
+            if (request is null)
+                return Results.NotFound(new { error = "no pending request from that host - it may have expired" });
+
+            try
+            {
+                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
+                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, request.Nonce);
+                var client = httpFactory.CreateClient("cluster");
+                using var response = await client.PostAsJsonAsync($"{request.RequesterEndpoint}/pairing/approved", payload, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)response.StatusCode}";
+                    return Results.Problem(
+                        detail: $"Host {request.RequesterEndpoint} svarade: {reason}",
+                        statusCode: StatusCodes.Status502BadGateway);
+                }
+
+                var approval = await response.Content.ReadFromJsonAsync<PairingApprovalResponse>(ct);
+                if (approval?.ClusterToken is not { Length: > 0 } token)
+                    return Results.Problem(
+                        detail: "Host skickade ingen klusternyckel.", statusCode: StatusCodes.Status502BadGateway);
+
+                pairing.RemoveInboundIfMatches(hostId, request.Nonce);
+                store.Update(new SettingsUpdate(HostEndpoint: request.RequesterEndpoint, ClusterToken: token), hostLocator);
+                return Results.Ok(new { connected = true, host = request.RequesterName });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+    }
+
+
+    /// <summary>The agent-assignment engine: builds the full tool executor
+    /// (scaffolds, builder, assets, playtest, vision, ...) and streams the
+    /// run as SSE. Shared by /execute/assignment (cluster dispatch) and the
+    /// LOCAL /api/assignment mapped for Launcher + standalone Worker
+    /// dashboards, so a single node runs builds without any Host.</summary>
+    internal static async Task<IResult> RunAssignmentAsync(
+        AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
+        NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
+        PersistentSettingsStore settingsStore, CancellationToken ct)
+    {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
                 return Results.Problem(
@@ -105,8 +270,13 @@ public static class WorkerRole
             if (string.IsNullOrWhiteSpace(req.Assignment))
                 return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
 
-            ctx.Response.Headers.CacheControl = "no-cache";
-            ctx.Response.ContentType = "text/event-stream";
+            // The local /api/assignment wrapper writes a leading worker-frame
+            // before delegating here, so the response may already be started.
+            if (!ctx.Response.HasStarted)
+            {
+                ctx.Response.Headers.CacheControl = "no-cache";
+                ctx.Response.ContentType = "text/event-stream";
+            }
             // The operator chooses the folder (Settings -> Agentlage) - a Worker
             // picks where ITS agent runs, never the Host. Null => the
             // default agent-workspace under this Worker's own data dir. A
@@ -256,6 +426,45 @@ public static class WorkerRole
                 });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
+            // Deterministic floor: a BUILD assignment on an EMPTY workspace
+            // gets its scaffold created by the node itself, up-front - weak
+            // local models sometimes answer a build request with prose and
+            // zero tool calls, which used to end "successfully" with no files
+            // at all. Now the production-bar project always lands on disk and
+            // the model's job is to EXTEND it. Never touches a non-empty
+            // workspace (existing projects must not be overwritten).
+            var assignmentText = req.Assignment;
+            if (HostRole.IsBuildRequest(req.Assignment) && WorkspaceIsEmpty(workspaceRoot))
+            {
+                var wantsGame = req.Assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
+                    || req.Assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
+                (bool Success, string Output) scaffold;
+                if (wantsGame)
+                {
+                    var g = new GameScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                    scaffold = (g.Success, g.Output);
+                }
+                else
+                {
+                    var a = new AppScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                    scaffold = (a.Success, a.Output);
+                }
+                if (scaffold.Success)
+                {
+                    async Task EmitStep(string kind, string detail)
+                    {
+                        await ctx.Response.WriteAsync(
+                            $"data: {JsonSerializer.Serialize(new { step = new AgentStep(kind, detail) })}\n\n", ct);
+                        await ctx.Response.Body.FlushAsync(ct);
+                    }
+                    await EmitStep("tool_call", wantsGame ? "scaffold_game (automatisk projektgrund)" : "scaffold_app (automatisk projektgrund)");
+                    await EmitStep("tool_result", scaffold.Output);
+                    assignmentText = req.Assignment +
+                        "\n\nOBS: En komplett, spelbar/körbar projektgrund är REDAN skapad i arbetsmappen (" + scaffold.Output +
+                        "). Skapa INTE ett nytt projekt - läs DESIGN.md och index/koden, och UTÖKA grunden enligt uppdraget (innehåll, mekanik, polish). Verifiera med verify/playtest när du är klar.";
+                }
+            }
+
             // Same production-grade system prompt as interactive sessions -
             // an assignment dispatched through the cluster used to run with NO
             // system prompt at all, so the same goal came out far worse than
@@ -264,7 +473,7 @@ public static class WorkerRole
             var instructions = await ProjectInstructionsReader.TryReadAsync(workspaceRoot, ct);
             var system = AgentSystemPrompt.Build(workspaceRoot, accessLevel, instructions);
 
-            var result = await loop.RunAsync(req.Assignment, accessLevel, req.ModelHint, onStep: async step =>
+            var result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: async step =>
             {
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
@@ -274,158 +483,63 @@ public static class WorkerRole
                 $"data: {JsonSerializer.Serialize(new { final = result })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
-        });
+    }
 
-        // --- Task isolation (git worktree per task) ---------------------------------
-        // Each "employee" (agent run) gets its own worktree+branch so two
-        // tasks on the same repo never overwrite each other. The Host creates
-        // one before dispatching (with useIsolation), then merges or discards
-        // it after the agent reports done - discard is the free undo button.
-
-        app.MapPost("/execute/isolation/create", async (
-            GitIsolationService isolation, NodeSettings settings, CancellationToken ct) =>
+    /// <summary>Local (no-cluster) planning + assignment endpoints for the
+    /// dashboard's Uppdrag flow, so it works on a Launcher or a standalone
+    /// Worker WITHOUT any Host: /api/goal-plan plans on this node's own
+    /// provider chain and /api/assignment runs the agent in-process. Before
+    /// this, both routes existed only on the Host role - the desktop app
+    /// (which starts its node as Launcher) got HTTP 404 on the very first
+    /// planning call.</summary>
+    public static void MapLocalAssignmentEndpoints(WebApplication app)
+    {
+        app.MapPost("/api/goal-plan", async (
+            GoalPlanRequest req, FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
         {
-            var repoPath = ResolveRepoPath(settings);
-            if (repoPath is null)
-                return Results.Problem(detail: "Git-isolation kräver att Agentlage -> Arbetsmapp är ett git-repo.", statusCode: StatusCodes.Status400BadRequest);
-            if (!await isolation.CanIsolateAsync(repoPath, ct))
-                return Results.Problem(detail: "Arbetsmappen är inte ett git-repo - kan inte isolera.", statusCode: StatusCodes.Status400BadRequest);
+            if (string.IsNullOrWhiteSpace(req.Goal))
+                return Results.Problem(detail: "goal text is required", statusCode: StatusCodes.Status400BadRequest);
 
-            var task = await isolation.CreateAsync(repoPath, "Uppgift", baseBranch: null, ct);
-            return task is null
-                ? Results.Problem(detail: "Kunde inte skapa isolerad arbetsyta (git worktree misslyckades).", statusCode: StatusCodes.Status500InternalServerError)
-                : Results.Ok(new { taskId = task.TaskId, branch = task.BranchName, worktree = task.WorktreePath });
-        });
+            var planner = new GoalPlanner(provider.CompleteAsync);
+            var maxParts = Math.Clamp(req.MaxParts ?? 6, 1, 8);
+            IReadOnlyList<PlannedSubtask>? plan = null;
+            try { plan = await planner.PlanAsync(req.Goal, maxParts, ct); }
+            catch { /* fall through to the actionable 502 below */ }
+            if (plan is null)
+                return Results.Problem(
+                    detail: "Kunde inte skapa en plan med nodens AI-modell. Kontrollera att en provider är konfigurerad (Ollama eller en API-nyckel i Inställningar), eller formulera målet som ett enda uppdrag.",
+                    statusCode: StatusCodes.Status502BadGateway);
 
-        app.MapGet("/execute/isolation/list", (GitIsolationService isolation) =>
-            Results.Ok(isolation.ListActive().Select(t => new
+            return Results.Ok(new
             {
-                taskId = t.TaskId,
-                branch = t.BranchName,
-                baseBranch = t.BaseBranch,
-                worktree = t.WorktreePath,
-                title = t.Title,
-                createdAt = t.CreatedAt
-            })));
-
-        app.MapPost("/execute/isolation/commit", async (
-            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
-        {
-            var body = await ctx.Request.ReadFromJsonAsync<IsolationCommitRequest>(ct);
-            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
-                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
-            var result = await isolation.CommitAsync(body.TaskId, body.Message ?? "Agent-ändringar", ct);
-            return Results.Ok(new { success = result.Success, output = result.Output });
+                worker = new { id = "local", name = settings.NodeName },
+                subtasks = plan.Select(p => new { p.Title, p.Description, p.Independent })
+            });
         });
 
-        app.MapPost("/execute/isolation/diff", async (
-            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
+        app.MapPost("/api/assignment", async (
+            AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
+            NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
+            PersistentSettingsStore settingsStore, CancellationToken ct) =>
         {
-            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
-            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
-                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
-            var diff = await isolation.DiffAsync(body.TaskId, ct);
-            return Results.Ok(new { taskId = body.TaskId, diff });
-        });
+            // Mirror the engine's own early checks BEFORE the response starts,
+            // so they still surface as proper HTTP errors instead of dying
+            // inside an already-started SSE stream.
+            if (settings.Worker.AgentAccess == AgentAccessLevel.Off)
+                return Results.Problem(
+                    detail: "Agentläge är inte aktiverat på den här noden (Inställningar -> Agentläge).",
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (string.IsNullOrWhiteSpace(req.Assignment))
+                return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
 
-        app.MapPost("/execute/isolation/merge", async (
-            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
-        {
-            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
-            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
-                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
-            var (success, output) = await isolation.MergeAsync(body.TaskId, ct);
-            return Results.Ok(new { success, output });
-        });
-
-        app.MapPost("/execute/isolation/discard", async (
-            GitIsolationService isolation, HttpContext ctx, CancellationToken ct) =>
-        {
-            var body = await ctx.Request.ReadFromJsonAsync<IsolationTaskRequest>(ct);
-            if (body is null || string.IsNullOrWhiteSpace(body.TaskId))
-                return Results.Problem(detail: "taskId krävs", statusCode: StatusCodes.Status400BadRequest);
-            await isolation.DiscardAsync(body.TaskId, ct);
-            return Results.Ok(new { discarded = true });
-        });
-
-        // Local dashboard mirror of the /execute/isolation/* endpoints so the
-        // in-app Studio "Branches" tab works on a single node without a cluster
-        // token. Sits under /api/ (not /execute/) so it is not node-only and
-        // therefore reachable with ordinary local dashboard auth.
-        MapIsolationEndpoints(app);
-
-        app.MapGet("/runtime", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.InspectAsync(ct)));
-
-        app.MapPost("/runtime/pull", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.PullRecommendedModelAsync(ct)));
-
-        // One click: install Ollama (if missing), start it, and pull the model.
-        app.MapPost("/runtime/setup", async (LocalRuntimeManager runtime, CancellationToken ct) =>
-            Results.Ok(await runtime.SetupLocalAiAsync(ct)));
-
-        // P2: Studio one-click Build / Run / Test against the workspace.
-        MapWorkspaceEndpoints(app);
-
-        // Click-to-pair, no typing: a Host that discovered this Worker via LAN
-        // beacon sends a connect request with a random nonce. This node's own
-        // operator must explicitly accept it (see /pairing/pending/{id}/accept)
-        // before anything is trusted - see PairingCoordinator for the full flow.
-        app.MapPost("/pairing/request", (PairingHandshakePayload req, PairingCoordinator pairing) =>
-        {
-            pairing.AddInbound(req.PeerId, req.PeerName, req.PeerEndpoint, req.Nonce);
-            return Results.Ok(new { received = true });
-        });
-
-        app.MapGet("/pairing/pending", (PairingCoordinator pairing) =>
-            Results.Ok(pairing.PendingInbound()));
-
-        app.MapPost("/pairing/pending/{hostId}/reject", (string hostId, PairingCoordinator pairing) =>
-        {
-            pairing.RejectInbound(hostId);
-            return Results.Ok(new { rejected = true });
-        });
-
-        app.MapPost("/pairing/pending/{hostId}/accept", async (
-            string hostId, PairingCoordinator pairing, PersistentSettingsStore store, HostLocator hostLocator,
-            NodeSettings settings, IHttpClientFactory httpFactory, CancellationToken ct) =>
-        {
-            // Peek, don't consume: only remove the pending request once the
-            // callback below actually succeeds, so a transient network/
-            // firewall failure leaves it available to retry instead of
-            // silently discarding an accept the operator already clicked.
-            var request = pairing.GetInbound(hostId);
-            if (request is null)
-                return Results.NotFound(new { error = "no pending request from that host - it may have expired" });
-
-            try
-            {
-                var selfEndpoint = $"http://{NetworkUtil.LocalIPv4()}:{settings.Port}";
-                var payload = new PairingHandshakePayload(store.NodeId, settings.NodeName, selfEndpoint, request.Nonce);
-                var client = httpFactory.CreateClient("cluster");
-                using var response = await client.PostAsJsonAsync($"{request.RequesterEndpoint}/pairing/approved", payload, ct);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync(ct);
-                    var reason = ExtractErrorReason(body) ?? $"HTTP {(int)response.StatusCode}";
-                    return Results.Problem(
-                        detail: $"Host {request.RequesterEndpoint} svarade: {reason}",
-                        statusCode: StatusCodes.Status502BadGateway);
-                }
-
-                var approval = await response.Content.ReadFromJsonAsync<PairingApprovalResponse>(ct);
-                if (approval?.ClusterToken is not { Length: > 0 } token)
-                    return Results.Problem(
-                        detail: "Host skickade ingen klusternyckel.", statusCode: StatusCodes.Status502BadGateway);
-
-                pairing.RemoveInboundIfMatches(hostId, request.Nonce);
-                store.Update(new SettingsUpdate(HostEndpoint: request.RequesterEndpoint, ClusterToken: token), hostLocator);
-                return Results.Ok(new { connected = true, host = request.RequesterName });
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
-            }
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.ContentType = "text/event-stream";
+            // Same leading worker-frame contract as the Host's /api/assignment,
+            // so the dashboard's plan runner works identically here.
+            await ctx.Response.WriteAsync(
+                $"data: {JsonSerializer.Serialize(new { worker = new { id = "local", name = settings.NodeName } })}\n\n", ct);
+            await ctx.Response.Body.FlushAsync(ct);
+            return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, ct);
         });
     }
 
@@ -577,6 +691,21 @@ public static class WorkerRole
     private sealed record IsolationCommitRequest(string TaskId, string? Message = null);
     /// <summary>Request body for the Studio workspace build/run/test endpoints.</summary>
     private sealed record WorkspaceRootRequest(string? Root = null);
+
+    /// <summary>True when the agent workspace has no files at all - the only
+    /// state where the deterministic pre-scaffold may run.</summary>
+    internal static bool WorkspaceIsEmpty(string root)
+    {
+        try
+        {
+            return !Directory.Exists(root)
+                || !Directory.EnumerateFileSystemEntries(root).Any();
+        }
+        catch
+        {
+            return false; // can't tell -> never risk scaffolding over something
+        }
+    }
 
     /// <summary>Resolves the repo path the agent works in: the explicit
     /// WorkspacePath if set, else the default agent-workspace. Isolation only

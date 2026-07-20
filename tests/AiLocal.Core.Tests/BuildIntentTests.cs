@@ -22,6 +22,25 @@ public class BuildIntentTests
         Assert.True(HostRole.IsBuildRequest(prompt));
     }
 
+    [Fact]
+    public void WorkspaceIsEmpty_OnlyForMissingOrEmptyDirs()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-wsempty-" + Guid.NewGuid().ToString("n"));
+        try
+        {
+            Assert.True(WorkerRole.WorkspaceIsEmpty(dir)); // finns inte
+            Directory.CreateDirectory(dir);
+            Assert.True(WorkerRole.WorkspaceIsEmpty(dir)); // tom
+            File.WriteAllText(Path.Combine(dir, "x.txt"), "hej");
+            // Icke-tom: förskaffolden får ALDRIG röra ett befintligt projekt.
+            Assert.False(WorkerRole.WorkspaceIsEmpty(dir));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
     [Theory]
     [InlineData("vad är en app?")]
     [InlineData("vilka spel är populära just nu?")]

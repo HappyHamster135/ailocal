@@ -24,6 +24,11 @@ public static class LauncherRole
         WorkerRole.MapIsolationEndpoints(app);
         WorkerRole.MapWorkspaceEndpoints(app);
 
+        // Uppdrag-flödet (plan + kör agent) lokalt - the desktop app runs its
+        // node as Launcher, and these two routes only existed on the Host
+        // role, so "Assignment" in the app 404'd on the first planning call.
+        WorkerRole.MapLocalAssignmentEndpoints(app);
+
         // One click: start a Host, then a Worker paired to it. The Worker adopts
         // the Host's freshly-minted cluster token automatically so pairing does
         // not require a manual copy/paste step for the common co-located case.
