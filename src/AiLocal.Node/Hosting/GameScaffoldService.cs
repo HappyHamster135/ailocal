@@ -285,6 +285,13 @@ public sealed partial class GameScaffoldService
             "snake" => (Html5Snake(prompt), Html5SnakeDesignDoc(prompt)),
             "idle" => (Html5Idle(prompt), Html5IdleDesignDoc(prompt)),
             "breakout" => (Html5Breakout(prompt), Html5BreakoutDesignDoc(prompt)),
+            "management" => (Html5Management(prompt), Html5ManagementDesignDoc(prompt)),
+            "simulator" => (Html5Simulator(prompt), Html5SimulatorDesignDoc(prompt)),
+            "roguelike" => (Html5Roguelike(prompt), Html5RoguelikeDesignDoc(prompt)),
+            "memory" => (Html5Memory(prompt), Html5MemoryDesignDoc(prompt)),
+            "minesweeper" => (Html5Minesweeper(prompt), Html5MinesweeperDesignDoc(prompt)),
+            "quiz" => (Html5Quiz(prompt), Html5QuizDesignDoc(prompt)),
+            "blockpuzzle" => (Html5BlockPuzzle(prompt), Html5BlockPuzzleDesignDoc(prompt)),
             _ => (Html5Game(), Html5DesignDoc(prompt))
         };
         Write(root, "index.html", game);

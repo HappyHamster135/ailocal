@@ -23,12 +23,19 @@ public partial class GameScaffoldService
         if (WordStart(p, "snake", "orm", "nokia")) return "snake";
         if (WordStart(p, "idle", "clicker", "klicker", "klickspel", "incremental", "cookie")) return "idle";
         if (WordStart(p, "breakout", "arkanoid", "brick", "tegel", "paddle", "pong")) return "breakout";
+        if (WordStart(p, "minesweeper", "minröj", "minroj", "minor", "mines")) return "minesweeper";
+        if (WordStart(p, "quiz", "frågesport", "fragesport", "trivia")) return "quiz";
+        if (WordStart(p, "memory", "minnesspel", "kortspel", "card", "pairs")) return "memory";
+        if (WordStart(p, "tetris", "tetromino", "block")) return "blockpuzzle";
+        if (WordStart(p, "roguelike", "rogue", "dungeon", "grotta", "permadeath")) return "roguelike";
+        if (WordStart(p, "tycoon", "manage", "kiosk", "butik", "restaurang", "företag", "foretag", "affär", "affar")) return "management";
+        if (WordStart(p, "sim", "farm", "bondgård", "bondgard", "odla", "skörda", "skorda")) return "simulator";
         if (WordStart(p, "shooter", "bullet", "shmup", "skjut", "shoot")) return "shooter";
         if (WordStart(p, "racing", "racer", "race", "bil", "kart") || WordExact(p, "car", "cars")) return "racing";
         if (WordStart(p, "puzzle", "pussel", "match", "bejeweled", "swap")) return "puzzle";
         if (p.Contains("tower defense") || p.Contains("towerdefense")
             || WordExact(p, "td") || WordStart(p, "torn", "wave")) return "towerdefense";
-        if (WordStart(p, "rpg", "adventure", "aventyr", "äventyr", "dungeon")
+        if (WordStart(p, "rpg", "adventure", "aventyr", "äventyr")
             || p.Contains("top-down") || p.Contains("topdown")) return "rpg";
         return "platformer";
     }
@@ -132,6 +139,32 @@ const PKit=(()=>{
             "# Breakout (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
             "Styrning: piltangenter/A-D eller mus; mellanslag släpper bollen. Esc/P = paus.\n\n" +
             "3 nivåer, tegel med 1-3 HP, vinkelstyrd studs. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "management" =>
+            "# Kiosken - Management/Tycoon (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Köp lager, sätt pris, anställ personal och starta dagen - efterfrågan styrs av pris och rykte. " +
+            "Nå 5000 kr på 14 dagar. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "simulator" =>
+            "# Bondgården - Simulator (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Klicka för att plantera (5 kr) och skörda (+14 kr). Regn ger dubbel växtfart. " +
+            "Nå 300 kr före dag 15. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "roguelike" =>
+            "# Grottan - Roguelike (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Turordningsbaserat: piltangenter/WASD flyttar, gå in i fiender för att slåss. " +
+            "Procedurgenererade våningar - nå trappan på våning 5. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "memory" =>
+            "# Memory (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Vänd två kort per försök och hitta alla 8 par på 30 försök. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "minesweeper" =>
+            "# Minröj (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Vänsterklick öppnar, högerklick flaggar. Första klicket är alltid säkert. " +
+            "Öppna alla säkra rutor för att vinna. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "quiz" =>
+            "# Frågesport (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "10 frågor, 15 sekunder per fråga, 3 liv - snabba rätta svar ger bonus. Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "blockpuzzle" =>
+            "# Blockpussel (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Piltangenter/WASD flyttar, upp roterar, mellanslag hårdfäller. Rensa 15 rader för att vinna. " +
+            "Esc/P = paus. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
         _ =>
             "# 2D Platformer (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
             "Styrning: piltangenter / WASD för rörelse, mellanslag / W / upp för att hoppa, Esc/P = paus.\n\n" +
@@ -855,4 +888,675 @@ loop();
         "- **Vagor:** rensa alla fiender for nasta vag; vag 10 rensad = vinst\n- **Osarbarhet:** korta i-frames efter traff\n\n" +
         "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay med omstart\n- WebAudio-SFX (skott, traff, doda fiender)\n" +
         "- Animation: partiklar vid traff, spelaren blinkar under i-frames\n- Highscore i localStorage\n\n## Extension\n- Power-ups\n- Boss-fiender\n- Olika vapen\n";
+
+    // ---- Management / Tycoon (HTML5) ---------------------------------------------
+    internal static string Html5Management(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Kiosken</title>
+<style>
+  body{margin:0;background:#151a22;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:system-ui,sans-serif;color:#fff}
+  canvas{border:2px solid #2a3350}
+  #hud{font:15px monospace;margin-bottom:8px}
+  .row{display:flex;gap:8px;margin-top:10px}
+  .row button{padding:9px 12px;background:#242c3c;color:#fff;border:1px solid #3a4a66;border-radius:8px;cursor:pointer;font:12px monospace}
+  .row button:disabled{opacity:.4;cursor:default}
+  #startDay{background:#2f6b3a}
+</style>
+</head>
+<body>
+<div id='hud'>Kassa <span id='cash'>100</span> kr &middot; Lager <span id='stock'>0</span> &middot; Pris <span id='price'>15</span> kr &middot; Personal <span id='staff'>1</span> &middot; Rykte <span id='rep'>50</span> &middot; Dag <span id='day'>1</span>/14</div>
+<canvas id='c' width='720' height='300'></canvas>
+<div class='row'>
+  <button id='buyStock'>Kop lager (10 st, 80 kr)</button>
+  <button id='priceDown'>Pris -1</button>
+  <button id='priceUp'>Pris +1</button>
+  <button id='hire'>Anstall (200 kr)</button>
+  <button id='startDay'>Starta dagen</button>
+</div>
+<script>" + ProductionKitJs + @"
+const GOAL=5000,MAXDAY=14;
+const c=document.getElementById('c'),ctx=c.getContext('2d'),W=720,H=300;
+let cash=100,stock=0,price=15,staff=1,rep=50,day=1,dayActive=false,customers=[],anim=0;
+const el=id=>document.getElementById(id);
+function guard(){return PKit.started&&!PKit.paused&&!PKit.ended;}
+
+el('buyStock').onclick=()=>{if(!guard()||dayActive||cash<80)return;cash-=80;stock+=10;PKit.sfx.place();};
+el('priceDown').onclick=()=>{if(!guard()||price<=5)return;price--;};
+el('priceUp').onclick=()=>{if(!guard()||price>=40)return;price++;};
+el('hire').onclick=()=>{if(!guard()||dayActive||cash<200||staff>=5)return;cash-=200;staff++;PKit.sfx.place();};
+el('startDay').onclick=()=>{if(!guard()||dayActive)return;startDay();};
+
+function startDay(){
+  dayActive=true;
+  const demand=Math.max(2,Math.min(25,Math.round(8+rep/10-(price-12)*0.8)));
+  customers=[];
+  for(let i=0;i<demand;i++)customers.push({x:-30-i*46,y:210+(i%3)*14,bought:false,frame:0});
+}
+
+function update(){
+  if(!guard())return;
+  anim=(anim+1)%24;
+  if(!dayActive)return;
+  const serveCap=staff; // personal begransar hur manga som hinner betjanas samtidigt
+  let serving=0;
+  for(const cu of customers){
+    cu.x+=2.2;
+    if(anim%12===0)cu.frame^=1;
+    if(!cu.bought&&cu.x>330&&cu.x<390&&serving<serveCap){
+      serving++;
+      if(stock>0&&Math.random()<Math.max(0.25,1.1-price/38)){
+        cu.bought=true;stock--;cash+=price;rep=Math.min(99,rep+0.4);PKit.sfx.coin();
+      }else if(stock<=0){rep=Math.max(1,rep-0.5);}
+    }
+  }
+  if(customers.every(cu=>cu.x>W+30)){
+    dayActive=false;day++;
+    if(cash>=GOAL){PKit.end(true,cash);return;}
+    if(day>MAXDAY){PKit.end(cash>=GOAL,cash);return;}
+    if(cash<80&&stock<=0){PKit.sfx.hit();PKit.end(false,cash);return;} // konkurs
+  }
+}
+
+function draw(){
+  ctx.fillStyle='#1a2130';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#3a4a66';ctx.fillRect(0,240,W,60); // trottoar
+  ctx.fillStyle='#8a5a2a';ctx.fillRect(320,90,80,150); // kiosk
+  ctx.fillStyle='#f5c542';ctx.fillRect(320,90,80,22);
+  ctx.fillStyle='#111';ctx.font='12px monospace';ctx.fillText('KIOSK',338,106);
+  ctx.fillStyle='#242c3c';ctx.fillRect(10,10,W-20,16);
+  ctx.fillStyle='#4caf50';ctx.fillRect(10,10,(W-20)*Math.min(1,cash/GOAL),16);
+  ctx.fillStyle='#fff';ctx.fillText('Mal: '+GOAL+' kr',W/2-40,22);
+  for(const cu of customers){
+    if(cu.x<-20||cu.x>W+20)continue;
+    const bob=cu.frame?2:0;
+    ctx.fillStyle=cu.bought?'#4caf50':'#c8d0e0';
+    ctx.fillRect(cu.x,cu.y+bob,14,26);
+    ctx.fillStyle='#ffd9a0';ctx.fillRect(cu.x+2,cu.y-8+bob,10,10);
+  }
+  el('cash').textContent=cash|0;el('stock').textContent=stock;el('price').textContent=price;
+  el('staff').textContent=staff;el('rep').textContent=rep|0;el('day').textContent=Math.min(day,MAXDAY);
+  el('buyStock').disabled=dayActive||cash<80;
+  el('hire').disabled=dayActive||cash<200||staff>=5;
+  el('startDay').disabled=dayActive;
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Kiosken','Kop lager, satt pris, anstall - na '+GOAL+' kr pa '+MAXDAY+' dagar','management',null);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5ManagementDesignDoc(string prompt) =>
+        "# Management / Tycoon (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nDriv en kiosk: kop lager, satt pris, anstall personal och overlev 14 dagar med vinstmal.\n\n" +
+        "## Mekanik\n- **Efterfragan:** styrs av pris och rykte (lagt pris + gott rykte = fler kunder)\n" +
+        "- **Personal:** begransar hur manga kunder som hinner betjanas per dag\n" +
+        "- **Rykte:** upp vid kop, ner nar lagret ar tomt\n- **Vinst:** 5000 kr; **konkurs:** utan pengar och lager\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (forsaljning, kop)\n" +
+        "- Kund-animation (gang-bob), progressbar mot malet\n- Highscore i localStorage\n\n## Extension\n- Fler varutyper\n- Marknadsforing\n- Konkurrenter\n";
+
+    // ---- Simulator / Farm (HTML5) ------------------------------------------------
+    internal static string Html5Simulator(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Bondgarden</title>
+<style>
+  body{margin:0;background:#12200f;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:system-ui,sans-serif;color:#fff}
+  canvas{border:2px solid #2a3a1e;cursor:pointer}
+  #hud{font:15px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Pengar <span id='cash'>20</span> kr &middot; Dag <span id='day'>1</span>/15 &middot; Vader <span id='wx'>Sol</span> &middot; Klicka: plantera (5 kr) / skorda (+14 kr)</div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const COLS=6,ROWS=4,T=90,GOAL=300,MAXDAY=15;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=COLS*T;c.height=ROWS*T+40;
+let cash=20,frameN=0,day=1,rain=false,anim=0;
+const plots=[];
+for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)plots.push({x,y,stage:-1,t:0});
+
+c.onclick=e=>{
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  const gx=e.offsetX/T|0,gy=(e.offsetY-40)/T|0;
+  const p=plots.find(q=>q.x===gx&&q.y===gy);
+  if(!p)return;
+  if(p.stage===-1&&cash>=5){cash-=5;p.stage=0;p.t=0;PKit.sfx.place();}
+  else if(p.stage>=3){cash+=14;p.stage=-1;p.t=0;PKit.sfx.coin();}
+};
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  frameN++;anim=(anim+1)%40;
+  if(frameN%420===0){day++;rain=Math.random()<0.35;
+    if(day>MAXDAY){PKit.end(cash>=GOAL,cash);return;}}
+  const growth=rain?2:1; // regn = dubbel vaxtfart
+  for(const p of plots)if(p.stage>=0&&p.stage<3){p.t+=growth;if(p.t>=160){p.t=0;p.stage++;}}
+}
+
+function draw(){
+  ctx.fillStyle=rain?'#39424e':'#7ec8e8';ctx.fillRect(0,0,c.width,40); // himmel
+  if(rain){ctx.fillStyle='#9fc2e8';for(let i=0;i<12;i++)ctx.fillRect((i*61+anim*4)%c.width,8+(i*13+anim*3)%26,2,7);}
+  else{ctx.fillStyle='#ffd94a';ctx.beginPath();ctx.arc(40,20,14+(anim<20?1:0),0,Math.PI*2);ctx.fill();}
+  for(const p of plots){
+    const px=p.x*T,py=p.y*T+40;
+    ctx.fillStyle='#5a3d1e';ctx.fillRect(px+2,py+2,T-4,T-4);
+    if(p.stage>=0){
+      const sway=p.stage>0&&anim<20?1:0; // vind-anim pa plantan
+      ctx.fillStyle=['#8afc8a','#4fd04f','#2fa32f','#ffd94a'][p.stage];
+      const h=[10,26,44,58][p.stage];
+      ctx.fillRect(px+T/2-5+sway,py+T-8-h,10,h);
+      if(p.stage>=3){ctx.fillStyle='#ffb02e';ctx.beginPath();ctx.arc(px+T/2+sway,py+T-14-h,10,0,Math.PI*2);ctx.fill();}
+    }
+    ctx.strokeStyle='#1c2a12';ctx.strokeRect(px+2,py+2,T-4,T-4);
+  }
+  document.getElementById('cash').textContent=cash;
+  document.getElementById('day').textContent=Math.min(day,MAXDAY);
+  document.getElementById('wx').textContent=rain?'Regn':'Sol';
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Bondgarden','Plantera, vanta pa skord (regn vaxer snabbare) - na '+GOAL+' kr pa '+MAXDAY+' dagar','simulator',null);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5SimulatorDesignDoc(string prompt) =>
+        "# Simulator / Bondgard (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEn odlingssimulator: plantera, vanta genom vaxtstadier, skorda och sal for att na det ekonomiska malet fore sasongens slut.\n\n" +
+        "## Mekanik\n- **Plantera:** 5 kr per ruta; **skorda:** +14 kr vid stadie 3\n- **Vaxtstadier:** 4 (planta till mogen groda)\n" +
+        "- **Vader:** regn ger dubbel vaxtfart, byts per dag\n- **Mal:** 300 kr fore dag 15\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (plantering, skord)\n" +
+        "- Animation: plantvind, sol-puls, regndroppar\n- Highscore i localStorage\n\n## Extension\n- Fler grodor med olika varden\n- Bevattning\n- Djur\n";
+
+    // ---- Roguelike (HTML5) -------------------------------------------------------
+    internal static string Html5Roguelike(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Grottan</title>
+<style>
+  body{margin:0;background:#0c0a10;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #2a2333}
+  #hud{color:#fff;font:15px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>HP <span id='hp'>20</span>/20 &middot; Guld <span id='gold'>0</span> &middot; Vaning <span id='fl'>1</span>/5 &middot; Ga pa fiender for att attackera</div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const COLS=15,ROWS=11,T=40,FINAL=5;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=COLS*T;c.height=ROWS*T;
+let grid=[],player={x:1,y:1,hp:20,maxHp:20,gold:0},floor=1,enemies=[],stairs={x:0,y:0},anim=0;
+
+function genFloor(){
+  grid=[];enemies=[];
+  for(let y=0;y<ROWS;y++){grid[y]=[];for(let x=0;x<COLS;x++)
+    grid[y][x]=(x===0||y===0||x===COLS-1||y===ROWS-1||Math.random()<0.18)?1:0;}
+  player.x=1;player.y=1;grid[1][1]=0;
+  stairs={x:COLS-2,y:ROWS-2};grid[stairs.y][stairs.x]=0;
+  // Grav en garanterad vag fran start till trappan sa vaningen alltid gar att klara.
+  let cx=1,cy=1;
+  while(cx!==stairs.x||cy!==stairs.y){
+    if(cx<stairs.x&&Math.random()<0.6)cx++;else if(cy<stairs.y)cy++;else if(cx<stairs.x)cx++;
+    grid[cy][cx]=0;}
+  for(let i=0;i<3+floor;i++)placeThing(t=>enemies.push({x:t.x,y:t.y,hp:5+floor*2,frame:0}));
+  for(let i=0;i<4;i++)placeThing(t=>grid[t.y][t.x]=2); // guld
+  for(let i=0;i<2;i++)placeThing(t=>grid[t.y][t.x]=3); // brygd
+}
+function placeThing(fn){
+  for(let tries=0;tries<80;tries++){
+    const x=1+(Math.random()*(COLS-2)|0),y=1+(Math.random()*(ROWS-2)|0);
+    if(grid[y][x]===0&&!(x===player.x&&y===player.y)&&!(x===stairs.x&&y===stairs.y)
+      &&!enemies.some(e=>e.x===x&&e.y===y)){fn({x,y});return;}}}
+
+document.addEventListener('keydown',e=>{
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  let dx=0,dy=0;const k=e.key;
+  if(k==='ArrowUp'||k==='w')dy=-1;else if(k==='ArrowDown'||k==='s')dy=1;
+  else if(k==='ArrowLeft'||k==='a')dx=-1;else if(k==='ArrowRight'||k==='d')dx=1;else return;
+  e.preventDefault();
+  turn(dx,dy);});
+
+function turn(dx,dy){
+  const nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS||grid[ny][nx]===1)return;
+  const foe=enemies.find(e=>e.x===nx&&e.y===ny);
+  if(foe){foe.hp-=4;PKit.sfx.hit();
+    if(foe.hp<=0){enemies=enemies.filter(e=>e!==foe);player.gold+=5;PKit.sfx.coin();}}
+  else{
+    player.x=nx;player.y=ny;
+    if(grid[ny][nx]===2){grid[ny][nx]=0;player.gold+=15;PKit.sfx.coin();}
+    if(grid[ny][nx]===3){grid[ny][nx]=0;player.hp=Math.min(player.maxHp,player.hp+8);PKit.sfx.jump();}
+    if(nx===stairs.x&&ny===stairs.y){
+      if(floor>=FINAL){PKit.end(true,player.gold+floor*100);return;}
+      floor++;genFloor();return;}}
+  // Fiendernas tur: ga mot spelaren, sla om intill.
+  for(const en of enemies){
+    const ex=Math.sign(player.x-en.x),ey=Math.sign(player.y-en.y);
+    const tx=en.x+(Math.abs(player.x-en.x)>=Math.abs(player.y-en.y)?ex:0);
+    const ty=en.y+(Math.abs(player.x-en.x)>=Math.abs(player.y-en.y)?0:ey);
+    if(Math.abs(player.x-en.x)+Math.abs(player.y-en.y)===1){
+      player.hp-=2+(floor>>1);PKit.sfx.hit();
+      if(player.hp<=0){PKit.end(false,player.gold+floor*50);return;}}
+    else if(grid[ty]&&grid[ty][tx]===0&&!(tx===player.x&&ty===player.y)
+      &&!enemies.some(o=>o!==en&&o.x===tx&&o.y===ty)){en.x=tx;en.y=ty;}}
+}
+
+function draw(){
+  anim=(anim+1)%30;
+  const torch=anim<15?0:8; // fackel-flimmer-anim
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const v=grid[y][x];
+    ctx.fillStyle=v===1?'rgb('+(42+torch)+','+(35+torch)+',51)':'#191420';
+    ctx.fillRect(x*T,y*T,T,T);
+    if(v===2){ctx.fillStyle='#f5c542';ctx.fillRect(x*T+14,y*T+14,12,12);}
+    if(v===3){ctx.fillStyle='#e05561';ctx.fillRect(x*T+13,y*T+11,14,18);}
+    ctx.strokeStyle='#0c0a10';ctx.strokeRect(x*T,y*T,T,T);}
+  ctx.fillStyle='#9a7db8';ctx.fillRect(stairs.x*T+8,stairs.y*T+8,T-16,T-16);
+  for(const en of enemies){if(anim%15===0)en.frame^=1;
+    ctx.fillStyle='#d04848';ctx.fillRect(en.x*T+8,en.y*T+8+(en.frame?2:0),T-16,T-16);}
+  ctx.fillStyle='#5ab8f0';ctx.fillRect(player.x*T+7,player.y*T+7,T-14,T-14);
+  document.getElementById('hp').textContent=Math.max(0,player.hp);
+  document.getElementById('gold').textContent=player.gold;
+  document.getElementById('fl').textContent=floor;
+}
+function loop(){try{draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Grottan','Piltangenter/WASD - turordning: du gar, fienderna gar · na trappan pa vaning '+FINAL,'roguelike',genFloor);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5RoguelikeDesignDoc(string prompt) =>
+        "# Roguelike (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nTurordningsbaserad grott-roguelike: procedurgenererade vaningar, permadeath, na trappan pa vaning 5.\n\n" +
+        "## Mekanik\n- **Turordning:** spelaren gar, sedan gar alla fiender ett steg mot spelaren\n" +
+        "- **Strid:** ga in i en fiende for att sla (4 skada); intilliggande fiender slar tillbaka\n" +
+        "- **Plock:** guld (+15), brygder (+8 HP)\n- **Procedur:** slumpade vaggar med garanterad grav vag till trappan\n" +
+        "- **Svarighet:** fler och starkare fiender per vaning\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (strid, plock, brygd)\n" +
+        "- Animation: fackel-flimmer pa vaggar, fiende-bob\n- Highscore i localStorage\n\n## Extension\n- Utrustning\n- Fiendetyper\n- Boss pa sista vaningen\n";
+
+    // ---- Memory / Card (HTML5) ---------------------------------------------------
+    internal static string Html5Memory(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Memory</title>
+<style>
+  body{margin:0;background:#1a1424;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #3a2f50;cursor:pointer}
+  #hud{color:#fff;font:16px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Par <span id='pr'>0</span>/8 &middot; Forsok kvar <span id='mv'>30</span></div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const COLS=4,ROWS=4,T=110,MOVES=30;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=COLS*T;c.height=ROWS*T;
+const clrs=['#e05561','#e0a355','#e0d955','#7ee055','#55c8e0','#7e7ee0','#d055c8','#8a5a2a'];
+let cards=[],first=null,second=null,flipback=0,moves=MOVES,pairs=0,anim=0;
+
+function deal(){
+  const vals=[];for(let i=0;i<8;i++){vals.push(i);vals.push(i);}
+  for(let i=vals.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[vals[i],vals[j]]=[vals[j],vals[i]];}
+  cards=vals.map((v,i)=>({v,x:i%COLS,y:i/COLS|0,up:false,done:false,flip:0}));
+}
+
+c.onclick=e=>{
+  if(!PKit.started||PKit.paused||PKit.ended||flipback>0)return;
+  const gx=e.offsetX/T|0,gy=e.offsetY/T|0;
+  const card=cards.find(k=>k.x===gx&&k.y===gy&&!k.done&&!k.up);
+  if(!card)return;
+  card.up=true;card.flip=6;PKit.sfx.place();
+  if(!first){first=card;return;}
+  second=card;moves--;
+  if(first.v===second.v){first.done=second.done=true;pairs++;PKit.sfx.coin();first=second=null;
+    if(pairs>=8){PKit.end(true,moves*20+200);return;}}
+  else{flipback=30;PKit.sfx.hit();}
+  if(moves<=0&&pairs<8)PKit.end(false,pairs*25);
+};
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  anim=(anim+1)%40;
+  for(const k of cards)if(k.flip>0)k.flip--;
+  if(flipback>0){flipback--;
+    if(flipback===0){if(first)first.up=false;if(second)second.up=false;first=second=null;}}
+}
+
+function draw(){
+  ctx.fillStyle='#221a30';ctx.fillRect(0,0,c.width,c.height);
+  for(const k of cards){
+    const px=k.x*T,py=k.y*T;
+    const w=(T-14)*(k.flip>0?Math.abs(3-k.flip)/3:1); // flip-anim: kortet smalnar och vaxer
+    const off=(T-14-w)/2;
+    if(k.up||k.done){ctx.fillStyle=clrs[k.v];ctx.fillRect(px+7+off,py+7,w,T-14);
+      ctx.fillStyle='#fff';ctx.font='34px monospace';
+      if(k.flip===0)ctx.fillText(String.fromCharCode(65+k.v),px+T/2-12,py+T/2+12);}
+    else{ctx.fillStyle='#3a2f50';ctx.fillRect(px+7+off,py+7,w,T-14);
+      ctx.fillStyle='#55486e';ctx.fillRect(px+T/2-8,py+T/2-8,16,16);}
+    if(k.done){ctx.globalAlpha=0.35+(anim<20?0.05:0);ctx.fillStyle='#000';
+      ctx.fillRect(px+7,py+7,T-14,T-14);ctx.globalAlpha=1;}}
+  document.getElementById('pr').textContent=pairs;
+  document.getElementById('mv').textContent=moves;
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Memory','Vand tva kort - hitta alla 8 par pa '+MOVES+' forsok','memory',deal);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5MemoryDesignDoc(string prompt) =>
+        "# Memory / Kortspel (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassiskt memory med 8 par, forsoksbudget och flip-animation.\n\n" +
+        "## Mekanik\n- **Vand:** tva kort per forsok; par ligger kvar\n- **Budget:** 30 forsok; farre anvanda forsok = hogre poang\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (vand, par, miss)\n" +
+        "- Flip-animation, dampning pa klara par\n- Highscore i localStorage\n\n## Extension\n- Storre brador\n- Tidsrekord\n- Tva spelare\n";
+
+    // ---- Minesweeper (HTML5) -----------------------------------------------------
+    internal static string Html5Minesweeper(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Minroj</title>
+<style>
+  body{margin:0;background:#171c17;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #2e3a2e;cursor:pointer}
+  #hud{color:#fff;font:15px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Minor <span id='mn'>12</span> &middot; Flaggor <span id='fg'>0</span> &middot; Vansterklick: oppna &middot; Hogerklick: flagga</div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const N=10,T=44,MINES=12;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=N*T;c.height=N*T;
+let cells=[],placed=false,flags=0,revealedCount=0,boom=0,anim=0;
+const numClrs=['#000','#5ab8f0','#7ee055','#e05561','#9a7db8','#e0a355','#55c8e0','#fff','#888'];
+
+function reset(){cells=[];placed=false;flags=0;revealedCount=0;boom=0;
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++)cells.push({x,y,mine:false,open:false,flag:false,n:0});}
+function at(x,y){return(x<0||y<0||x>=N||y>=N)?null:cells[y*N+x];}
+function neighbors(cl){const r=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+  if(!dx&&!dy)continue;const q=at(cl.x+dx,cl.y+dy);if(q)r.push(q);}return r;}
+function placeMines(safe){
+  let m=0;
+  while(m<MINES){const q=cells[Math.random()*cells.length|0];
+    if(q.mine||q===safe||neighbors(safe).includes(q))continue;q.mine=true;m++;}
+  for(const q of cells)q.n=neighbors(q).filter(o=>o.mine).length;
+  placed=true;}
+function reveal(cl){
+  if(cl.open||cl.flag)return;
+  cl.open=true;revealedCount++;
+  if(cl.mine){boom=20;PKit.sfx.hit();for(const q of cells)if(q.mine)q.open=true;
+    PKit.end(false,(revealedCount-1)*5);return;}
+  PKit.sfx.place();
+  if(cl.n===0){const stack=[cl];
+    while(stack.length){const cur=stack.pop();
+      for(const q of neighbors(cur))if(!q.open&&!q.flag&&!q.mine){
+        q.open=true;revealedCount++;if(q.n===0)stack.push(q);}}}
+  if(revealedCount>=N*N-MINES){PKit.sfx.win();PKit.end(true,1000+flags*10);}}
+
+c.onclick=e=>{
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  const cl=at(e.offsetX/T|0,e.offsetY/T|0);
+  if(!cl)return;
+  if(!placed)placeMines(cl);
+  reveal(cl);};
+c.oncontextmenu=e=>{e.preventDefault();
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  const cl=at(e.offsetX/T|0,e.offsetY/T|0);
+  if(!cl||cl.open)return;
+  cl.flag=!cl.flag;flags+=cl.flag?1:-1;PKit.sfx.place();};
+
+function draw(){
+  anim=(anim+1)%30;
+  if(boom>0)boom--;
+  ctx.fillStyle=boom>0&&boom%4<2?'#3a1c1c':'#1d241d';
+  ctx.fillRect(0,0,c.width,c.height);
+  for(const cl of cells){
+    const px=cl.x*T,py=cl.y*T;
+    if(cl.open){ctx.fillStyle=cl.mine?'#5a1c1c':'#2a332a';ctx.fillRect(px+1,py+1,T-2,T-2);
+      if(cl.mine){ctx.fillStyle='#e05561';ctx.beginPath();ctx.arc(px+T/2,py+T/2,9,0,Math.PI*2);ctx.fill();}
+      else if(cl.n>0){ctx.fillStyle=numClrs[cl.n];ctx.font='20px monospace';ctx.fillText(cl.n,px+T/2-6,py+T/2+7);}}
+    else{ctx.fillStyle='#37452f';ctx.fillRect(px+1,py+1,T-2,T-2);
+      ctx.fillStyle='#43543a';ctx.fillRect(px+1,py+1,T-2,4);
+      if(cl.flag){const wave=anim<15?0:2; // flagg-vaj-anim
+        ctx.fillStyle='#e05561';ctx.fillRect(px+T/2-2,py+10,4,T-20);
+        ctx.fillRect(px+T/2+2,py+10+wave,12,9);}}
+    }
+  document.getElementById('mn').textContent=MINES;
+  document.getElementById('fg').textContent=flags;
+}
+function loop(){try{draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Minroj','Oppna alla sakra rutor - forsta klicket ar alltid sakert','minesweeper',reset);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5MinesweeperDesignDoc(string prompt) =>
+        "# Minroj (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassisk minroj 10x10 med 12 minor, flood-fill och garanterat sakert forsta klick.\n\n" +
+        "## Mekanik\n- **Vansterklick:** oppna (nollor oppnar grannomrade)\n- **Hogerklick:** flagga\n" +
+        "- **Forsta klicket:** minor placeras EFTER klicket, aldrig pa eller intill det\n- **Vinst:** alla sakra rutor oppna\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (oppna, flagga, small)\n" +
+        "- Animation: flagg-vaj, explosion-blink\n- Highscore i localStorage\n\n## Extension\n- Svarighetsgrader\n- Tidsrekord\n- Chord-klick\n";
+
+    // ---- Quiz (HTML5) ------------------------------------------------------------
+    internal static string Html5Quiz(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Fragesport</title>
+<style>
+  body{margin:0;background:#101828;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:system-ui,sans-serif;color:#fff}
+  #q{font-size:22px;margin:16px;max-width:640px;text-align:center;min-height:56px}
+  canvas{margin-bottom:6px}
+  .answers{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:640px}
+  .answers button{padding:16px;background:#243048;color:#fff;border:1px solid #3a4a6e;border-radius:10px;cursor:pointer;font-size:15px}
+  #hud{font:15px monospace;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div id='hud'>Poang <span id='sc'>0</span> &middot; Liv <span id='lv'>3</span> &middot; Fraga <span id='qn'>1</span>/10</div>
+<canvas id='c' width='640' height='14'></canvas>
+<div id='q'>...</div>
+<div class='answers'>
+  <button id='a0'></button><button id='a1'></button>
+  <button id='a2'></button><button id='a3'></button>
+</div>
+<script>" + ProductionKitJs + @"
+const QS=[
+ {q:'Vilken planet ar narmast solen?',a:['Merkurius','Venus','Mars','Jupiter'],r:0},
+ {q:'Vad ar Sveriges huvudstad?',a:['Goteborg','Uppsala','Stockholm','Malmo'],r:2},
+ {q:'Hur manga ben har en spindel?',a:['6','8','10','12'],r:1},
+ {q:'Vilket ar det storsta havet?',a:['Atlanten','Indiska oceanen','Norra ishavet','Stilla havet'],r:3},
+ {q:'Vem malade Mona Lisa?',a:['Da Vinci','Picasso','Rembrandt','Monet'],r:0},
+ {q:'Vad ar H2O?',a:['Syre','Vatten','Vate','Salt'],r:1},
+ {q:'Vilket land har flest invanare?',a:['USA','Indien','Kina','Ryssland'],r:1},
+ {q:'Hur manga minuter ar en fotbollsmatch?',a:['80','90','100','120'],r:1},
+ {q:'Vilken ar varldens langsta flod?',a:['Amazonfloden','Nilen','Yangtze','Mississippi'],r:1},
+ {q:'Vad heter var galax?',a:['Andromeda','Orion','Vintergatan','Centaurus'],r:2}];
+const TIME=900; // 15 s i frames
+const ctx=document.getElementById('c').getContext('2d');
+let qi=0,score=0,lives=3,timer=TIME,answered=false,advanceT=0,flash=0,anim=0;
+const el=id=>document.getElementById(id);
+
+function show(){const Q=QS[qi];el('q').textContent=Q.q;
+  for(let i=0;i<4;i++)el('a'+i).textContent=Q.a[i];
+  timer=TIME;answered=false;}
+
+for(let i=0;i<4;i++)el('a'+i).onclick=()=>{
+  if(!PKit.started||PKit.paused||PKit.ended||answered)return;
+  answered=true;advanceT=45;
+  if(i===QS[qi].r){const bonus=Math.round(timer/60);score+=100+bonus;flash=1;PKit.sfx.coin();}
+  else{lives--;flash=2;PKit.sfx.hit();
+    if(lives<=0){PKit.end(false,score);return;}}};
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  anim=(anim+1)%30;
+  if(flash>0&&anim%5===0)flash=0;
+  if(answered){advanceT--;
+    if(advanceT<=0){qi++;
+      if(qi>=QS.length){PKit.end(lives>0,score+lives*100);return;}
+      show();}
+    return;}
+  timer--;
+  if(timer<=0){answered=true;advanceT=45;lives--;PKit.sfx.hit();
+    if(lives<=0)PKit.end(false,score);}
+}
+
+function draw(){
+  ctx.fillStyle='#243048';ctx.fillRect(0,0,640,14);
+  const frac=Math.max(0,timer/TIME);
+  ctx.fillStyle=frac>0.4?'#4caf50':frac>0.2?'#e0a355':'#e05561'; // timer-anim: farg + krympande bar
+  ctx.fillRect(0,0,640*frac,14);
+  if(flash===1){ctx.fillStyle='rgba(76,175,80,.5)';ctx.fillRect(0,0,640,14);}
+  if(flash===2){ctx.fillStyle='rgba(224,85,97,.5)';ctx.fillRect(0,0,640,14);}
+  el('sc').textContent=score;el('lv').textContent=Math.max(0,lives);
+  el('qn').textContent=Math.min(qi+1,QS.length);
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Fragesport','10 fragor · 15 sekunder per fraga · 3 liv · snabba svar ger bonus','quiz',show);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5QuizDesignDoc(string prompt) =>
+        "# Fragesport / Quiz (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEn fragesport med 10 inbyggda fragor, tidspress och liv-system.\n\n" +
+        "## Mekanik\n- **Timer:** 15 s per fraga; snabbt ratt svar ger tidsbonus\n- **Liv:** 3; fel svar eller timeout kostar ett\n" +
+        "- **Vinst:** alla 10 fragor med liv kvar (+100/liv)\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (ratt, fel)\n" +
+        "- Animation: timer-bar med fargskifte, ratt/fel-blink\n- Highscore i localStorage\n\n## Extension\n- Fler fragor/kategorier\n- Svarighetsniva\n- Blandade svarsordningar\n";
+
+    // ---- Blockpussel / Tetris-typ (HTML5) ----------------------------------------
+    internal static string Html5BlockPuzzle(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Blockpussel</title>
+<style>
+  body{margin:0;background:#0e1018;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #2a3040}
+  #hud{color:#fff;font:15px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Poang <span id='sc'>0</span> &middot; Rader <span id='ln'>0</span>/15 &middot; Niva <span id='lv'>1</span></div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const COLS=10,ROWS=18,T=26,GOAL=15;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=COLS*T+120;c.height=ROWS*T;
+const SHAPES=[
+ [[0,0],[1,0],[0,1],[1,1]],      // O
+ [[-1,0],[0,0],[1,0],[2,0]],     // I
+ [[-1,0],[0,0],[1,0],[0,1]],     // T
+ [[-1,0],[0,0],[0,1],[1,1]],     // S
+ [[0,0],[1,0],[-1,1],[0,1]],     // Z
+ [[-1,0],[0,0],[1,0],[1,1]],     // J
+ [[-1,0],[0,0],[1,0],[-1,1]]];   // L
+const shapeClrs=['#e0d955','#55c8e0','#9a7db8','#7ee055','#e05561','#5a78e0','#e0a355'];
+let grid=[],piece=null,next=null,fallT=0,score=0,lines=0,flashRows=[],flashT=0,anim=0;
+
+function newGrid(){grid=[];for(let y=0;y<ROWS;y++){grid[y]=[];for(let x=0;x<COLS;x++)grid[y][x]=-1;}}
+function spawn(){
+  piece=next||{s:Math.random()*7|0,cells:null,x:4,y:1,rot:0};
+  next={s:Math.random()*7|0,cells:null,x:4,y:1,rot:0};
+  piece.x=4;piece.y=1;piece.rot=0;
+  if(collides(piece,0,0,piece.rot)){PKit.end(false,score);}}
+function cellsOf(p,rot){
+  return SHAPES[p.s].map(([x,y])=>{let cx=x,cy=y;
+    for(let r=0;r<rot;r++){const t=cx;cx=-cy;cy=t;}
+    return [cx,cy];});}
+function collides(p,dx,dy,rot){
+  return cellsOf(p,rot).some(([cx,cy])=>{
+    const gx=p.x+cx+dx,gy=p.y+cy+dy;
+    return gx<0||gx>=COLS||gy>=ROWS||(gy>=0&&grid[gy][gx]>=0);});}
+function lockPiece(){
+  for(const [cx,cy] of cellsOf(piece,piece.rot)){
+    const gy=piece.y+cy,gx=piece.x+cx;
+    if(gy>=0&&gy<ROWS)grid[gy][gx]=piece.s;}
+  PKit.sfx.place();
+  const full=[];
+  for(let y=0;y<ROWS;y++)if(grid[y].every(v=>v>=0))full.push(y);
+  if(full.length){flashRows=full;flashT=14;
+    score+=[0,100,300,500,800][full.length];lines+=full.length;PKit.sfx.coin();}
+  else spawn();}
+function clearFlashed(){
+  for(const y of flashRows){grid.splice(y,1);grid.unshift(Array(COLS).fill(-1));}
+  flashRows=[];
+  if(lines>=GOAL){PKit.sfx.win();PKit.end(true,score+400);return;}
+  spawn();}
+
+document.addEventListener('keydown',e=>{
+  if(!PKit.started||PKit.paused||PKit.ended||!piece||flashRows.length)return;
+  const k=e.key;
+  if(k==='ArrowLeft'||k==='a'){if(!collides(piece,-1,0,piece.rot))piece.x--;}
+  else if(k==='ArrowRight'||k==='d'){if(!collides(piece,1,0,piece.rot))piece.x++;}
+  else if(k==='ArrowUp'||k==='w'){const nr=(piece.rot+1)%4;if(!collides(piece,0,0,nr))piece.rot=nr;}
+  else if(k==='ArrowDown'||k==='s'){if(!collides(piece,0,1,piece.rot))piece.y++;}
+  else if(k===' '){while(!collides(piece,0,1,piece.rot))piece.y++;lockPiece();}
+  if(k.startsWith('Arrow')||k===' ')e.preventDefault();});
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  anim=(anim+1)%30;
+  if(flashRows.length){flashT--;if(flashT<=0)clearFlashed();return;}
+  if(!piece)return;
+  fallT++;
+  const speed=Math.max(6,34-(lines*2|0));
+  if(fallT>=speed){fallT=0;
+    if(!collides(piece,0,1,piece.rot))piece.y++;
+    else lockPiece();}}
+
+function drawCell(gx,gy,s){
+  ctx.fillStyle=shapeClrs[s];ctx.fillRect(gx*T+1,gy*T+1,T-2,T-2);
+  ctx.fillStyle='rgba(255,255,255,.25)';ctx.fillRect(gx*T+1,gy*T+1,T-2,4);}
+function draw(){
+  ctx.fillStyle='#131624';ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle='#0b0d16';ctx.fillRect(0,0,COLS*T,ROWS*T);
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)if(grid[y][x]>=0)drawCell(x,y,grid[y][x]);
+  for(const y of flashRows){ctx.fillStyle=flashT%4<2?'#fff':'#888'; // rad-rensnings-anim
+    ctx.fillRect(0,y*T,COLS*T,T);}
+  if(piece&&!flashRows.length)
+    for(const [cx,cy] of cellsOf(piece,piece.rot))
+      if(piece.y+cy>=0)drawCell(piece.x+cx,piece.y+cy,piece.s);
+  ctx.fillStyle='#fff';ctx.font='13px monospace';ctx.fillText('Nasta:',COLS*T+18,30);
+  if(next)for(const [cx,cy] of cellsOf(next,0)){
+    ctx.fillStyle=shapeClrs[next.s];ctx.fillRect(COLS*T+52+cx*16,60+cy*16,14,14);}
+  document.getElementById('sc').textContent=score;
+  document.getElementById('ln').textContent=lines;
+  document.getElementById('lv').textContent=1+(lines/5|0);
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Blockpussel','Piltangenter/WASD · upp roterar · mellanslag slapper · rensa '+GOAL+' rader','blockpuzzle',()=>{newGrid();spawn();});
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5BlockPuzzleDesignDoc(string prompt) =>
+        "# Blockpussel (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEtt fallande-block-pussel med 7 pjaser, rotation, nasta-pjas-forhandsvisning och okande fart.\n\n" +
+        "## Mekanik\n- **Styrning:** vanster/hoger flyttar, upp roterar, ner mjukfaller, mellanslag hardfaller\n" +
+        "- **Rader:** fulla rader rensas (100/300/500/800 poang); farten okar med rensade rader\n" +
+        "- **Vinst:** 15 rader; **forlust:** stapeln nar toppen\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (las, rensning)\n" +
+        "- Animation: rad-rensnings-blink, glansen pa block\n- Highscore i localStorage\n\n## Extension\n- Hold-funktion\n- Ghost piece\n- Kombo-poang\n";
 }

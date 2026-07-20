@@ -1502,6 +1502,21 @@ public static class HostRole
                 return;
             }
 
+            // "Bygg en app / ett spel" i chatten ska producera FILER via en
+            // riktig agent - inte kod som text tillbaka i chatten (chat-
+            // pipelinens workers kör rena chat-kompletteringar utan verktyg).
+            // Är prompten en byggbegäran och någon Worker har agentläge på,
+            // körs målet som ett assignment där i stället: scaffold, verify,
+            // playtest, filer på disk. Dispatch-fel faller tillbaka till den
+            // vanliga chat-pipelinen så användaren alltid får ett svar.
+            if (IsBuildRequest(req.Prompt))
+            {
+                var agentWorker = workers.FirstOrDefault(w => w.AgentAccess != AgentAccessLevel.Off);
+                if (agentWorker is not null && await TryRunAsAssignmentAsync(
+                        root, req, agentWorker, board, httpFactory, streamHub, hostSettings, ct, log))
+                    return;
+            }
+
             var maxParts = Math.Clamp(req.Parallelism ?? workers.Count, 1, Math.Min(workers.Count, 8));
 
             IReadOnlyList<PlannedWorkItem> plan;
@@ -1598,6 +1613,162 @@ public static class HostRole
             root.CompletedAt = DateTimeOffset.UtcNow;
             board.Save();
             log.LogWarning("planning failed: {Message}", ex.Message);
+        }
+    }
+
+    /// <summary>True when a chat prompt asks to BUILD something (app/game/
+    /// tool). Both a build verb and an artifact noun must appear - "vad är en
+    /// app?" (no verb) or "bygg vidare på resonemanget" (no artifact) don't
+    /// count. Word-START matching so "spelet"/"appen" still hit.</summary>
+    internal static bool IsBuildRequest(string prompt)
+    {
+        var p = (prompt ?? "").ToLowerInvariant();
+        string[] verbs = ["bygg", "skapa", "gör ett", "gör en", "gor ett", "gor en",
+            "implementera", "koda", "utveckla", "programmera", "build", "create", "make", "develop", "implement"];
+        // Substring match for the nouns: Swedish compounds put them at the
+        // END ("plattformsspel", "vaderapp"), so word-boundary matching would
+        // miss the most common phrasings. The verb requirement is what keeps
+        // questions ("vad är en app?") off the agent path.
+        string[] artifacts = ["app", "spel", "game", "webbsida", "website", "hemsida",
+            "program", "verktyg", "tool", "script", "skript", "bot", "api", "tjänst", "tjanst", "cli"];
+        return verbs.Any(v => p.Contains(v)) && artifacts.Any(a => p.Contains(a));
+    }
+
+    /// <summary>Dispatches a build-intent chat goal to an agent-enabled Worker
+    /// as a REAL assignment (files on disk, verify/playtest) and streams the
+    /// agent's steps into the task's live stream. Returns true when the goal
+    /// was handled this way (success OR agent failure - both are answers);
+    /// false only on a dispatch-level failure, so the caller falls back to
+    /// the ordinary chat pipeline.</summary>
+    private static async Task<bool> TryRunAsAssignmentAsync(
+        AgentTask root, SubmitTaskRequest req, NodeInfo worker, TaskBoard board,
+        IHttpClientFactory httpFactory, TaskStreamHub streamHub, HostSettings hostSettings,
+        CancellationToken taskCt, ILogger log)
+    {
+        root.AssignedWorkerId = worker.Id;
+        root.WorkerName = worker.Name;
+        root.RequiredSkill = "coding";
+        root.AssignmentReason = "byggbegäran - körs som agent-assignment (filer, verify) i stället för chat";
+        board.Save();
+
+        worker.ActiveTasks++;
+        worker.Status = NodeStatus.Busy;
+        var startedAt = DateTimeOffset.UtcNow;
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(hostSettings.DispatchTimeoutSeconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(taskCt, timeoutCts.Token);
+
+        try
+        {
+            var client = httpFactory.CreateClient("cluster");
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{worker.PreferredEndpoint}/execute/assignment")
+            {
+                Content = JsonContent.Create(new AssignmentRequest(req.Prompt, req.ModelHint))
+            };
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                log.LogWarning("build-intent dispatch to {Worker} declined ({Status}) - falling back to chat",
+                    worker.Name, (int)response.StatusCode);
+                return false;
+            }
+
+            streamHub.Publish(root.Id, $"[{worker.Name} bygger med agentverktyg...]\n");
+
+            bool? agentSuccess = null;
+            string finalAnswer = "";
+            await using var stream = await response.Content.ReadAsStreamAsync(linked.Token);
+            using var reader = new StreamReader(stream);
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(linked.Token);
+                if (line is null) break;
+                if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+                var json = line[5..].Trim();
+                if (json.Length == 0) continue;
+
+                JsonDocument? doc = null;
+                try { doc = JsonDocument.Parse(json); } catch { /* skip malformed frame */ }
+                if (doc is null) continue;
+                using (doc)
+                {
+                    var el = doc.RootElement;
+                    if (el.TryGetProperty("step", out var step))
+                    {
+                        var kind = step.TryGetProperty("Kind", out var k) ? k.GetString() : null;
+                        var detail = step.TryGetProperty("Detail", out var d) ? d.GetString() ?? "" : "";
+                        switch (kind)
+                        {
+                            case "thinking":
+                                streamHub.Publish(root.Id, detail + "\n");
+                                break;
+                            case "tool_call":
+                                var head = detail.Length > 90 ? detail[..90] + "…" : detail;
+                                streamHub.Publish(root.Id, $"▸ {head}\n");
+                                break;
+                            case "tool_error":
+                                var err = detail.Length > 160 ? detail[..160] + "…" : detail;
+                                streamHub.Publish(root.Id, $"⚠ {err}\n");
+                                break;
+                        }
+                    }
+                    else if (el.TryGetProperty("final", out var final))
+                    {
+                        agentSuccess = final.TryGetProperty("Success", out var s) && s.GetBoolean();
+                        finalAnswer = final.TryGetProperty("FinalAnswer", out var fa) ? fa.GetString() ?? "" : "";
+                        if (final.TryGetProperty("TotalUsage", out var usage))
+                            root.Usage = new TokenUsage(
+                                usage.TryGetProperty("InputTokens", out var it) ? it.GetInt32() : 0,
+                                usage.TryGetProperty("OutputTokens", out var ot) ? ot.GetInt32() : 0);
+                    }
+                }
+            }
+
+            if (agentSuccess is null)
+            {
+                log.LogWarning("build-intent stream from {Worker} ended without a final frame - falling back to chat", worker.Name);
+                return false;
+            }
+
+            var workspaceNote = string.IsNullOrWhiteSpace(worker.WorkspacePath)
+                ? $"\n\n---\nByggt av {worker.Name} med agentverktyg (filerna ligger i workerns arbetsmapp)."
+                : $"\n\n---\nByggt av {worker.Name}. Filerna ligger i: {worker.WorkspacePath}";
+            root.Result = finalAnswer + workspaceNote;
+            root.State = agentSuccess.Value ? TaskState.Completed : TaskState.Failed;
+            root.Error = agentSuccess.Value ? null : "Agenten slutförde inte bygget - se resultatet för detaljer.";
+            RecordHealth(worker, agentSuccess.Value, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
+            NoticeBoard.Add(agentSuccess.Value ? NoticeType.TaskDone : NoticeType.TaskFailed,
+                (agentSuccess.Value ? "Bygge klart: " : "Bygge misslyckades: ") + root.Prompt, root.Id);
+            return true;
+        }
+        catch (OperationCanceledException) when (taskCt.IsCancellationRequested)
+        {
+            root.State = TaskState.Cancelled;
+            root.Error = "Cancelled by operator.";
+            return true;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            root.State = TaskState.Failed;
+            root.Error = $"Bygget tog längre än {hostSettings.DispatchTimeoutSeconds}s och avbröts.";
+            NoticeBoard.Add(NoticeType.TaskFailed, "Bygge timeout: " + root.Prompt, root.Id);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("build-intent dispatch failed ({Message}) - falling back to chat", ex.Message);
+            return false;
+        }
+        finally
+        {
+            streamHub.Complete(root.Id);
+            if (root.State is TaskState.Completed or TaskState.Failed or TaskState.Cancelled)
+            {
+                root.CompletedAt = DateTimeOffset.UtcNow;
+                board.Save();
+            }
+            if (worker.ActiveTasks > 0) worker.ActiveTasks--;
+            worker.Status = worker.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
         }
     }
 

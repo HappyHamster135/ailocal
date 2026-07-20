@@ -40,6 +40,13 @@ public class GameScaffoldProductionTests : IDisposable
         ["ett snake spel som pa gamla nokia", "snake"],
         ["ett idle clicker spel om en guldgruva", "idle"],
         ["ett breakout spel med tegelstenar", "breakout"],
+        ["ett management spel dar man driver en kiosk", "management"],
+        ["en simulator dar man odlar en bondgard", "simulator"],
+        ["ett roguelike dungeon spel med permadeath", "roguelike"],
+        ["ett memory kortspel", "memory"],
+        ["klassisk minesweeper", "minesweeper"],
+        ["en quiz app med fragesport", "quiz"],
+        ["ett tetris-liknande blockpussel", "blockpuzzle"],
     ];
 
     [Theory]
