@@ -44,19 +44,22 @@ public sealed partial class GameScaffoldService
         return new(true, root, engine, files, $"{engine} projekt skapat i {root} ({files.Length} filer).");
     }
 
-    /// <summary>Pick the best engine for a game prompt. Defaults to html5
-    /// (runs in any browser, no install). Escalates to unity/godot only when
-    /// the prompt implies a heavy engine is genuinely needed (3D, or the
-    /// words unity/godot appear). The agent can always override by passing an
-    /// explicit engine.</summary>
+    /// <summary>Pick the engine for a game prompt. Default is GODOT - the
+    /// app's goal is studio-grade games, and a browser toy is not that (user
+    /// report: "alla vet att man inte kan göra ett riktigt studiospel i
+    /// html"). Html5 is chosen only when the prompt explicitly asks for a
+    /// browser/web game - the 16 html5 genre kits are still one word away
+    /// ("webbspel"). Unity when named, or for 3D. The agent can always
+    /// override by passing an explicit engine.</summary>
     static string PickEngine(string prompt)
     {
         var p = (prompt ?? "").ToLowerInvariant();
         if (p.Contains("unity")) return "unity";
-        if (p.Contains("godot")) return "godot";
-        // 3D games are better in a real engine; 2D stays html5 by default.
+        if (p.Contains("html") || p.Contains("browser") || p.Contains("webbläsar") || p.Contains("webblasar")
+            || p.Contains("webbspel") || p.Contains("web game") || p.Contains("i webben"))
+            return "html5";
         if (p.Contains("3d")) return "unity";
-        return "html5";
+        return "godot";
     }
 
     static string[] ScaffoldUnity(string root, string prompt)

@@ -15,7 +15,7 @@ namespace AiLocal.Core.Agent;
 /// </summary>
 public sealed class ProjectVerifier
 {
-    public enum ProjectKind { Unknown, DotNet, Node, Rust, Go, Python, Html5 }
+    public enum ProjectKind { Unknown, DotNet, Node, Rust, Go, Python, Html5, Godot }
 
     /// <summary>Runs a build (and test, when the ecosystem supports a single
     /// verify command) for the detected project under <paramref name="root"/>
@@ -37,6 +37,9 @@ public sealed class ProjectVerifier
         if (kind == ProjectKind.Html5)
             return VerifyHtml5(root);
 
+        if (kind == ProjectKind.Godot)
+            return await VerifyGodotAsync(root, runCommand, ct);
+
         var command = CommandFor(kind);
         var (exitCode, output) = await runCommand(command, root, ct);
         var failures = ExtractFailures(kind, output);
@@ -55,6 +58,13 @@ public sealed class ProjectVerifier
     public ProjectKind Detect(string root)
     {
         if (!Directory.Exists(root)) return ProjectKind.Unknown;
+        // FÖRE .csproj-kollen: Godot-mono-projekt innehåller .csproj men ska
+        // aldrig verifieras med `dotnet build`. Innan denna kind fanns var
+        // Godot-projekt OSYNLIGA för detektorn - kvalitetsgrinden graderade
+        // då ett gammalt HTML5-spel i roten medan agenten byggde Godot i en
+        // undermapp, och godkände fel projekt (sett i användartranskript).
+        if (File.Exists(Path.Combine(root, "project.godot")))
+            return ProjectKind.Godot;
         if (Directory.EnumerateFiles(root, "*.sln", SearchOption.TopDirectoryOnly).Any()
             || Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories).Any())
             return ProjectKind.DotNet;
@@ -109,6 +119,59 @@ public sealed class ProjectVerifier
             : new VerifyResult(false, ProjectKind.Html5,
                 "BUILD/VERIFY FAILED (Html5). JavaScript syntax errors - the game will not run until these are fixed:\n"
                 + string.Join("\n", errors.Take(25)), errors.Count);
+    }
+
+    /// <summary>Verifies a Godot project. Two tiers: a static pass that always
+    /// runs (every res:// path referenced from a scene must exist on disk -
+    /// broken references are the most common agent mistake and crash at load),
+    /// and a full headless import (`godot --headless --path . --quit`) when a
+    /// godot binary is locatable, which surfaces GDScript parse/compile
+    /// errors. Without the binary the static pass alone decides - provisioning
+    /// godot upgrades verification, it is never required for a green gate.</summary>
+    private async Task<VerifyResult> VerifyGodotAsync(
+        string root,
+        Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
+        CancellationToken ct)
+    {
+        var missing = new List<string>();
+        foreach (var scene in Directory.EnumerateFiles(root, "*.tscn", SearchOption.AllDirectories))
+        {
+            foreach (Match match in Regex.Matches(File.ReadAllText(scene), "path=\"res://([^\"]+)\""))
+            {
+                var rel = match.Groups[1].Value;
+                if (!File.Exists(Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar))))
+                    missing.Add($"{Path.GetFileName(scene)}: res://{rel} saknas på disk");
+            }
+        }
+        if (missing.Count > 0)
+            return new VerifyResult(false, ProjectKind.Godot,
+                "BUILD/VERIFY FAILED (Godot). Brutna res://-referenser - scenerna kraschar vid laddning tills de pekar på filer som finns:\n"
+                + string.Join("\n", missing.Take(25)), missing.Count);
+
+        var godot = ToolLocator.Find("godot");
+        if (godot is null)
+            return new VerifyResult(true, ProjectKind.Godot,
+                "BUILD/VERIFY PASSED (Godot, statisk kontroll): alla scenreferenser finns. Provisionera \"godot\" för full headless-verifiering av GDScript.", 0);
+
+        var (exitCode, output) = await runCommand($"\"{godot}\" --headless --path . --quit", root, ct);
+        // Headless loggar ofarliga ERROR-rader (ljuddrivrutin, vulkan) på
+        // maskiner utan grafik - bara skript-/parse-fel är kodens sanning.
+        var errors = output.Split('\n')
+            .Where(l => l.Contains("SCRIPT ERROR", StringComparison.OrdinalIgnoreCase)
+                || l.Contains("Parse Error", StringComparison.OrdinalIgnoreCase)
+                || l.Contains("Compile Error", StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Trim())
+            .Take(25)
+            .ToList();
+        if (errors.Count > 0)
+            return new VerifyResult(false, ProjectKind.Godot,
+                "BUILD/VERIFY FAILED (Godot headless). GDScript-fel - åtgärda och kör verify igen:\n" + string.Join("\n", errors),
+                errors.Count);
+        if (exitCode != 0)
+            return new VerifyResult(false, ProjectKind.Godot,
+                $"BUILD/VERIFY FAILED (Godot headless, exit {exitCode}):\n{Truncate(output, 1200)}", 1);
+        return new VerifyResult(true, ProjectKind.Godot,
+            "BUILD/VERIFY PASSED (Godot headless): projektet importerar utan skriptfel.", 0);
     }
 
     private static string CommandFor(ProjectKind kind) => kind switch

@@ -299,17 +299,27 @@ public static class TeamBuild
     internal static List<TeamTrack> FallbackTracks(string assignment, string workspaceRoot)
     {
         var projectRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
-        var isGame = GameBuilder.DetectEngine(projectRoot) != "unknown"
+        var engine = GameBuilder.DetectEngine(projectRoot);
+        var isGame = engine != "unknown"
             || assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
             || assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
+
+        // Filråden måste följa motorn - "lägg koden i en js-fil" i ett
+        // Godot-projekt skickar utvecklaren åt helt fel håll.
+        var fileHint = engine switch
+        {
+            "godot" => "Lägg ny logik i EGNA .gd-skript/scener och koppla in dem med små riktade edit_file-ändringar i befintliga scener.",
+            "unity" => "Lägg ny logik i EGNA C#-skript under Assets och koppla in dem med små riktade edit_file-ändringar.",
+            _ => "Lägg ny logik i en EGEN js-fil och länka in den med en <script src>-rad via edit_file."
+        };
 
         return isGame
             ?
             [
-                new("Innehåll och nivåer", "Utöka spelet med mer innehåll: fler nivåer/vågor/varianter med stigande svårighetsgrad. Lägg ny logik i en egen js-fil (t.ex. levels.js) och länka in den med en <script src>-rad via edit_file."),
-                new("Ljud och effekter", "Förbättra ljudbilden och effekterna: WebAudio-ljud för varje viktig händelse och visuella effekter vid poäng, träffar och game over. Lägg koden i en egen js-fil (t.ex. effects.js) och länka in den via edit_file."),
-                new("Meny och polish", "Förbättra menyer och känsla: startskärm med instruktioner, paus, game over med highscore och konsekvent färgtema. Gör små riktade edit_file-ändringar - skriv aldrig om hela index-filen."),
-                new("Mekanik och variation", "Lägg till en ny spelmekanik som ger djup (power-ups, combo eller liknande) kopplad till poängsystemet. Lägg koden i en egen js-fil (t.ex. powerups.js) och länka in den via edit_file.")
+                new("Innehåll och nivåer", $"Utöka spelet med mer innehåll: fler nivåer/vågor/varianter med stigande svårighetsgrad. {fileHint}"),
+                new("Ljud och effekter", $"Förbättra ljudbilden och effekterna: ljud för varje viktig händelse och visuella effekter vid poäng, träffar och game over. {fileHint}"),
+                new("Meny och polish", $"Förbättra menyer och känsla: startskärm med instruktioner, paus, game over med highscore och konsekvent färgtema. Gör små riktade edit_file-ändringar - skriv aldrig om hela filer andra spår rör."),
+                new("Mekanik och variation", $"Lägg till en ny spelmekanik som ger djup (power-ups, combo eller liknande) kopplad till poängsystemet. {fileHint}")
             ]
             :
             [

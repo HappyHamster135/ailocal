@@ -110,7 +110,8 @@ public static class AssignmentQualityGate
         " och hittade följande problem:\n\n" + findings.Report +
         "\n\nÅtgärda problemen i de BEFINTLIGA filerna (edit_file/write_file), kör verify igen, " +
         "och avsluta först när allt är grönt. Skapa inte ett nytt projekt. " +
-        "Saknas ett verktyg (python, node, ...) - installera det med provision och försök igen.";
+        "Saknas ett verktyg (python, node, godot, ...) - installera det med provision och försök igen. " +
+        "VIKTIGT: anropa verktygen på riktigt via tool-anrop - JSON eller kommandon skrivna som TEXT i svaret kör ingenting.";
 
     private static string FirstLine(string text)
     {

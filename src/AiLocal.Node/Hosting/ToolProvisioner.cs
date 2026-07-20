@@ -52,6 +52,17 @@ public sealed class ToolProvisioner
             null,
             "Godot_v4.3-stable_mono_win64/Godot_v4.3-stable_mono_win64.exe",
             ""),
+        // Godots exportmallar (.tpz = zip) - KRÄVS för att `godot --headless
+        // --export-release` ska kunna producera en körbar exe. Versionen
+        // måste matcha godot-posten ovan exakt; destinationen tvingas till
+        // %APPDATA%\Godot\export_templates\4.3.stable.mono (se ProvisionAsync)
+        // eftersom det är den enda plats Godot letar på.
+        ["godot-templates"] = new("Godot exportmallar 4.3 (mono)",
+            "https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_mono_export_templates.tpz",
+            null,
+            null,
+            "",
+            ExtractAllTo: ""),
         // Blender portable: official developer site (no installer).
         ["blender"] = new("Blender (portable)",
             "https://download.blender.org/release/Blender4.3/blender-4.3.0-windows-x64.zip",
@@ -134,6 +145,13 @@ public sealed class ToolProvisioner
         var dest = string.IsNullOrWhiteSpace(destinationDir)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiLocal", "tools")
             : destinationDir;
+        // Exportmallarna har EN giltig plats - Godot letar bara i
+        // %APPDATA%\Godot\export_templates\<version>. Anroparens destination
+        // ignoreras medvetet, annars hamnar mallarna där ingen hittar dem.
+        if (key.Equals("godot-templates", StringComparison.OrdinalIgnoreCase))
+            dest = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Godot", "export_templates", "4.3.stable.mono");
         Directory.CreateDirectory(dest);
 
         CrashLog.Write("ProvisionStart", new Exception($"fetching {spec.Display} from pinned trusted source: {spec.TrustedUrl}"));
@@ -180,6 +198,16 @@ public sealed class ToolProvisioner
                 Directory.CreateDirectory(target);
                 ZipFile.ExtractToDirectory(zipPath, target, overwriteFiles: true);
                 TryDelete(zipPath);
+
+                // .tpz-arkivet har en inre "templates/"-mapp men Godot förväntar
+                // sig filerna DIREKT i versionsmappen - platta ut.
+                var inner = Path.Combine(target, "templates");
+                if (key.Equals("godot-templates", StringComparison.OrdinalIgnoreCase) && Directory.Exists(inner))
+                {
+                    foreach (var file in Directory.EnumerateFiles(inner))
+                        File.Move(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+                    try { Directory.Delete(inner, recursive: true); } catch { /* best effort */ }
+                }
             }
             else if (spec.ArchiveEntry is not null)
             {

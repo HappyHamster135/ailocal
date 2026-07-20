@@ -103,12 +103,23 @@ public class AppScaffoldTests : IDisposable
     }
 
     [Fact]
-    public void GameScaffold_Auto_PicksHtml5ByDefault()
+    public void GameScaffold_Auto_PicksGodotByDefault()
     {
+        // v1.33.0: spel byggs i en riktig motor som standard - html5 kräver
+        // uttryckliga webbord ("webbspel", "browser", ...).
         var svc = new GameScaffoldService();
         var result = svc.Scaffold("auto", "en enkel 2d-plattformare", _dir);
         Assert.True(result.Success, result.Output);
+        Assert.Equal("godot", result.Engine);
+        Assert.True(File.Exists(Path.Combine(_dir, "project.godot")));
+    }
+
+    [Fact]
+    public void GameScaffold_Auto_WebWordsStillPickHtml5()
+    {
+        var svc = new GameScaffoldService();
+        var result = svc.Scaffold("auto", "ett enkelt webbspel med snake", _dir);
+        Assert.True(result.Success, result.Output);
         Assert.Equal("html5", result.Engine);
-        Assert.True(File.Exists(Path.Combine(_dir, "index.html")));
     }
 }

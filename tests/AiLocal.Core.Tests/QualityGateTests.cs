@@ -167,7 +167,8 @@ public class QualityGateTests : IDisposable
         Assert.True(r.Success, r.Output);
         Assert.NotEqual(Path.GetFullPath(_dir), Path.GetFullPath(r.Path));
         Assert.StartsWith(Path.GetFullPath(_dir), Path.GetFullPath(r.Path));
-        Assert.True(File.Exists(Path.Combine(r.Path, "index.html")));
+        // auto = godot sedan v1.33.0 - undermappen ska vara ett riktigt projekt.
+        Assert.True(File.Exists(Path.Combine(r.Path, "project.godot")));
     }
 
     [Fact]

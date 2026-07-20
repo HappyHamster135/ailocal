@@ -1694,6 +1694,8 @@ internal static class Dashboard
                     </select>
                     <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
                     <input id="parallelism" type="number" min="1" max="32" value="4">
+                    <label class="small" for="workerSelect" title="Vilken Worker uppdraget körs på - filerna hamnar på DEN datorn. Auto låter Hosten välja.">Worker</label>
+                    <select id="workerSelect"><option value="">Auto</option></select>
                     <label class="check-field small" style="min-height:28px" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
                       <input id="assignmentMode" type="checkbox"> Agentläge (kör på Worker)
                     </label>
@@ -2754,6 +2756,21 @@ internal static class Dashboard
               <div class="small">${esc(trunc(providers, 52))}</div>
             </div>`;
           }).join('') : '<div class="empty">Inga Workers har registrerats ännu.</div>';
+
+          // Worker-väljaren i composern speglar agentkapabla online-workers.
+          // Egen diff-guard så ~3s-refreshen inte nollställer ett pågående val.
+          const workerSel = $('workerSelect');
+          if (workerSel) {
+            const optionsHtml = '<option value="">Auto</option>' + state.nodes
+              .filter(n => statusText(n.status) !== 'Offline' && n.agentAccess && n.agentAccess !== 'Off')
+              .map(n => `<option value="${esc(n.id)}">${esc(n.name)}</option>`).join('');
+            if (workerSel._html !== optionsHtml) {
+              const previous = workerSel.value;
+              workerSel.innerHTML = optionsHtml;
+              workerSel._html = optionsHtml;
+              workerSel.value = previous;
+            }
+          }
 
           const listEl = $('nodes');
           if (listEl._html !== listHtml) {
@@ -5481,7 +5498,7 @@ internal static class Dashboard
           const teamSize = Math.min(4, Math.max(2, Number($('parallelism').value) || 2));
           state.assignmentMessages.push({ role: 'user', content: goalText, isAssignment: true });
           try {
-            await runPlanSubtask({ title: `Team-bygge (${teamSize} agenter)` }, goalText, null, teamSize);
+            await runPlanSubtask({ title: `Team-bygge (${teamSize} agenter)` }, goalText, $('workerSelect')?.value || null, teamSize);
           } finally {
             renderMessages();
             syncComposerLock();
@@ -5542,7 +5559,10 @@ internal static class Dashboard
           const sequential = included.filter(s => !s.independent);
           const independent = included.filter(s => s.independent);
 
-          let pinnedWorkerId = null;
+          // Operatören kan välja worker i composern - då hamnar FILERNA på
+          // den datorn (rapporterat: "filerna hamnade inte på host-datorn").
+          // Auto (tomt) låter Hosten välja som förut.
+          let pinnedWorkerId = $('workerSelect')?.value || null;
           let stoppedEarly = false;
           const completedSummaries = [];
 
@@ -5569,7 +5589,7 @@ internal static class Dashboard
             independent.forEach(s => { s.status = 'running'; });
             renderMessages();
             await Promise.all(independent.map(async subtask => {
-              const outcome = await runPlanSubtask(subtask, subtask.description, null);
+              const outcome = await runPlanSubtask(subtask, subtask.description, $('workerSelect')?.value || null);
               subtask.status = outcome.success ? 'done' : 'failed';
               renderMessages();
             }));

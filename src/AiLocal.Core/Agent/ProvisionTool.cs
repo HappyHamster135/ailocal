@@ -14,8 +14,8 @@ public static class ProvisionTool
     // acts on this - it accepts ONLY a tool NAME, never a URL.
     public static readonly ToolDefinition Definition = new(
         "provision",
-        "Provision a build tool this Worker is missing so a task can complete: python, node (npm), git, java, dotnet, godot, blender or unity. Pass the tool NAME only - never a URL. The Worker downloads it from a pinned trusted official source and installs it, and returns the absolute executable path. Use whenever a build/verify/command fails because the tool is missing (e.g. exit 9009 'command not found' on Windows) - do NOT skip the step, provision and retry instead.",
+        "Provision a build tool this Worker is missing so a task can complete: python, node (npm), git, java, dotnet, godot, godot-templates, blender or unity. Pass the tool NAME only - never a URL. The Worker downloads it from a pinned trusted official source and installs it, and returns the absolute executable path. Use whenever a build/verify/command fails because the tool is missing (e.g. exit 9009 'command not found' on Windows) - do NOT skip the step, provision and retry instead. For Godot games that must export a runnable exe: provision 'godot' AND 'godot-templates' (the export templates), then run build_game.",
         """
-        {"type":"object","properties":{"tool":{"type":"string","description":"Tool name to provision: 'python', 'node', 'git', 'java', 'dotnet', 'godot', 'blender' or 'unity'. No URLs."},"destination":{"type":"string","description":"Optional folder to install into (defaults to the Worker's local app-data tools dir)."}},"required":["tool"]}
+        {"type":"object","properties":{"tool":{"type":"string","description":"Tool name to provision: 'python', 'node', 'git', 'java', 'dotnet', 'godot', 'godot-templates', 'blender' or 'unity'. No URLs."},"destination":{"type":"string","description":"Optional folder to install into (defaults to the Worker's local app-data tools dir; godot-templates always installs to Godot's own template folder)."}},"required":["tool"]}
         """);
 }
