@@ -1697,6 +1697,9 @@ internal static class Dashboard
                     <label class="check-field small" style="min-height:28px" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
                       <input id="assignmentMode" type="checkbox"> Agentläge (kör på Worker)
                     </label>
+                    <label class="check-field small" style="min-height:28px" title="PÅ = uppdraget byggs av ett team: en arkitekt delar upp arbetet i oberoende spår, parallella utvecklaragenter bygger i varsin git-worktree, och grenarna mergas ihop. Parallellitet-fältet styr teamstorleken (2-4). Kräver Agentläge.">
+                      <input id="teamMode" type="checkbox"> Team-läge
+                    </label>
                   </div>
                   <div class="composer-tools">
                     <span class="composer-hint">Enter skickar · Shift+Enter ny rad</span>
@@ -5325,6 +5328,13 @@ internal static class Dashboard
             return;
           }
           if ($('assignmentMode').checked) {
+            // Team-läge kör målet som ETT uppdrag där NODEN gör uppdelningen
+            // (arkitekt -> parallella worktree-agenter -> merge) - planeraren
+            // hoppas över, den skulle bara duplicera arkitektens jobb.
+            if ($('teamMode')?.checked) {
+              await runTeamAssignment(prompt);
+              return;
+            }
             await planAndRunGoal(prompt);
             return;
           }
@@ -5463,6 +5473,21 @@ internal static class Dashboard
           </article>`;
         }
 
+        // Team-läge: hela målet skickas som ETT uppdrag med teamSize satt -
+        // noden kör arkitekt -> parallella worktree-agenter -> merge själv.
+        async function runTeamAssignment(goalText) {
+          $('prompt').value = '';
+          $('composerNotice').className = 'notice';
+          const teamSize = Math.min(4, Math.max(2, Number($('parallelism').value) || 2));
+          state.assignmentMessages.push({ role: 'user', content: goalText, isAssignment: true });
+          try {
+            await runPlanSubtask({ title: `Team-bygge (${teamSize} agenter)` }, goalText, null, teamSize);
+          } finally {
+            renderMessages();
+            syncComposerLock();
+          }
+        }
+
         // Assignment mode plans before it runs: the goal gets broken into a
         // reviewable list of subtasks (POST /api/goal-plan) instead of being
         // handed straight to one Worker as one big vague instruction. The
@@ -5559,7 +5584,7 @@ internal static class Dashboard
         // "worker" frame /api/assignment now sends first, so a sequential
         // group's later steps can pin to the same Worker the first one landed
         // on (see HostRole's /api/assignment WorkerId handling).
-        async function runPlanSubtask(subtask, assignmentText, workerId) {
+        async function runPlanSubtask(subtask, assignmentText, workerId, teamSize) {
           const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title, startedAt: Date.now(), steps: [] };
           state.assignmentMessages.push(stepMsg);
           state.assignmentStreamLive = true;
@@ -5577,7 +5602,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: assignmentText, workerId })
+              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null })
             });
 
             if (!response.ok || !response.body) {

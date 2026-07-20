@@ -44,6 +44,21 @@ public class GitService
         return exitCode == 0;
     }
 
+    /// <summary>Initializes a fresh repo with a local commit identity, so
+    /// commits work even on machines where git has no global user configured
+    /// (team builds must never die on "Please tell me who you are"). No-op
+    /// (true) when the folder already is a repo.</summary>
+    public virtual async Task<bool> InitAsync(string folderPath, CancellationToken ct = default)
+    {
+        if (await IsRepoAsync(folderPath, ct)) return true;
+        Directory.CreateDirectory(folderPath);
+        var (initExit, _, _) = await RunGitAsync(folderPath, ["init"], ct);
+        if (initExit != 0) return false;
+        await RunGitAsync(folderPath, ["config", "user.name", "AiLocal Agent"], ct);
+        await RunGitAsync(folderPath, ["config", "user.email", "agent@ailocal.local"], ct);
+        return true;
+    }
+
     public virtual async Task<GitStatus> GetStatusAsync(string folderPath, CancellationToken ct = default)
     {
         if (!await IsRepoAsync(folderPath, ct))
@@ -125,6 +140,14 @@ public class GitService
     /// (the main repo, not a worktree). Used before merging a task branch back
     /// into its base - the caller ensures repoPath is left on the base
     /// branch, so the subsequent merge lands in the right place.</summary>
+    /// <summary>Aborts an in-progress conflicted merge, restoring the repo to
+    /// its pre-merge state. Team builds use this before redoing a conflicting
+    /// track sequentially - without it, every later merge would fail too.</summary>
+    public virtual async Task AbortMergeAsync(string repoPath, CancellationToken ct = default)
+    {
+        await RunGitAsync(repoPath, ["merge", "--abort"], ct);
+    }
+
     public virtual async Task<(bool Success, string Output)> CheckoutAsync(
         string repoPath, string branch, CancellationToken ct = default)
     {

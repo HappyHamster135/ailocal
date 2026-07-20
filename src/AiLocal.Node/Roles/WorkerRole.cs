@@ -16,7 +16,7 @@ namespace AiLocal.Node.Roles;
 /// from the same plan that need to land on the same machine to share a
 /// workspace. The Worker itself ignores it; a Worker only ever executes on
 /// itself.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false);
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null);
 
 /// <summary>Response from POST /execute/isolation/create: the freshly created
 /// worktree+branch for one isolated task.</summary>
@@ -359,10 +359,13 @@ public static class WorkerRole
                     proc.WaitForExit((int)TimeSpan.FromMinutes(30).TotalMilliseconds);
                     return Task.FromResult((proc.ExitCode, $"exit code: {proc.ExitCode}\n{so}\n{se}"));
                 };
-            var executor = new AgentToolExecutor(accessLevel, workspaceRoot, gate, settings.Worker.AllowInternet,
+            // Fabrik i stället för en enda instans: team-läget kör en executor
+            // PER WORKTREE (varsin rot, varsitt projektminne) - vanliga
+            // körningar tar en enda för workspaceRoot precis som förut.
+            AgentToolExecutor BuildExecutor(string rootDir) => new(accessLevel, rootDir, gate, settings.Worker.AllowInternet,
                 new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
                 settings.Worker.ProjectMemoryEnabled ? new CodebaseIndex() : null,
-                settings.Worker.ProjectMemoryEnabled ? new ProjectMemory(workspaceRoot) : null,
+                settings.Worker.ProjectMemoryEnabled ? new ProjectMemory(rootDir) : null,
                 provisioner: async (tool, dest, provCt) =>
                 {
                     var r = await new ToolProvisioner().ProvisionAsync(tool, dest, provCt);
@@ -382,7 +385,7 @@ public static class WorkerRole
                 taskDelegator: (subPrompt, subSystem, delCt) =>
                 {
                     var delegator = new TaskDelegator(provider.CompleteAsync, accessLevel,
-                        workspaceRoot, settings.Worker.AllowInternet,
+                        rootDir, settings.Worker.AllowInternet,
                         approvalGate: gate, commandGuard: new CommandGuard(settings.Worker.CommandGuard, settings.Worker.BlockedCommands),
                         provisioner: (tool, dest, provCt) => new ToolProvisioner().ProvisionAsync(tool, dest, provCt).ContinueWith(t => (t.Result.Success, t.Result.Output), TaskContinuationOptions.OnlyOnRanToCompletion),
                         gameScaffolder: (engine, p, root, scafCt) => { var r = new GameScaffoldService().Scaffold(engine, p, root); return Task.FromResult((r.Success, r.Output)); },
@@ -432,6 +435,7 @@ public static class WorkerRole
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
                     return (r.Success, FormatVisionResult(r));
                 });
+            var executor = BuildExecutor(workspaceRoot);
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
             // Deterministic floor: a BUILD assignment on an EMPTY workspace
@@ -496,7 +500,43 @@ public static class WorkerRole
             var instructions = await ProjectInstructionsReader.TryReadAsync(workspaceRoot, ct);
             var system = AgentSystemPrompt.Build(workspaceRoot, accessLevel, instructions);
 
-            var result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+            // ---- Team-läge: arkitekt -> parallella worktree-agenter -> merge.
+            // Faller tillbaka till en ensam agent när git saknas/repo inte
+            // gick att skapa (TeamBuild returnerar null) - team-läget får
+            // aldrig göra ett bygge OMÖJLIGT som annars hade fungerat.
+            AgentRunResult result;
+            if (req.TeamSize is >= 2 && buildIntent)
+            {
+                // SSE-strömmen är EN ström - parallella spår måste serialisera
+                // sina skrivningar, annars flätas frames sönder.
+                var emitLock = new SemaphoreSlim(1, 1);
+                Func<AgentStep, Task> teamEmit = async step =>
+                {
+                    await emitLock.WaitAsync(ct);
+                    try { await emitAgentStep(step); }
+                    finally { emitLock.Release(); }
+                };
+                await teamEmit(new AgentStep("thinking",
+                    $"Team-läge: upp till {Math.Clamp(req.TeamSize.Value, 2, 4)} parallella utvecklare i varsin git-worktree."));
+                var gitService = new GitService();
+                var teamResult = await TeamBuild.RunAsync(
+                    assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, req.ModelHint,
+                    system, provider.CompleteAsync, BuildExecutor, teamEmit,
+                    gitService, new GitIsolationService(gitService), ct);
+                // null = git saknas/repo gick inte att skapa ELLER inget spår
+                // producerade ändringar (TeamBuild har redan förklarat vilket
+                // i strömmen) - den ensamma agenten med kvalitetsgrindens
+                // tvingande rundor tar över.
+                if (teamResult is null)
+                    await teamEmit(new AgentStep("thinking",
+                        "Team-läget slutförde inte bygget - kör som en ensam agent i stället."));
+                result = teamResult
+                    ?? await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+            }
+            else
+            {
+                result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+            }
 
             // ---- Nodens kvalitetsgrind --------------------------------------
             // Modellens eget "klart" räcker inte: noden kör verify + playtest

@@ -1,0 +1,384 @@
+using System.Text;
+using System.Text.Json;
+using AiLocal.Core.Agent;
+using AiLocal.Core.Contracts;
+using AiLocal.Core.Providers;
+
+namespace AiLocal.Node.Hosting;
+
+/// <summary>One developer's slice of a team build.</summary>
+public sealed record TeamTrack(string Title, string Description);
+
+/// <summary>
+/// The "small company" build: an ARCHITECT model call splits the remaining
+/// work into independent tracks, one DEVELOPER agent per track runs in its
+/// own git worktree (true filesystem isolation - GitIsolationService), the
+/// branches merge back one by one, and any track whose merge conflicts is
+/// REDONE sequentially on top of the merged result so the build always
+/// converges. The caller's quality gate (AssignmentQualityGate) then judges
+/// the merged whole exactly like a single-agent run.
+///
+/// Runs on ONE worker: worktrees need a shared repo, and a cross-machine
+/// team would need remote sync this deliberately does not have yet. With a
+/// cloud provider the tracks genuinely run in parallel; with one local GPU
+/// they interleave - correctness is the same either way.
+/// </summary>
+public static class TeamBuild
+{
+    private const int MaxTeamSize = 4;
+
+    /// <summary>Returns null when a team build is impossible here (no git, or
+    /// the repo could not be initialized/committed) - the caller falls back to
+    /// the ordinary single-agent run, so team mode can never BREAK a build.</summary>
+    public static async Task<AgentRunResult?> RunAsync(
+        string assignment,
+        int teamSize,
+        string workspaceRoot,
+        AgentAccessLevel accessLevel,
+        string? modelHint,
+        string system,
+        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
+        Func<string, AgentToolExecutor> executorFor,
+        Func<AgentStep, Task> emit,
+        GitService git,
+        GitIsolationService isolation,
+        CancellationToken ct)
+    {
+        teamSize = Math.Clamp(teamSize, 2, MaxTeamSize);
+
+        // ---- 1. Grund: repo + baslinje ----------------------------------
+        if (!await git.InitAsync(workspaceRoot, ct))
+            return null;
+        EnsureGitignore(workspaceRoot);
+        await git.CommitAsync(workspaceRoot, "AiLocal team: baslinje", ct);
+        // Ingen gren = ingen commit gick att göra (tom mapp, trasig git-
+        // identitet, ...) - worktrees kräver en riktig HEAD att utgå från.
+        if (await git.GetCurrentBranchAsync(workspaceRoot, ct) is null)
+            return null;
+
+        // ---- 2. Arkitekten ----------------------------------------------
+        await emit(new AgentStep("tool_call", "teamarkitekt (delar upp arbetet i oberoende spår)"));
+        var tracks = await PlanTracksAsync(assignment, workspaceRoot, teamSize, modelHint, complete, ct)
+            ?? FallbackTracks(assignment, workspaceRoot);
+        tracks = tracks.Take(teamSize).ToList();
+        if (tracks.Count < 2)
+            tracks = FallbackTracks(assignment, workspaceRoot).Take(teamSize).ToList();
+        await emit(new AgentStep("tool_result",
+            string.Join("\n", tracks.Select((t, i) => $"Spår {i + 1}: {t.Title} - {t.Description}"))));
+
+        // ---- 3. Worktrees + parallella utvecklare -----------------------
+        var runs = new List<TrackRun>();
+        foreach (var track in tracks)
+        {
+            var iso = await isolation.CreateAsync(workspaceRoot, track.Title, ct: ct);
+            runs.Add(new TrackRun(track, iso));
+        }
+
+        var iterations = 0;
+        var inputTokens = 0;
+        var outputTokens = 0;
+        var usageLock = new object();
+        void AddUsage(AgentRunResult r)
+        {
+            lock (usageLock)
+            {
+                iterations += r.Iterations;
+                inputTokens += r.TotalUsage.InputTokens;
+                outputTokens += r.TotalUsage.OutputTokens;
+            }
+        }
+
+        await Task.WhenAll(runs.Where(r => r.Iso is not null).Select(async run =>
+        {
+            var loop = new AgentLoop(complete, executorFor(run.Iso!.WorktreePath));
+            Func<AgentStep, Task> trackEmit = step =>
+                emit(new AgentStep(step.Kind, $"[{run.Track.Title}] {step.Detail}"));
+            var result = await loop.RunAsync(
+                TrackPrompt(assignment, run.Track, tracks.Count), accessLevel, modelHint,
+                onStep: trackEmit, ct, system: system);
+            AddUsage(result);
+
+            // Svaga modeller "svarar" gärna med prosa och noll verktygsanrop
+            // (observerat live: båda spåren skrev ingenting). Samma filosofi
+            // som kvalitetsgrindens skrev-inget-underkännande, fast per spår:
+            // en tvingande korrigeringsrunda med historiken kvar.
+            if (result.Success && !await git.HasUncommittedChangesAsync(run.Iso.WorktreePath, ct))
+            {
+                await trackEmit(new AgentStep("tool_error",
+                    "spåret skrev inga filer - en tvingande korrigeringsrunda körs."));
+                result = await loop.RunAsync(
+                    "Du skrev inga filer alls. Genomför ditt spår PÅ RIKTIGT nu: skapa/ändra filerna med " +
+                    "write_file/edit_file, kör verify, och avsluta först när ändringarna ligger på disk. " +
+                    "Svara inte med text, planer eller frågor - de kastas bort.",
+                    accessLevel, modelHint, onStep: trackEmit, ct, history: result.Messages, system: system);
+                AddUsage(result);
+            }
+
+            run.Result = result;
+            // Committa spårets arbete i worktreet så merge har något att ta.
+            var commit = await isolation.CommitAsync(run.Iso.TaskId, $"AiLocal team: {run.Track.Title}");
+            run.ProducedChanges = commit.Success;
+        }));
+
+        // ---- 4. Merge, spår för spår ------------------------------------
+        var summary = new StringBuilder();
+        var redo = new List<TeamTrack>();
+        foreach (var run in runs)
+        {
+            if (run.Iso is null)
+            {
+                // Worktreet kunde inte skapas - kör spåret sekventiellt efteråt.
+                redo.Add(run.Track);
+                continue;
+            }
+            if (run.Result is not { Success: true } || !run.ProducedChanges)
+            {
+                // En tom gren "mergar" alltid (Already up to date) - att kalla
+                // det "klart" vore exakt det falska-Klar-mönster grinden finns
+                // för att stoppa. Ärlig rapport + kassering i stället.
+                var reason = run.Result is { Success: true }
+                    ? "producerade inga ändringar"
+                    : "utvecklaren misslyckades";
+                await emit(new AgentStep("tool_error",
+                    $"[{run.Track.Title}] {reason} - spåret kasseras."));
+                await isolation.DiscardAsync(run.Iso.TaskId, ct);
+                summary.AppendLine($"- {run.Track.Title}: {reason}.");
+                continue;
+            }
+
+            var (merged, mergeOutput) = await isolation.MergeAsync(run.Iso.TaskId, ct);
+            if (merged)
+            {
+                summary.AppendLine($"- {run.Track.Title}: klart och mergat.");
+            }
+            else
+            {
+                // Konflikt: kasta grenen och GÖR OM spåret ovanpå det som
+                // redan mergats - sekventiellt kan aldrig kollidera, så
+                // bygget konvergerar alltid.
+                await emit(new AgentStep("tool_error",
+                    $"[{run.Track.Title}] merge-konflikt ({FirstLine(mergeOutput)}) - spåret görs om ovanpå det mergade resultatet."));
+                await git.AbortMergeAsync(workspaceRoot, ct);
+                await isolation.DiscardAsync(run.Iso.TaskId, ct);
+                redo.Add(run.Track);
+            }
+        }
+
+        // ---- 5. Redo-på-toppen ------------------------------------------
+        foreach (var track in redo)
+        {
+            if (ct.IsCancellationRequested) break;
+            await emit(new AgentStep("tool_call", $"gör om spåret \"{track.Title}\" ovanpå det mergade projektet"));
+            var loop = new AgentLoop(complete, executorFor(workspaceRoot));
+            var result = await loop.RunAsync(
+                RedoPrompt(assignment, track), accessLevel, modelHint,
+                onStep: step => emit(new AgentStep(step.Kind, $"[{track.Title}] {step.Detail}")),
+                ct, system: system);
+            AddUsage(result);
+            // Samma ärlighetsregel som för worktree-spåren: bara ett omtag som
+            // faktiskt committade ändringar får kallas klart.
+            var redoCommit = result.Success
+                ? await git.CommitAsync(workspaceRoot, $"AiLocal team (redo): {track.Title}", ct)
+                : new GitCommitResult(false, "");
+            summary.AppendLine(result.Success && redoCommit.Success
+                ? $"- {track.Title}: klart (omgjort sekventiellt)."
+                : $"- {track.Title}: misslyckades även i omtaget.");
+        }
+
+        var landed = summary.ToString().Split('\n').Count(l => l.Contains(": klart"));
+        if (landed == 0)
+        {
+            // Hela teamet gick bet - ge inte upp bygget: null låter anroparen
+            // köra om som EN agent, där kvalitetsgrindens tvingande fixrundor
+            // och eskalering tar vid. Teamet får aldrig ge ett sämre utfall
+            // än vad en ensam agent hade gett.
+            await emit(new AgentStep("tool_error",
+                "Inget spår producerade ändringar - teamet avbryts och bygget körs som en ensam agent i stället."));
+            return null;
+        }
+        var final = $"Team-bygge med {tracks.Count} spår:\n{summary.ToString().TrimEnd()}";
+        return new AgentRunResult(
+            true, final,
+            [new AgentStep("done", final)],
+            iterations,
+            [],
+            new TokenUsage(inputTokens, outputTokens));
+    }
+
+    private sealed class TrackRun(TeamTrack track, IsolatedTask? iso)
+    {
+        public TeamTrack Track { get; } = track;
+        public IsolatedTask? Iso { get; } = iso;
+        public AgentRunResult? Result { get; set; }
+        public bool ProducedChanges { get; set; }
+    }
+
+    // ---- Arkitekten -----------------------------------------------------
+
+    private const string ArchitectSystem = """
+        You are the ARCHITECT of a small development team. Split the user's
+        build request into INDEPENDENT work tracks, one per developer. The
+        project base already exists - the tracks describe how to EXTEND it.
+
+        Rules:
+        - Tracks must be as file-independent as possible (different features,
+          different files). Never give two tracks the same responsibility.
+        - Each description tells ONE developer concretely what to build, in
+          the same language the user wrote in.
+        - Respond with ONLY this JSON, nothing else:
+          {"tracks":[{"title":"...","description":"..."}]}
+        """;
+
+    private static async Task<List<TeamTrack>?> PlanTracksAsync(
+        string assignment, string workspaceRoot, int teamSize, string? modelHint,
+        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, CancellationToken ct)
+    {
+        try
+        {
+            var projectRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
+            var files = ListProjectFiles(projectRoot);
+            var prompt = $"Build request: {assignment}\n\nCurrent project files:\n{files}\n\nSplit the remaining work into exactly {teamSize} independent tracks.";
+            var response = await complete(new ChatRequest
+            {
+                System = ArchitectSystem,
+                Messages = [new ChatMessage("user", prompt)],
+                ModelHint = modelHint,
+                MaxTokens = 800
+            }, ct);
+            if (!response.IsSuccess || string.IsNullOrWhiteSpace(response.Response!.Content))
+                return null;
+            return ParseTracks(response.Response.Content);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static List<TeamTrack>? ParseTracks(string content)
+    {
+        var text = content.Trim();
+        if (text.StartsWith("```"))
+        {
+            var firstNewline = text.IndexOf('\n');
+            var lastFence = text.LastIndexOf("```", StringComparison.Ordinal);
+            if (firstNewline >= 0 && lastFence > firstNewline)
+                text = text[(firstNewline + 1)..lastFence].Trim();
+        }
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(text[start..(end + 1)]);
+            if (!doc.RootElement.TryGetProperty("tracks", out var tracksEl) || tracksEl.ValueKind != JsonValueKind.Array)
+                return null;
+            var tracks = new List<TeamTrack>();
+            foreach (var el in tracksEl.EnumerateArray())
+            {
+                var title = el.TryGetProperty("title", out var t) ? t.GetString() : null;
+                var description = el.TryGetProperty("description", out var d) ? d.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(description))
+                    tracks.Add(new TeamTrack(title.Trim(), description.Trim()));
+            }
+            return tracks.Count >= 2 ? tracks : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Deterministic floor, same philosophy as the pre-scaffold: a
+    /// weak model that can't produce parseable JSON still gets a sensible
+    /// team split instead of killing the whole team run.</summary>
+    internal static List<TeamTrack> FallbackTracks(string assignment, string workspaceRoot)
+    {
+        var projectRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
+        var isGame = GameBuilder.DetectEngine(projectRoot) != "unknown"
+            || assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
+            || assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
+
+        return isGame
+            ?
+            [
+                new("Innehåll och nivåer", "Utöka spelet med mer innehåll: fler nivåer/vågor/varianter med stigande svårighetsgrad. Lägg ny logik i en egen js-fil (t.ex. levels.js) och länka in den med en <script src>-rad via edit_file."),
+                new("Ljud och effekter", "Förbättra ljudbilden och effekterna: WebAudio-ljud för varje viktig händelse och visuella effekter vid poäng, träffar och game over. Lägg koden i en egen js-fil (t.ex. effects.js) och länka in den via edit_file."),
+                new("Meny och polish", "Förbättra menyer och känsla: startskärm med instruktioner, paus, game over med highscore och konsekvent färgtema. Gör små riktade edit_file-ändringar - skriv aldrig om hela index-filen."),
+                new("Mekanik och variation", "Lägg till en ny spelmekanik som ger djup (power-ups, combo eller liknande) kopplad till poängsystemet. Lägg koden i en egen js-fil (t.ex. powerups.js) och länka in den via edit_file.")
+            ]
+            :
+            [
+                new("Kärnfunktioner", "Implementera och förbättra applikationens kärnfunktioner enligt uppdraget. Håll dig till kärnlogikens filer."),
+                new("Robusthet och tester", "Lägg till felhantering, indata-validering och tester för den befintliga funktionaliteten. Skapa testerna i egna filer."),
+                new("Gränssnitt och finish", "Förbättra användarupplevelsen: tydliga utskrifter/gränssnitt, hjälptext och en README som förklarar hur allt används."),
+                new("Utökade funktioner", "Lägg till närliggande funktioner som gör applikationen mer komplett, i egna filer/moduler.")
+            ];
+    }
+
+    // ---- Prompter -------------------------------------------------------
+
+    private static string TrackPrompt(string assignment, TeamTrack track, int teamSize) =>
+        $"{assignment}\n\n=== DIN ROLL I TEAMET ===\n" +
+        $"Du är EN av {teamSize} utvecklare som bygger detta samtidigt. Projektet finns redan i din arbetsmapp - läs DESIGN.md och koden först, och UTÖKA det.\n" +
+        $"DITT SPÅR: {track.Title}\n{track.Description}\n\n" +
+        "Regler för teamarbetet:\n" +
+        "- ARBETA ENBART GENOM VERKTYGEN (write_file/edit_file/verify). Ett svar utan verktygsanrop kastas bort - ingen människa läser det.\n" +
+        "- Håll dig till ditt spår - andra utvecklare arbetar parallellt med sina.\n" +
+        "- Lägg ny kod i EGNA filer när det går, och koppla in dem med små edit_file-ändringar. Skriv ALDRIG om hela filer som andra spår också rör.\n" +
+        "- Kör verify innan du avslutar.";
+
+    private static string RedoPrompt(string assignment, TeamTrack track) =>
+        $"{assignment}\n\n=== OMTAG EFTER MERGE-KONFLIKT ===\n" +
+        $"Övriga teamets arbete är redan inarbetat i projektet i din arbetsmapp. Genomför nu DITT spår ovanpå det:\n" +
+        $"SPÅR: {track.Title}\n{track.Description}\n\n" +
+        "Läs den befintliga koden först och gör riktade ändringar (edit_file). Kör verify innan du avslutar.";
+
+    // ---- Hjälpare -------------------------------------------------------
+
+    private static void EnsureGitignore(string root)
+    {
+        try
+        {
+            var path = Path.Combine(root, ".gitignore");
+            var existing = File.Exists(path) ? File.ReadAllText(path) : "";
+            var needed = new[] { ".worktrees/", "node_modules/", "build/", "__pycache__/" };
+            var missing = needed.Where(n => !existing.Contains(n)).ToArray();
+            if (missing.Length > 0)
+                File.AppendAllText(path, (existing.Length > 0 && !existing.EndsWith('\n') ? "\n" : "") + string.Join("\n", missing) + "\n");
+        }
+        catch
+        {
+            // .gitignore är en trevnad - utan den fungerar bygget ändå.
+        }
+    }
+
+    private static string ListProjectFiles(string root)
+    {
+        try
+        {
+            var skip = new[] { ".git", ".worktrees", "node_modules", "build", "bin", "obj", "__pycache__" };
+            return string.Join("\n", Directory
+                .EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(root, f))
+                .Where(rel => !skip.Any(s => rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Contains(s, StringComparer.OrdinalIgnoreCase)))
+                .Take(40));
+        }
+        catch
+        {
+            return "(kunde inte lista filer)";
+        }
+    }
+
+    private static string FirstLine(string text)
+    {
+        var trimmed = (text ?? "").Trim();
+        var i = trimmed.IndexOf('\n');
+        return i < 0 ? trimmed : trimmed[..i];
+    }
+}
