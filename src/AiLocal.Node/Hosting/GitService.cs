@@ -241,7 +241,9 @@ public class GitService
     {
         var psi = new ProcessStartInfo
         {
-            FileName = "git",
+            // ToolLocator: absolut sökväg när git finns provisionerad/
+            // installerad men inte på PATH - annars bara "git" som förut.
+            FileName = AiLocal.Core.Agent.ToolLocator.Find("git") ?? "git",
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

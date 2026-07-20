@@ -141,4 +141,40 @@ public class TranscriptBugFixTests : IDisposable
         Assert.True(cmd == "python" || (cmd.StartsWith('"') && cmd.EndsWith('"') && cmd.Contains("python", StringComparison.OrdinalIgnoreCase)),
             $"ovantat kommando: {cmd}");
     }
+
+    // ---- Generell provisionering (node/git/java/dotnet) --------------------
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("git")]
+    [InlineData("java")]
+    [InlineData("dotnet")]
+    public async Task Provision_KnowsTheWholeToolchainCatalog(string tool)
+    {
+        // Okant namn listar hela katalogen - varje verktyg agenten kan
+        // behova ska finnas dar sa "verktyg saknas" alltid ar atgardbart.
+        var result = await new ToolProvisioner().ProvisionAsync("definitivt-okant", _dir, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Contains(tool, result.Output);
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("npm")]
+    [InlineData("git")]
+    [InlineData("java")]
+    [InlineData("dotnet")]
+    [InlineData("godot")]
+    public void ToolLocator_CommandOrDefault_NeverThrows_AndFallsBackToBareName(string tool)
+    {
+        var cmd = ToolLocator.CommandOrDefault(tool);
+        Assert.True(cmd == tool || (cmd.StartsWith('"') && cmd.EndsWith('"')),
+            $"ovantat kommando for {tool}: {cmd}");
+    }
+
+    [Fact]
+    public void ToolLocator_UnknownTool_ReturnsNull()
+    {
+        Assert.Null(ToolLocator.Find("helt-okant-verktyg"));
+    }
 }

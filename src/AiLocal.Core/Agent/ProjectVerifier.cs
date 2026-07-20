@@ -113,8 +113,11 @@ public sealed class ProjectVerifier
 
     private static string CommandFor(ProjectKind kind) => kind switch
     {
-        ProjectKind.DotNet => "dotnet build",
-        ProjectKind.Node => "npm test --if-present && npm run build --if-present",
+        // Alla kommandon loses via ToolLocator: absolut sokvag nar verktyget
+        // finns installerat/provisionerat men inte pa PATH (den korande
+        // processen ser aldrig PATH-andringar), annars det nakna kommandot.
+        ProjectKind.DotNet => $"{ToolLocator.CommandOrDefault("dotnet")} build",
+        ProjectKind.Node => $"{ToolLocator.CommandOrDefault("npm")} test --if-present && {ToolLocator.CommandOrDefault("npm")} run build --if-present",
         ProjectKind.Rust => "cargo build",
         ProjectKind.Go => "go build ./...",
         // Absolut sokvag nar python finns installerad men inte pa PATH -

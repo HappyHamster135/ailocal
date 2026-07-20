@@ -52,20 +52,22 @@ public sealed class WorkspaceService
             || Directory.GetFiles(root, "*.csproj").Length > 0;
         if (isDotnet)
         {
+            var dotnet = AiLocal.Core.Agent.ToolLocator.Find("dotnet") ?? "dotnet";
             return kind switch
             {
-                "test" => new("dotnet", ["test"], "test"),
-                "run" => new("dotnet", ["run", "--project", FirstProject(root) ?? "."], "run"),
-                _ => new("dotnet", ["build"], "build"),
+                "test" => new(dotnet, ["test"], "test"),
+                "run" => new(dotnet, ["run", "--project", FirstProject(root) ?? "."], "run"),
+                _ => new(dotnet, ["build"], "build"),
             };
         }
         if (File.Exists(Path.Combine(root, "package.json")))
         {
+            var npm = AiLocal.Core.Agent.ToolLocator.Find("npm") ?? "npm";
             return kind switch
             {
-                "test" => new("npm", ["test"], "test"),
-                "run" => new("npm", ["start"], "run"),
-                _ => new("npm", ["run", "build"], "build"),
+                "test" => new(npm, ["test"], "test"),
+                "run" => new(npm, ["start"], "run"),
+                _ => new(npm, ["run", "build"], "build"),
             };
         }
         if (File.Exists(Path.Combine(root, "Cargo.toml")))

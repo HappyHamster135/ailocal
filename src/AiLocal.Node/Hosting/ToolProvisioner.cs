@@ -36,7 +36,12 @@ public sealed class ToolProvisioner
         string TrustedUrl,
         string? ExpectedSha256,   // null = trust-by-source only (still pinned URL)
         string? ArchiveEntry,      // for portable zips: the exe to extract/verify
-        string InstallArgs);       // for installer-based tools
+        string InstallArgs,        // for installer-based tools
+        // Full toolchain zips (node/git/jdk/dotnet) - extract the WHOLE
+        // archive: null = not a full-extract entry; "" = the zip has its own
+        // root folder; a name = extract into that subfolder (zips whose files
+        // sit at the archive root, e.g. MinGit and dotnet-sdk).
+        string? ExtractAllTo = null);
 
     private static readonly IReadOnlyDictionary<string, Spec> Catalog = new Dictionary<string, Spec>(StringComparer.OrdinalIgnoreCase)
     {
@@ -68,6 +73,38 @@ public sealed class ToolProvisioner
             null,
             null,
             "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0 SimpleInstall=1"),
+        // Node.js portable: officiella nodejs.org-zipen (node + npm), ingen
+        // installer/admin. Zipen har egen rotmapp (node-v20...-win-x64).
+        ["node"] = new("Node.js 20 LTS (portabel)",
+            "https://nodejs.org/dist/v20.18.1/node-v20.18.1-win-x64.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: ""),
+        // Git: officiella MinGit fran git-for-windows (kommandoraden, inget
+        // UI). Filerna ligger i zipens rot -> extraheras till MinGit/.
+        ["git"] = new("Git (MinGit, portabel)",
+            "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/MinGit-2.47.1-64-bit.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: "MinGit"),
+        // Java: Eclipse Temurin JDK 21 (officiella Adoptium-releasen),
+        // portabel zip med egen rotmapp (jdk-21...).
+        ["java"] = new("Java JDK 21 (Temurin, portabel)",
+            "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_x64_windows_hotspot_21.0.5_11.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: ""),
+        // .NET SDK: officiella Microsoft-CDN:en, portabel zip (dotnet.exe i
+        // zipens rot) -> extraheras till dotnet/.
+        ["dotnet"] = new(".NET SDK 8 (portabel)",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.404/dotnet-sdk-8.0.404-win-x64.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: "dotnet"),
     };
 
     public ToolProvisioner()
@@ -112,7 +149,14 @@ public sealed class ToolProvisioner
                 return Reject(spec, $"nedladdning misslyckades: HTTP {(int)resp.StatusCode}");
 
             // Guard against redirect to a different host (MITM / bad mirror).
-            if (!string.Equals(resp.RequestMessage!.RequestUri!.Host, trustedHost, StringComparison.OrdinalIgnoreCase))
+            // GitHubs releaser omdirigeras ALLTID till githubusercontent.com
+            // (GitHubs egen CDN) - det är den förväntade, betrodda vägen och
+            // blockerade tidigare varje github-hostad post (godot, git, java).
+            var finalHost = resp.RequestMessage!.RequestUri!.Host;
+            var redirectOk = string.Equals(finalHost, trustedHost, StringComparison.OrdinalIgnoreCase)
+                || (trustedHost.EndsWith("github.com", StringComparison.OrdinalIgnoreCase)
+                    && finalHost.EndsWith("githubusercontent.com", StringComparison.OrdinalIgnoreCase));
+            if (!redirectOk)
                 return Reject(spec, "nedladdningen omdirigerades till en annan värd - blockerad.");
 
             var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
@@ -129,7 +173,15 @@ public sealed class ToolProvisioner
             await File.WriteAllBytesAsync(zipPath, bytes, ct);
 
             // Extract the portable archive entry (if any) into dest.
-            if (spec.ArchiveEntry is not null)
+            if (spec.ExtractAllTo is not null)
+            {
+                // Hela verktygskedjan (node/git/jdk/dotnet) - packa upp allt.
+                var target = spec.ExtractAllTo.Length == 0 ? dest : Path.Combine(dest, spec.ExtractAllTo);
+                Directory.CreateDirectory(target);
+                ZipFile.ExtractToDirectory(zipPath, target, overwriteFiles: true);
+                TryDelete(zipPath);
+            }
+            else if (spec.ArchiveEntry is not null)
             {
                 await ExtractEntryAsync(zipPath, spec.ArchiveEntry, dest, ct);
             }
@@ -142,18 +194,16 @@ public sealed class ToolProvisioner
             }
 
             CrashLog.Write("ProvisionOK", new Exception($"{spec.Display} provisionerad till {dest}"));
-            var note = spec.ArchiveEntry is not null
+            var note = spec.ExtractAllTo is not null || spec.ArchiveEntry is not null
                 ? $"{spec.Display} nedladdad och extraherad till {dest}."
                 : $"{spec.Display} installerad (körde officiell installer med fasta argument).";
-            if (key.Equals("python", StringComparison.OrdinalIgnoreCase))
-            {
-                // Den korande processen ser inte nya PATH - ge agenten den
-                // absoluta sokvagen direkt sa den kan fortsatta utan omstart.
-                var python = AiLocal.Core.Agent.PythonLocator.Find();
-                note += python is not null
-                    ? $" python.exe: {python} - verify/run hittar den automatiskt; anvand den absoluta sokvagen i run_command."
-                    : " OBS: kunde inte lokalisera python.exe efter installationen - kontrollera %LOCALAPPDATA%\\Programs\\Python\\.";
-            }
+            // Den korande processen ser inte nya PATH - ge agenten den
+            // absoluta sokvagen direkt sa den kan fortsatta utan omstart
+            // (verify/build/run loser samma vag via ToolLocator).
+            var located = AiLocal.Core.Agent.ToolLocator.Find(key);
+            note += located is not null
+                ? $" Körbar: {located} - verify/run hittar den automatiskt; använd den absoluta sökvägen i run_command."
+                : " OBS: kunde inte lokalisera den körbara filen efter installationen.";
             return new(true, note);
         }
         catch (Exception ex)
@@ -161,6 +211,11 @@ public sealed class ToolProvisioner
             CrashLog.Write("ProvisionError", ex);
             return new(false, $"provisioneringsfel: {ex.Message}");
         }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort */ }
     }
 
     private ProvisionResult Reject(Spec spec, string why)

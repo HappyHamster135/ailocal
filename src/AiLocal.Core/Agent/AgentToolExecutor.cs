@@ -837,8 +837,12 @@ public sealed class AgentToolExecutor
         if (_provisioner is null)
             return Error(call, "provision is not available on this Worker (ToolProvisioner not wired).");
         var tool = RequireString(args, "tool");
+        // Default: tom sträng => provisionerns egen verktygsmapp
+        // (%LOCALAPPDATA%\AiLocal\tools) - SAMMA plats ToolLocator letar på,
+        // så verify/run hittar verktyget direkt. Arbetsytan som default
+        // gömde verktyget för locatorn.
         var destination = args.TryGetProperty("destination", out var d) && d.ValueKind == JsonValueKind.String
-            ? d.GetString()! : _workspaceRoot;
+            ? d.GetString()! : "";
         var (success, output) = await _provisioner(tool, destination, ct);
         return success
             ? new ToolResult(call.Id, call.Name, output)

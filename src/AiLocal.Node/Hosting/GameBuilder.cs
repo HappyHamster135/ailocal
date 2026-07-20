@@ -102,6 +102,10 @@ public sealed class GameBuilder
 
     static string? FindGodot()
     {
+        // Provisionerad godot (ToolLocator: %LOCALAPPDATA%\AiLocal\tools)
+        // vinner - den finns garanterat inte pa PATH i den korande processen.
+        if (AiLocal.Core.Agent.ToolLocator.Find("godot") is { } provisioned)
+            return provisioned;
         var fromPath = FindOnPath("godot.exe") ?? FindOnPath("godot");
         if (fromPath is not null) return fromPath;
         var candidates = new[]
