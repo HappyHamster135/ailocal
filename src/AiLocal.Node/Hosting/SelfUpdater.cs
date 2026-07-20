@@ -298,9 +298,21 @@ public static class SelfUpdater
             cleanups.AppendLine($"if exist \"{oldPath}\" del /f /q \"{oldPath}\" >nul 2>&1");
         }
 
+        // Stang korande instanser av just de binarer som byts fore swappen:
+        // den gamla appen levde annars kvar bredvid den nystartade (tva
+        // fonster, dott UI i det gamla), och barnnoder fran samma mapp holl
+        // ailocal.exe last sa swappen kunde ge upp efter 30 forsok. Bara
+        // binarer som ingar i DETTA paket dodas - en orelaterad installation
+        // ska inte fallas av nagon annans uppdatering.
+        var kills = new StringBuilder();
+        foreach (var (currentPath, _, _) in downloaded)
+            kills.AppendLine($"taskkill /f /im \"{Path.GetFileName(currentPath)}\" >nul 2>&1");
+
         var script = $$"""
             @echo off
             echo [%date% %time%] update: swapping {{downloaded.Count}} binary/ies >> "{{logPath}}"
+            {{kills}}
+            ping -n 3 127.0.0.1 >nul
             {{swaps}}
             echo [%date% %time%] update: swapped ok, relaunching >> "{{logPath}}"
             start "" "{{relaunchExe}}" {{relaunchArgs}}

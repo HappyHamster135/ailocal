@@ -897,7 +897,7 @@ public static class HostRole
         // through to whichever connected Worker has agent mode enabled.
         app.MapPost("/api/assignment", async (
             AssignmentRequest req, HttpContext ctx, WorkerRegistry registry,
-            IHttpClientFactory httpFactory, CancellationToken ct) =>
+            IHttpClientFactory httpFactory, TaskBoard board, CancellationToken ct) =>
         {
             // A plan's sequential subtasks pin to one specific Worker (see
             // GoalPlanner) so later steps can see earlier ones' file changes -
@@ -970,8 +970,66 @@ public static class HostRole
             await ctx.Response.WriteAsync(
                 $"data: {JsonSerializer.Serialize(new { worker = new { id = candidate.Id, name = candidate.Name } })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
-            await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(ct);
-            await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
+
+            // Bokför uppdraget i TaskBoard sa det syns i workerns HISTORIK
+            // och kontorsvyn - agentkorningar via API:t var tidigare helt
+            // osynliga dar (rapporterat: "kan inte se pa en worker att dom
+            // jobbar"). Forwarda strommen rad for rad och plocka final-framen
+            // for resultat/status pa vagen.
+            var task = board.Create(req.Assignment, null, "Uppdrag (agent)");
+            task.AssignedWorkerId = candidate.Id;
+            task.WorkerName = candidate.Name;
+            task.RequiredSkill = "coding";
+            task.State = TaskState.Running;
+            board.Save();
+
+            var finalized = false;
+            try
+            {
+                await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(ct);
+                using var reader = new StreamReader(upstreamStream);
+                while (true)
+                {
+                    var line = await reader.ReadLineAsync(ct);
+                    if (line is null) break;
+                    await ctx.Response.WriteAsync(line + "\n", ct);
+                    if (line.Length == 0)
+                        await ctx.Response.Body.FlushAsync(ct);
+
+                    if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+                    var json = line[5..].Trim();
+                    if (json.Length == 0) continue;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("final", out var final))
+                        {
+                            var ok = final.TryGetProperty("Success", out var s) && s.GetBoolean();
+                            task.Result = final.TryGetProperty("FinalAnswer", out var fa) ? fa.GetString() : null;
+                            task.State = ok ? TaskState.Completed : TaskState.Failed;
+                            if (!ok) task.Error = "Agenten slutförde inte uppdraget - se resultatet.";
+                            if (final.TryGetProperty("TotalUsage", out var usage))
+                                task.Usage = new TokenUsage(
+                                    usage.TryGetProperty("InputTokens", out var it) ? it.GetInt32() : 0,
+                                    usage.TryGetProperty("OutputTokens", out var ot) ? ot.GetInt32() : 0);
+                            finalized = true;
+                        }
+                    }
+                    catch { /* skip malformed frame - forwarding already happened */ }
+                }
+            }
+            finally
+            {
+                if (!finalized)
+                {
+                    task.State = ct.IsCancellationRequested ? TaskState.Cancelled : TaskState.Failed;
+                    task.Error = ct.IsCancellationRequested
+                        ? "Avbruten av operatören."
+                        : "Strömmen avslutades utan slutresultat (worker/anslutning föll ifrån).";
+                }
+                task.CompletedAt = DateTimeOffset.UtcNow;
+                board.Save();
+            }
             return Results.Empty;
         });
 

@@ -100,7 +100,7 @@ public static class OverseerRole
         // Overseer-vyn HTTP 404 på första planeringsanropet.
         app.MapPost("/api/goal-plan", (GoalPlanRequest req, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
-            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/api/goal-plan", req, ct));
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/api/goal-plan", req, ct, TimeSpan.FromSeconds(180)));
 
         app.MapPost("/api/assignment", async (AssignmentRequest req, HttpContext ctx,
             HostLocator locator, HostRegistry hosts, IHttpClientFactory hf, CancellationToken ct) =>
@@ -399,7 +399,8 @@ public static class OverseerRole
         HttpMethod method,
         string path,
         object? body,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? timeout = null)
     {
         var candidates = PrimaryCandidates(locator, hosts);
 
@@ -409,7 +410,7 @@ public static class OverseerRole
         IResult? lastResult = null;
         foreach (var endpoint in candidates)
         {
-            var (reached, result) = await TryProxyEndpoint(endpoint, hosts, httpFactory, method, path, body, ct);
+            var (reached, result) = await TryProxyEndpoint(endpoint, hosts, httpFactory, method, path, body, ct, timeout);
             if (reached)
                 return result;
             lastResult = result;
@@ -439,12 +440,17 @@ public static class OverseerRole
         HttpMethod method,
         string path,
         object? body,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? timeout = null)
     {
         try
         {
             var client = httpFactory.CreateClient("cluster");
-            client.Timeout = TimeSpan.FromSeconds(15);
+            // 15 s racker for statuskoll och installningar, men INTE for
+            // anrop som vantar pa en AI-modell (goal-plan tog >15 s och dog
+            // med "HttpClient.Timeout of 15 seconds elapsing") - de anropen
+            // skickar sin egen langre timeout.
+            client.Timeout = timeout ?? TimeSpan.FromSeconds(15);
             using var request = new HttpRequestMessage(method, $"{endpoint.TrimEnd('/')}{path}");
             // Present the *target Host's* own cluster token, not the
             // Overseer's - each node mints its own and rejects others with
