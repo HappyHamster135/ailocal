@@ -15,16 +15,31 @@ public partial class GameScaffoldService
     internal static string DetectGenre(string prompt)
     {
         var p = (prompt ?? "").ToLowerInvariant();
-        if (ContainsAny(p, "shooter", "bullet", "shmup", "skjut", "shoot", "hell")) return "shooter";
-        if (ContainsAny(p, "racing", "racer", "race", "car", "bil", "kart")) return "racing";
-        if (ContainsAny(p, "puzzle", "pussel", "match", "match3", "bejeweled", "swap")) return "puzzle";
-        if (ContainsAny(p, "tower defense", "towerdefense", "td", "torn", "wave")) return "towerdefense";
-        if (ContainsAny(p, "rpg", "adventure", "aventyr", "äventyr", "top-down", "topdown", "dungeon")) return "rpg";
+        // Word-START matching, not raw substring: "plattfORMsspel" must not
+        // trigger the snake keyword "orm", "moBIL" must not trigger "bil".
+        // Word-start (not whole-word) so Swedish compounds still hit:
+        // "ormspel" -> orm, "bilspel" -> bil. "car" stays whole-word so
+        // "card"/"cards" never reads as racing.
+        if (WordStart(p, "snake", "orm", "nokia")) return "snake";
+        if (WordStart(p, "idle", "clicker", "klicker", "klickspel", "incremental", "cookie")) return "idle";
+        if (WordStart(p, "breakout", "arkanoid", "brick", "tegel", "paddle", "pong")) return "breakout";
+        if (WordStart(p, "shooter", "bullet", "shmup", "skjut", "shoot")) return "shooter";
+        if (WordStart(p, "racing", "racer", "race", "bil", "kart") || WordExact(p, "car", "cars")) return "racing";
+        if (WordStart(p, "puzzle", "pussel", "match", "bejeweled", "swap")) return "puzzle";
+        if (p.Contains("tower defense") || p.Contains("towerdefense")
+            || WordExact(p, "td") || WordStart(p, "torn", "wave")) return "towerdefense";
+        if (WordStart(p, "rpg", "adventure", "aventyr", "äventyr", "dungeon")
+            || p.Contains("top-down") || p.Contains("topdown")) return "rpg";
         return "platformer";
     }
 
-    private static bool ContainsAny(string text, params string[] values) =>
-        values.Any(v => text.Contains(v));
+    private static bool WordStart(string text, params string[] prefixes) =>
+        prefixes.Any(k => System.Text.RegularExpressions.Regex.IsMatch(
+            text, @"\b" + System.Text.RegularExpressions.Regex.Escape(k)));
+
+    private static bool WordExact(string text, params string[] words) =>
+        words.Any(k => System.Text.RegularExpressions.Regex.IsMatch(
+            text, @"\b" + System.Text.RegularExpressions.Regex.Escape(k) + @"\b"));
 
     /// <summary>Shared production layer injected into every genre template:
     /// start/pause/game-over overlays (DOM, no alert()), guarded WebAudio SFX,
@@ -105,6 +120,18 @@ const PKit=(()=>{
             "# Shooter - Top-Down Arena (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
             "Styrning: WASD rörelse, sikta med musen, håll vänster musknapp för att skjuta. Esc/P = paus.\n\n" +
             "Klara 10 vågor för att vinna. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "snake" =>
+            "# Snake (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Styrning: piltangenter/WASD. Ät mat, väx, krocka inte med vägg eller dig själv. Esc/P = paus.\n\n" +
+            "Farten ökar var 50:e poäng. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "idle" =>
+            "# Guldgruvan - Idle/Clicker (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Klicka på gruvan för guld, köp uppgraderingar (hacka, gruvarbetare, borrigg) och nå 10 000 guld. Esc/P = paus.\n\n" +
+            "Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
+        "breakout" =>
+            "# Breakout (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
+            "Styrning: piltangenter/A-D eller mus; mellanslag släpper bollen. Esc/P = paus.\n\n" +
+            "3 nivåer, tegel med 1-3 HP, vinkelstyrd studs. Highscore sparas lokalt.\n\nSpelets design: se `DESIGN.md`.\n",
         _ =>
             "# 2D Platformer (HTML5)\n\nSpela: öppna `index.html` i en webbläsare.\n\n" +
             "Styrning: piltangenter / WASD för rörelse, mellanslag / W / upp för att hoppa, Esc/P = paus.\n\n" +
@@ -571,6 +598,255 @@ loop();
 </script>
 </body>
 </html>";
+
+    // ---- Snake (HTML5) -----------------------------------------------------------
+    internal static string Html5Snake(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Snake</title>
+<style>
+  body{margin:0;background:#101418;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #2a3a2a}
+  #hud{color:#fff;font:16px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Poang <span id='sc'>0</span> &middot; Langd <span id='len'>3</span> &middot; Fart <span id='spd'>1</span></div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const T=24,COLS=28,ROWS=22;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=COLS*T;c.height=ROWS*T;
+let snake=[{x:14,y:11},{x:13,y:11},{x:12,y:11}];
+let dir={x:1,y:0},nextDir={x:1,y:0},food=null,score=0,tick=0,speed=8,anim=0;
+
+document.addEventListener('keydown',e=>{
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  const k=e.key;
+  if((k==='ArrowUp'||k==='w')&&dir.y!==1)nextDir={x:0,y:-1};
+  if((k==='ArrowDown'||k==='s')&&dir.y!==-1)nextDir={x:0,y:1};
+  if((k==='ArrowLeft'||k==='a')&&dir.x!==1)nextDir={x:-1,y:0};
+  if((k==='ArrowRight'||k==='d')&&dir.x!==-1)nextDir={x:1,y:0};
+  if(k.startsWith('Arrow'))e.preventDefault();});
+
+function placeFood(){
+  while(true){const f={x:Math.random()*COLS|0,y:Math.random()*ROWS|0};
+    if(!snake.some(s=>s.x===f.x&&s.y===f.y)){food=f;return;}}}
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  tick++;anim=(anim+1)%20;
+  if(tick%Math.max(2,(12-speed))!==0)return;
+  dir=nextDir;
+  const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+  if(head.x<0||head.x>=COLS||head.y<0||head.y>=ROWS||snake.some(s=>s.x===head.x&&s.y===head.y)){
+    PKit.sfx.hit();PKit.end(false,score);return;}
+  snake.unshift(head);
+  if(food&&head.x===food.x&&head.y===food.y){
+    score+=10;speed=Math.min(10,1+(score/50|0));PKit.sfx.coin();placeFood();
+    if(snake.length>=COLS*ROWS-1){PKit.end(true,score+1000);return;}}
+  else snake.pop();
+}
+
+function draw(){
+  ctx.fillStyle='#182018';ctx.fillRect(0,0,c.width,c.height);
+  if(food){ctx.fillStyle=anim<10?'#f5c542':'#ffd76a'; // puls-anim pa maten
+    ctx.fillRect(food.x*T+3,food.y*T+3,T-6,T-6);}
+  for(let i=0;i<snake.length;i++){const s=snake[i];
+    ctx.fillStyle=i===0?'#7ef07e':'#3fa34d';
+    ctx.fillRect(s.x*T+1,s.y*T+1,T-2,T-2);}
+  document.getElementById('sc').textContent=score;
+  document.getElementById('len').textContent=snake.length;
+  document.getElementById('spd').textContent=speed;
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Snake','Piltangenter/WASD styr ormen · at mat, vax, krocka inte','snake',placeFood);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5SnakeDesignDoc(string prompt) =>
+        "# Snake (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassisk snake med okande fart och vinst nar planen ar full.\n\n" +
+        "## Mekanik\n- **Styrning:** piltangenter/WASD (180-graders svangar blockeras)\n" +
+        "- **Mat:** +10 poang, ormen vaxer, farten okar var 50:e poang\n- **Forlust:** vagg eller egen kropp\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), game over-overlay med omstart\n- WebAudio-SFX (mat, krock)\n" +
+        "- Puls-animation pa maten\n- Highscore i localStorage\n\n## Extension\n- Hinder\n- Speciamat (bonus/gift)\n- Tva spelare\n";
+
+    // ---- Idle / Clicker (HTML5) --------------------------------------------------
+    internal static string Html5Idle(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Guldgruvan</title>
+<style>
+  body{margin:0;background:#141018;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:system-ui,sans-serif;color:#fff}
+  #mine{width:180px;height:180px;border-radius:50%;background:radial-gradient(#f5c542,#8a6d1a);border:6px solid #5a4712;font-size:64px;cursor:pointer;transition:transform .06s}
+  #mine:active{transform:scale(.94)}
+  #hud{font:18px monospace;margin:14px}
+  .shop{display:flex;gap:10px;margin-top:14px}
+  .shop button{padding:10px 14px;background:#242030;color:#fff;border:1px solid #443c5a;border-radius:8px;cursor:pointer;font:13px monospace}
+  .shop button:disabled{opacity:.4;cursor:default}
+</style>
+</head>
+<body>
+<div id='hud'>Guld <span id='gold'>0</span> &middot; Per klick <span id='cv'>1</span> &middot; Per sekund <span id='ps'>0</span></div>
+<button id='mine'>&#9935;</button>
+<div class='shop'>
+  <button id='buyPick'>Battre hacka (+1/klick)<br>Kostar <span id='pickCost'>10</span></button>
+  <button id='buyMiner'>Gruvarbetare (+1/s)<br>Kostar <span id='minerCost'>25</span></button>
+  <button id='buyRig'>Borrigg (+8/s)<br>Kostar <span id='rigCost'>200</span></button>
+</div>
+<canvas id='c' width='420' height='60' style='margin-top:10px'></canvas>
+<script>" + ProductionKitJs + @"
+const GOAL=10000;
+let gold=0,perClick=1,perSec=0,pickCost=10,minerCost=25,rigCost=200,anim=0;
+const ctx=document.getElementById('c').getContext('2d');
+const el=id=>document.getElementById(id);
+
+el('mine').onclick=()=>{
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  gold+=perClick;PKit.sfx.coin();};
+el('buyPick').onclick=()=>{if(PKit.ended||gold<pickCost)return;gold-=pickCost;perClick++;pickCost=Math.ceil(pickCost*1.6);PKit.sfx.place();};
+el('buyMiner').onclick=()=>{if(PKit.ended||gold<minerCost)return;gold-=minerCost;perSec+=1;minerCost=Math.ceil(minerCost*1.7);PKit.sfx.place();};
+el('buyRig').onclick=()=>{if(PKit.ended||gold<rigCost)return;gold-=rigCost;perSec+=8;rigCost=Math.ceil(rigCost*1.8);PKit.sfx.place();};
+
+let tick=0;
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  tick++;anim=(anim+1)%60;
+  if(tick%60===0&&perSec>0){gold+=perSec;}
+  if(gold>=GOAL)PKit.end(true,gold);
+}
+
+function draw(){
+  el('gold').textContent=gold|0;
+  el('cv').textContent=perClick;
+  el('ps').textContent=perSec;
+  el('pickCost').textContent=pickCost;
+  el('minerCost').textContent=minerCost;
+  el('rigCost').textContent=rigCost;
+  el('buyPick').disabled=gold<pickCost;
+  el('buyMiner').disabled=gold<minerCost;
+  el('buyRig').disabled=gold<rigCost;
+  // progress-bar mot malet med skimmer-anim
+  ctx.fillStyle='#242030';ctx.fillRect(0,0,420,60);
+  const w=Math.min(1,gold/GOAL)*412;
+  ctx.fillStyle='#f5c542';ctx.fillRect(4,4,w,52);
+  ctx.fillStyle='rgba(255,255,255,'+(anim<30?anim/60:(60-anim)/60)+')';
+  ctx.fillRect(Math.max(0,w-30),4,26,52);
+  ctx.fillStyle='#fff';ctx.font='14px monospace';
+  ctx.fillText('Mal: '+GOAL+' guld',150,34);
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Guldgruvan','Klicka pa gruvan for guld · kop uppgraderingar · na '+GOAL+' guld','idle',null);
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5IdleDesignDoc(string prompt) =>
+        "# Idle / Clicker (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEtt klickspel med tre uppgraderingsspar och ett tydligt mal (10 000 guld) sa rundan har ett slut.\n\n" +
+        "## Mekanik\n- **Klick:** +guld per klick\n- **Uppgraderingar:** hacka (+1/klick), gruvarbetare (+1/s), borrigg (+8/s); priser vaxer exponentiellt\n" +
+        "- **Vinst:** 10 000 guld\n\n## Produktion\n- Titelskarm, paus (Esc/P), vinst-overlay med omstart\n- WebAudio-SFX (klick, kop)\n" +
+        "- Skimmer-animation pa progressbaren, tryck-animation pa knappen\n- Highscore i localStorage\n\n## Extension\n- Prestige-system\n- Fler byggnader\n- Offline-produktion\n";
+
+    // ---- Breakout (HTML5) --------------------------------------------------------
+    internal static string Html5Breakout(string prompt) => @"<!DOCTYPE html>
+<html lang='sv'>
+<head>
+<meta charset='UTF-8'>
+<title>Breakout</title>
+<style>
+  body{margin:0;background:#0e1220;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}
+  canvas{border:2px solid #2a3350}
+  #hud{color:#fff;font:16px monospace;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id='hud'>Poang <span id='sc'>0</span> &middot; Liv <span id='lv'>3</span> &middot; Niva <span id='ni'>1</span>/3</div>
+<canvas id='c'></canvas>
+<script>" + ProductionKitJs + @"
+const W=720,H=520,ROWS=5,COLS=10,BW=64,BH=20;
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+c.width=W;c.height=H;
+const clrs=['#e05561','#e0a355','#e0d955','#7ee055','#55c8e0'];
+let paddle={x:W/2-50,w:100,h:12},ball={x:W/2,y:H-80,vx:3,vy:-4,r:7,stuck:true};
+let bricks=[],score=0,lives=3,level=1,anim=0;
+const keys={};
+document.addEventListener('keydown',e=>{keys[e.key]=true;
+  if(e.key===' '&&ball.stuck&&PKit.started&&!PKit.paused&&!PKit.ended){ball.stuck=false;PKit.sfx.jump();}
+  if(e.key.startsWith('Arrow'))e.preventDefault();});
+document.addEventListener('keyup',e=>keys[e.key]=false);
+c.onmousemove=e=>{if(PKit.started&&!PKit.paused)paddle.x=Math.max(0,Math.min(W-paddle.w,e.offsetX-paddle.w/2));};
+
+function buildLevel(n){bricks=[];
+  for(let r=0;r<ROWS;r++)for(let col=0;col<COLS;col++){
+    const hp=Math.min(3,1+((r+n)%3));
+    bricks.push({x:col*(BW+6)+15,y:r*(BH+6)+50,hp,max:hp});}}
+
+function resetBall(){ball.x=paddle.x+paddle.w/2;ball.y=H-80;ball.vx=3*(Math.random()<0.5?-1:1);ball.vy=-4;ball.stuck=true;}
+
+function update(){
+  if(!PKit.started||PKit.paused||PKit.ended)return;
+  anim=(anim+1)%30;
+  const sp=7;
+  if(keys['ArrowLeft']||keys['a'])paddle.x=Math.max(0,paddle.x-sp);
+  if(keys['ArrowRight']||keys['d'])paddle.x=Math.min(W-paddle.w,paddle.x+sp);
+  if(ball.stuck){ball.x=paddle.x+paddle.w/2;ball.y=H-paddle.h-30;return;}
+  ball.x+=ball.vx;ball.y+=ball.vy;
+  if(ball.x<ball.r||ball.x>W-ball.r){ball.vx*=-1;ball.x=Math.max(ball.r,Math.min(W-ball.r,ball.x));}
+  if(ball.y<ball.r){ball.vy*=-1;ball.y=ball.r;}
+  if(ball.y>H+20){lives--;PKit.sfx.hit();
+    if(lives<=0){PKit.end(false,score);return;}
+    resetBall();return;}
+  const py=H-30;
+  if(ball.vy>0&&ball.y+ball.r>=py&&ball.y+ball.r<=py+paddle.h+8&&ball.x>=paddle.x-ball.r&&ball.x<=paddle.x+paddle.w+ball.r){
+    const hit=(ball.x-(paddle.x+paddle.w/2))/(paddle.w/2);
+    ball.vx=hit*5;ball.vy=-Math.abs(ball.vy);PKit.sfx.place();}
+  for(const b of bricks){if(b.hp<=0)continue;
+    if(ball.x>b.x-ball.r&&ball.x<b.x+BW+ball.r&&ball.y>b.y-ball.r&&ball.y<b.y+BH+ball.r){
+      b.hp--;score+=10;PKit.sfx.coin();
+      const fromSide=ball.x<b.x||ball.x>b.x+BW;
+      if(fromSide)ball.vx*=-1;else ball.vy*=-1;
+      break;}}
+  if(bricks.every(b=>b.hp<=0)){
+    if(level>=3){PKit.end(true,score+lives*100);return;}
+    level++;score+=50;buildLevel(level);resetBall();PKit.sfx.win();}
+}
+
+function draw(){
+  ctx.fillStyle='#101528';ctx.fillRect(0,0,W,H);
+  for(const b of bricks){if(b.hp<=0)continue;
+    ctx.fillStyle=clrs[(b.max-b.hp+b.y/26|0)%clrs.length];
+    ctx.globalAlpha=0.5+0.5*(b.hp/b.max);
+    ctx.fillRect(b.x,b.y,BW,BH);ctx.globalAlpha=1;
+    ctx.strokeStyle='#0e1220';ctx.strokeRect(b.x,b.y,BW,BH);}
+  ctx.fillStyle='#7ea2ff';ctx.fillRect(paddle.x,H-30,paddle.w,paddle.h);
+  ctx.fillStyle=anim<15?'#fff':'#ffe9a0'; // glimt-anim pa bollen
+  ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  document.getElementById('sc').textContent=score;
+  document.getElementById('lv').textContent=lives;
+  document.getElementById('ni').textContent=level;
+}
+function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
+PKit.init('Breakout','Piltangenter/A-D eller mus styr plattan · mellanslag slapper bollen','breakout',()=>{buildLevel(1);resetBall();});
+loop();
+</script>
+</body>
+</html>";
+
+    internal static string Html5BreakoutDesignDoc(string prompt) =>
+        "# Breakout (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassisk breakout med 3 nivaer, flertaligt tegel (1-3 HP) och vinkelstyrd studs pa plattan.\n\n" +
+        "## Mekanik\n- **Styrning:** piltangenter/A-D eller mus; mellanslag slapper bollen\n" +
+        "- **Tegel:** 10 poang per traff, tal 1-3 traffar (genomskinlighet visar skada)\n" +
+        "- **Studs:** traffpunkt pa plattan styr vinkeln\n- **Liv:** 3; vinst efter niva 3 (+100/liv kvar)\n\n" +
+        "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay med omstart\n- WebAudio-SFX (studs, tegel, miss, niva)\n" +
+        "- Glimt-animation pa bollen, skade-genomskinlighet pa tegel\n- Highscore i localStorage\n\n## Extension\n- Power-ups (bredare platta, multiboll)\n- Fler nivalayouter\n- Okande bollfart\n";
 
     internal static string Html5ShooterDesignDoc(string prompt) =>
         "# Top-Down Shooter (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +

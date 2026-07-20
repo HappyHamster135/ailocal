@@ -597,6 +597,45 @@ public class AgentToolExecutorTests : IDisposable
         Assert.True(result.IsError);
     }
 
+    // ---- vision_review ------------------------------------------------------
+
+    [Fact]
+    public async Task VisionReview_WhenWired_ResolvesPathAndReachesDelegate()
+    {
+        var imagePath = Path.Combine(_workspace, "shot.png");
+        await File.WriteAllBytesAsync(imagePath, [1, 2, 3]);
+        string? seenPath = null, seenQuestion = null;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            visionReviewer: (path, question, ct) =>
+            {
+                seenPath = path; seenQuestion = question;
+                return Task.FromResult((true, "Ser bra ut. Inga visuella buggar."));
+            });
+
+        Assert.Contains(executor.Tools, t => t.Name == "vision_review");
+
+        var result = await executor.ExecuteAsync(
+            Call("vision_review", new { path = "shot.png", question = "ser spelet ratt ut?" }),
+            CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Equal(imagePath, seenPath);
+        Assert.Equal("ser spelet ratt ut?", seenQuestion);
+        Assert.Contains("Ser bra ut", result.Output);
+    }
+
+    [Fact]
+    public async Task VisionReview_MissingImage_ErrorsWithoutCallingDelegate()
+    {
+        var called = false;
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace,
+            visionReviewer: (_, _, _) => { called = true; return Task.FromResult((true, "x")); });
+        var result = await executor.ExecuteAsync(
+            Call("vision_review", new { path = "finns-inte.png" }), CancellationToken.None);
+        Assert.True(result.IsError);
+        Assert.False(called);
+    }
+
     // ---- generate_asset / screenshot default output paths ------------------
 
     [Fact]

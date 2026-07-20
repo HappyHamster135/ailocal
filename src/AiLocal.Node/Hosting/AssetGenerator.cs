@@ -405,19 +405,215 @@ public sealed class AssetGenerator
     {
         try
         {
-            var bytes = CreatePlaceholderPng(width, height, DeriveColor(prompt ?? "sprite"));
+            // Real pixel-art shapes (hero/enemy/coin/heart/star/tree/ship,
+            // symmetric identicon fallback) instead of the old flat colored
+            // rectangle - a usable sprite even fully offline.
+            var bytes = CreatePixelSprite(width, height, prompt ?? "sprite");
             var dir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
             File.WriteAllBytes(outputPath, bytes);
 
             return new AssetResult(true,
-                $"Generated procedural sprite: {width}x{height} PNG", outputPath);
+                $"Generated procedural pixel sprite ({SpriteShapeFor(prompt ?? "sprite")}): {width}x{height} PNG", outputPath);
         }
         catch (Exception ex)
         {
             return new AssetResult(false, $"Failed to generate sprite: {ex.Message}", null);
         }
+    }
+
+    // ---- Pixel-art sprites -------------------------------------------------
+    // 12x12 patterns scaled nearest-neighbor to the requested size, so the
+    // result reads as crisp pixel art at any resolution. Palette characters:
+    // ' '=transparent, '#'=outline, 'o'=main color, '+'=highlight, '*'=accent.
+
+    private static readonly Dictionary<string, string[]> SpritePatterns = new()
+    {
+        ["hero"] =
+        [
+            "   ####    ",
+            "  #++++#   ",
+            "  #+**+#   ",
+            "  #++++#   ",
+            "   #oo#    ",
+            " ##oooo##  ",
+            "#o#oooo#o# ",
+            "#o#oooo#o# ",
+            "   #oo#    ",
+            "  #o##o#   ",
+            "  #o##o#   ",
+            " ##  ##    ",
+        ],
+        ["enemy"] =
+        [
+            "  ##  ##   ",
+            "  #o##o#   ",
+            " #oooooo#  ",
+            "#oo*oo*oo# ",
+            "#oooooooo# ",
+            "#o+oooo+o# ",
+            "#oo++++oo# ",
+            " #oooooo#  ",
+            "  #o##o#   ",
+            " #o#  #o#  ",
+            " ##    ##  ",
+            "           ",
+        ],
+        ["coin"] =
+        [
+            "   ####    ",
+            "  #++++#   ",
+            " #+oooo+#  ",
+            "#+oo**oo+# ",
+            "#+o****o+# ",
+            "#+o****o+# ",
+            "#+oo**oo+# ",
+            " #+oooo+#  ",
+            "  #++++#   ",
+            "   ####    ",
+            "           ",
+            "           ",
+        ],
+        ["heart"] =
+        [
+            " ###  ###  ",
+            "#+++##+++# ",
+            "#+o++o+oo# ",
+            "#+oooooooo#",
+            "#oooooooo# ",
+            " #oooooo#  ",
+            "  #oooo#   ",
+            "   #oo#    ",
+            "    ##     ",
+            "           ",
+            "           ",
+            "           ",
+        ],
+        ["star"] =
+        [
+            "     #     ",
+            "    #o#    ",
+            "    #o#    ",
+            "####o+o####",
+            "#oo+++++oo#",
+            " #o+++++o# ",
+            "  #o+++o#  ",
+            "  #o+o+o#  ",
+            " #o## ##o# ",
+            " ##     ## ",
+            "           ",
+            "           ",
+        ],
+        ["tree"] =
+        [
+            "   ####    ",
+            "  #oooo#   ",
+            " #oo+ooo#  ",
+            "#ooo+oooo# ",
+            "#oo+++ooo# ",
+            " #oooooo#  ",
+            "  #oooo#   ",
+            "   #**#    ",
+            "   #**#    ",
+            "   #**#    ",
+            "  #****#   ",
+            "           ",
+        ],
+        ["ship"] =
+        [
+            "     #     ",
+            "    #+#    ",
+            "    #o#    ",
+            "   #ooo#   ",
+            "   #o*o#   ",
+            "  #oo*oo#  ",
+            "  #ooooo#  ",
+            " #o#ooo#o# ",
+            " #o#ooo#o# ",
+            "  # #*# #  ",
+            "    #*#    ",
+            "           ",
+        ],
+    };
+
+    internal static string SpriteShapeFor(string prompt)
+    {
+        var p = prompt.ToLowerInvariant();
+        if (p.Contains("hero") || p.Contains("hjalte") || p.Contains("hjälte") || p.Contains("player")
+            || p.Contains("spelare") || p.Contains("character") || p.Contains("karaktar") || p.Contains("gubbe")) return "hero";
+        if (p.Contains("enemy") || p.Contains("fiende") || p.Contains("monster") || p.Contains("slime")
+            || p.Contains("goblin") || p.Contains("boss")) return "enemy";
+        if (p.Contains("coin") || p.Contains("mynt") || p.Contains("gold") || p.Contains("guld")) return "coin";
+        if (p.Contains("heart") || p.Contains("hjarta") || p.Contains("hjärta") || p.Contains("liv")
+            || p.Contains("health") || p.Contains("hp")) return "heart";
+        if (p.Contains("star") || p.Contains("stjarna") || p.Contains("stjärna")) return "star";
+        if (p.Contains("tree") || p.Contains("trad") || p.Contains("träd") || p.Contains("skog")) return "tree";
+        if (p.Contains("ship") || p.Contains("skepp") || p.Contains("rocket") || p.Contains("raket")) return "ship";
+        return "pattern";
+    }
+
+    internal static byte[] CreatePixelSprite(int width, int height, string prompt)
+    {
+        var shape = SpriteShapeFor(prompt);
+        var grid = SpritePatterns.TryGetValue(shape, out var pattern)
+            ? pattern
+            : IdenticonPattern(prompt);
+
+        var rows = grid.Length;
+        var cols = grid.Max(r => r.Length);
+        var (mr, mg, mb) = DeriveColor(prompt);
+        // Palette: outline near-black, highlight lighter, accent hue-rotated.
+        (byte, byte, byte) Light() => ((byte)Math.Min(255, mr + 70), (byte)Math.Min(255, mg + 70), (byte)Math.Min(255, mb + 70));
+        (byte, byte, byte) Accent() => (mg, mb, mr);
+
+        var stride = width * 4;
+        var raw = new byte[height * stride];
+        for (var y = 0; y < height; y++)
+        {
+            var gy = Math.Min(rows - 1, y * rows / Math.Max(1, height));
+            var row = grid[gy];
+            for (var x = 0; x < width; x++)
+            {
+                var gx = Math.Min(cols - 1, x * cols / Math.Max(1, width));
+                var ch = gx < row.Length ? row[gx] : ' ';
+                var i = y * stride + x * 4;
+                if (ch == ' ') continue; // transparent
+                var (r, g, b) = ch switch
+                {
+                    '#' => ((byte)24, (byte)24, (byte)32),
+                    '+' => Light(),
+                    '*' => Accent(),
+                    _ => (mr, mg, mb)
+                };
+                raw[i] = r; raw[i + 1] = g; raw[i + 2] = b; raw[i + 3] = 255;
+            }
+        }
+        return EncodePng(width, height, raw);
+    }
+
+    /// <summary>Deterministic, mirrored 12x12 pattern seeded by the prompt -
+    /// an identicon-style sprite for prompts no named shape matches, so two
+    /// different prompts still yield visually distinct art.</summary>
+    private static string[] IdenticonPattern(string prompt)
+    {
+        var seed = 17;
+        foreach (var c in prompt) seed = seed * 31 + c;
+        var rnd = new Random(seed);
+        var rows = new string[12];
+        for (var y = 0; y < 12; y++)
+        {
+            var half = new char[6];
+            for (var x = 0; x < 6; x++)
+            {
+                var v = rnd.Next(100);
+                half[x] = v < 38 ? 'o' : v < 50 ? '+' : v < 58 ? '#' : ' ';
+            }
+            var mirrored = new char[12];
+            for (var x = 0; x < 6; x++) { mirrored[x] = half[x]; mirrored[11 - x] = half[x]; }
+            rows[y] = new string(mirrored);
+        }
+        return rows;
     }
 
     /// <summary>

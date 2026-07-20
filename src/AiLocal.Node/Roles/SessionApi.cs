@@ -118,7 +118,8 @@ public static class SessionApi
         app.MapPost("/api/sessions/{id}/run", async (
             string id, SessionMessageRequest req, HttpContext ctx,
             SessionStore store, SessionRunRegistry runs, PendingChangeRegistry pending,
-            PendingInfoRegistry info, FallbackChatProvider provider, NodeSettings settings, CancellationToken ct) =>
+            PendingInfoRegistry info, FallbackChatProvider provider, NodeSettings settings,
+            IHttpClientFactory httpFactory, PersistentSettingsStore settingsStore, CancellationToken ct) =>
         {
             var session = store.Get(id);
             if (session is null)
@@ -282,7 +283,13 @@ public static class SessionApi
                         : "No matching errors found.";
                     return Task.FromResult((found, fixText, bestPractices));
                 },
-                gameModules: GameModuleTool.Handle);
+                gameModules: GameModuleTool.Handle,
+                visionReviewer: async (imagePath, question, vct) =>
+                {
+                    var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
+                    var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
+                    return (r.Success, WorkerRole.FormatVisionResult(r));
+                });
 
                 // Build a short plan first (GoalPlanner) so the operator sees
                 // what the agent intends before it starts writing files. The

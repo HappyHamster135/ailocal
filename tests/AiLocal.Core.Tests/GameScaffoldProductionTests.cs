@@ -37,6 +37,9 @@ public class GameScaffoldProductionTests : IDisposable
         ["ett match-3 pussel", "puzzle"],
         ["ett tower defense spel", "towerdefense"],
         ["en top-down shooter", "shooter"],
+        ["ett snake spel som pa gamla nokia", "snake"],
+        ["ett idle clicker spel om en guldgruva", "idle"],
+        ["ett breakout spel med tegelstenar", "breakout"],
     ];
 
     [Theory]

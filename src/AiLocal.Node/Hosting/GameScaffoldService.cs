@@ -282,6 +282,9 @@ public sealed partial class GameScaffoldService
             "puzzle" => (Html5Puzzle(prompt), Html5PuzzleDesignDoc(prompt)),
             "towerdefense" => (Html5TowerDefense(prompt), Html5TdDesignDoc(prompt)),
             "shooter" => (Html5Shooter(prompt), Html5ShooterDesignDoc(prompt)),
+            "snake" => (Html5Snake(prompt), Html5SnakeDesignDoc(prompt)),
+            "idle" => (Html5Idle(prompt), Html5IdleDesignDoc(prompt)),
+            "breakout" => (Html5Breakout(prompt), Html5BreakoutDesignDoc(prompt)),
             _ => (Html5Game(), Html5DesignDoc(prompt))
         };
         Write(root, "index.html", game);
@@ -653,20 +656,66 @@ public class GameManager : MonoBehaviour
     public int Hp { get; private set; }
     public int Level { get; private set; } = 1;
 
+    // Survive the scene reload LevelCleared performs: instance fields reset
+    // with every reload, so without these the game restarted at level 1 with
+    // 0 points after every cleared level.
+    private static int s_score;
+    private static int s_level = 1;
+    private static bool s_startedOnce;
+
     private Text _hud;
     private bool _paused;
+    private bool _started;
+    private bool _ended;
+    private int _high;
 
     void Awake()
     {
         Instance = this;
         Hp = startHp;
+        Score = s_score;
+        Level = s_level;
+        _high = PlayerPrefs.GetInt(""highscore"", 0);
         _hud = GameObject.Find(""UIManager"")?.GetComponent<UIManager>()?.HudText;
-        UpdateHud();
+        if (s_startedOnce)
+        {
+            // Mid-run reload (next level): skip the title screen.
+            _started = true;
+            Time.timeScale = 1;
+            UpdateHud();
+        }
+        else
+        {
+            // Title screen: frozen until the player presses Enter/Space.
+            Time.timeScale = 0;
+            if (_hud) _hud.text = $""PIXEL RUSH\nSamla mynt, undvik fiender, na malet.\nRekord: {_high}\n\nTryck ENTER eller SPACE for att starta"";
+        }
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Escape)) TogglePause();
+        if (!_started)
+        {
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Space))
+            {
+                _started = true;
+                s_startedOnce = true;
+                Time.timeScale = 1;
+                UpdateHud();
+            }
+            return;
+        }
+        if (_ended)
+        {
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                s_score = 0; s_level = 1; s_startedOnce = false;
+                Time.timeScale = 1;
+                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+            }
+            return;
+        }
+        if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P)) TogglePause();
     }
 
     public void Collect(GameObject coin)
@@ -687,22 +736,35 @@ public class GameManager : MonoBehaviour
     public void LevelCleared()
     {
         if (Level >= totalLevels) { Win(); return; }
-        Level++;
+        s_level = Level + 1;
+        s_score = Score;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
     private void Win()
     {
-        if (_hud) _hud.text = $""DU VANN! Poang: {Score}"";
+        _ended = true;
+        Time.timeScale = 0;
+        SaveHighscore();
+        if (_hud) _hud.text = $""DU VANN! Poang: {Score} - Rekord: {_high}\nTryck R for att spela igen"";
         Debug.Log(""You win!"");
-        enabled = false;
     }
 
     private void GameOver()
     {
-        if (_hud) _hud.text = $""GAME OVER - Poang: {Score}"";
+        _ended = true;
+        Time.timeScale = 0;
+        SaveHighscore();
+        if (_hud) _hud.text = $""GAME OVER - Poang: {Score} - Rekord: {_high}\nTryck R for att spela igen"";
         Debug.Log(""Game over."");
-        enabled = false;
+    }
+
+    private void SaveHighscore()
+    {
+        if (Score <= _high) return;
+        _high = Score;
+        PlayerPrefs.SetInt(""highscore"", _high);
+        PlayerPrefs.Save();
     }
 
     private void TogglePause()
@@ -713,7 +775,7 @@ public class GameManager : MonoBehaviour
 
     private void UpdateHud()
     {
-        if (_hud) _hud.text = $""Niva {Level}/{totalLevels}   Poang {Score}   HP {Hp}"";
+        if (_hud) _hud.text = $""Niva {Level}/{totalLevels}   Poang {Score}   HP {Hp}   Rekord {_high}"";
     }
 }
 ";
@@ -1033,6 +1095,9 @@ public partial class Game : Node2D
     private int _hp;
     private int _level = 1;
     private bool _paused;
+    private bool _started;
+    private bool _ended;
+    private int _high;
     private Label _hud;
     private Node2D _world;
     private AudioStreamPlayer _sfx;
@@ -1056,17 +1121,44 @@ public partial class Game : Node2D
 
     public override void _Ready()
     {
+        // This node must keep processing input while the tree is paused -
+        // without Always, neither the title screen nor pause could ever be
+        // dismissed (a paused node stops receiving _UnhandledInput).
+        ProcessMode = ProcessModeEnum.Always;
         _hp = PlayerHp;
+        _high = LoadHighscore();
         _hud = GetNode<Label>(""HUD/Margin/Label"");
         _world = GetNode<Node2D>(""World"");
         _sfx = GetNode<AudioStreamPlayer>(""Sfx"");
         LoadLevel(_level);
-        UpdateHud();
+        // Title screen: frozen until the player presses Enter/Space.
+        GetTree().Paused = true;
+        _hud.Text = $""PIXEL RUSH\nSamla mynt, undvik fiender, na malet.\nRekord: {_high}\n\nTryck ENTER eller SPACE for att starta"";
     }
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e is InputEventKey k && k.Pressed && k.Keycode == Key.Escape)
+        if (e is not InputEventKey k || !k.Pressed) return;
+        if (!_started)
+        {
+            if (k.Keycode is Key.Enter or Key.Space)
+            {
+                _started = true;
+                GetTree().Paused = false;
+                UpdateHud();
+            }
+            return;
+        }
+        if (_ended)
+        {
+            if (k.Keycode == Key.R)
+            {
+                GetTree().Paused = false;
+                GetTree().ReloadCurrentScene();
+            }
+            return;
+        }
+        if (k.Keycode is Key.Escape or Key.P)
             TogglePause();
     }
 
@@ -1076,6 +1168,21 @@ public partial class Game : Node2D
         GetTree().Paused = _paused;
         _hud.Text = _paused ? ""PAUSED - Esc for fortsatt"" : _hud.Text;
         if (!_paused) UpdateHud();
+    }
+
+    private static int LoadHighscore()
+    {
+        if (!FileAccess.FileExists(""user://highscore.txt"")) return 0;
+        using var f = FileAccess.Open(""user://highscore.txt"", FileAccess.ModeFlags.Read);
+        return f != null && int.TryParse(f.GetAsText().Trim(), out var v) ? v : 0;
+    }
+
+    private void SaveHighscore()
+    {
+        if (_score <= _high) return;
+        _high = _score;
+        using var f = FileAccess.Open(""user://highscore.txt"", FileAccess.ModeFlags.Write);
+        f?.StoreString(_high.ToString());
     }
 
     private void LoadLevel(int lvl)
@@ -1136,14 +1243,18 @@ public partial class Game : Node2D
 
     private void Win()
     {
-        GetTree().Paused = false;
-        _hud.Text = $""DU VANN! Poang: {_score}"";
+        _ended = true;
+        SaveHighscore();
+        GetTree().Paused = true;
+        _hud.Text = $""DU VANN! Poang: {_score} - Rekord: {_high}\nTryck R for att spela igen"";
     }
 
     private void GameOver()
     {
-        GetTree().Paused = false;
-        _hud.Text = $""GAME OVER - Poang: {_score}. Tryck R for nytt forsok."";
+        _ended = true;
+        SaveHighscore();
+        GetTree().Paused = true;
+        _hud.Text = $""GAME OVER - Poang: {_score} - Rekord: {_high}\nTryck R for att spela igen"";
     }
 
     private void Play(string path)
@@ -1153,7 +1264,7 @@ public partial class Game : Node2D
     }
 
     private void UpdateHud() =>
-        _hud.Text = $""Niva {_level}/{Levels}   Poang {_score}   HP {_hp}"";
+        _hud.Text = $""Niva {_level}/{Levels}   Poang {_score}   HP {_hp}   Rekord {_high}"";
 }
 ";
 

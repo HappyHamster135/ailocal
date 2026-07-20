@@ -94,7 +94,7 @@ public static class WorkerRole
         app.MapPost("/execute/assignment", async (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            CancellationToken ct) =>
+            PersistentSettingsStore settingsStore, CancellationToken ct) =>
         {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
@@ -247,7 +247,13 @@ public static class WorkerRole
                         : "No matching errors found.";
                     return Task.FromResult((found, fixText, bestPractices));
                 },
-                gameModules: GameModuleTool.Handle);
+                gameModules: GameModuleTool.Handle,
+                visionReviewer: async (imagePath, question, vct) =>
+                {
+                    var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
+                    var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
+                    return (r.Success, FormatVisionResult(r));
+                });
             var loop = new AgentLoop(provider.CompleteAsync, executor);
 
             // Same production-grade system prompt as interactive sessions -
@@ -535,6 +541,14 @@ public static class WorkerRole
             return Results.Ok(new { success, output });
         });
     }
+
+    /// <summary>Formats a VisionResult for the agent: the analysis text plus
+    /// the issue list, so the model gets both the narrative and actionable
+    /// bullet points. Shared with SessionApi's wiring.</summary>
+    internal static string FormatVisionResult(VisionResult r) =>
+        r.Analysis + (r.Issues.Count > 0
+            ? "\n\nVisuella problem:\n" + string.Join("\n", r.Issues.Select(i => "- " + i))
+            : "\n\n(inga visuella problem listade)");
 
     /// <summary>Pulls a human-readable reason out of a failed response body -
     /// either a ProblemDetails "detail" field or a plain {"error": "..."}

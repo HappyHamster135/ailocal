@@ -100,6 +100,11 @@ public sealed class AgentToolExecutor
     // agent can pull in per engine instead of hand-writing them. Args:
     // (action 'list'|'get', moduleName, engine) -> (success, output).
     private readonly Func<string, string?, string?, Task<(bool Success, string Output)>>? _gameModules;
+    // Optional vision-review delegate (Node layer wires this to VisionAnalyzer):
+    // sends an image + question to a vision-capable cloud model and returns
+    // the analysis with any visual issues found. Args: (imagePath, question,
+    // ct) -> (success, output).
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? _visionReviewer;
 
     public AgentToolExecutor(
         AgentAccessLevel level,
@@ -120,7 +125,8 @@ public sealed class AgentToolExecutor
                 Func<string, string, CancellationToken, Task<(bool Success, string Output, double Fps, double PeakMemMb, TimeSpan Duration)>>? playtester = null,
                 Func<string, string, string, string?, CancellationToken, Task<(bool Success, string Output, string? PackagePath, long SizeBytes)>>? packager = null,
                 Func<string, string, Task<(bool Found, string Fixes, string BestPractices)>>? knowledgeBase = null,
-                Func<string, string?, string?, Task<(bool Success, string Output)>>? gameModules = null)
+                Func<string, string?, string?, Task<(bool Success, string Output)>>? gameModules = null,
+                Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? visionReviewer = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
@@ -141,6 +147,7 @@ public sealed class AgentToolExecutor
                 _packager = packager;
                 _knowledgeBase = knowledgeBase;
                 _gameModules = gameModules;
+                _visionReviewer = visionReviewer;
         if (_level == AgentAccessLevel.Sandboxed)
             Directory.CreateDirectory(_workspaceRoot);
     }
@@ -150,9 +157,9 @@ public sealed class AgentToolExecutor
     /// property existed the loop called the static ToolsFor(level) itself,
     /// which meant the loop and the executor had to agree on the flags out
     /// of band; an instance property can't drift from its own switch.</summary>
-    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null, _gameBuilder is not null, _assetGenerator is not null, _screenshotTool is not null, _playtester is not null, _packager is not null, _knowledgeBase is not null, _gameModules is not null);
+    public IReadOnlyList<ToolDefinition> Tools => ToolsFor(_level, _allowInternet, _memory is not null, _gameScaffolder is not null, _appScaffolder is not null, _askUser is not null, _taskDelegator is not null, _gameBuilder is not null, _assetGenerator is not null, _screenshotTool is not null, _playtester is not null, _packager is not null, _knowledgeBase is not null, _gameModules is not null, _visionReviewer is not null);
 
-    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false, bool gameBuild = false, bool hasAssetGen = false, bool hasScreenshot = false, bool hasPlaytest = false, bool hasPackage = false, bool hasKnowledge = false, bool hasGameModules = false)
+    public static IReadOnlyList<ToolDefinition> ToolsFor(AgentAccessLevel level, bool allowInternet = false, bool projectMemory = false, bool gameScaffold = false, bool appScaffold = false, bool canAskUser = false, bool canDelegate = false, bool gameBuild = false, bool hasAssetGen = false, bool hasScreenshot = false, bool hasPlaytest = false, bool hasPackage = false, bool hasKnowledge = false, bool hasGameModules = false, bool hasVision = false)
     {
         if (level == AgentAccessLevel.Off)
             return [];
@@ -275,6 +282,12 @@ public sealed class AgentToolExecutor
                         "Package the built game/app into a distributable .zip file with auto-generated README and metadata. Includes all .exe, assets, and dependencies. Use when the game/app is fully built and tested to create a release artifact.",
                         """{"type":"object","properties":{"root":{"type":"string","description":"Project root directory."},"engine":{"type":"string","description":"Engine: 'html5', 'unity', 'godot', 'python', 'csharp'."},"name":{"type":"string","description":"Human-readable name for the release package."},"outputDir":{"type":"string","description":"Output directory for the .zip (default: {root}/release)."}},"required":[]}"""));
 
+                // ---- Vision review ----------------------------------------------------
+                if (hasVision)
+                    tools.Add(new("vision_review",
+                        "SEE and critique an image with a vision-capable AI model: pass the path to a screenshot (from the screenshot tool) or any PNG/JPG in the workspace, plus a question ('does the game look right? any visual bugs?'). Returns the model's analysis and a list of visual issues. Requires a cloud API key (OpenAI/OpenRouter/Anthropic/Gemini) configured on this node. Use after screenshot to visually verify your game/app.",
+                        """{"type":"object","properties":{"path":{"type":"string","description":"Path to the image to analyze (PNG/JPG)."},"question":{"type":"string","description":"What to evaluate, e.g. 'Ser spelet korrekt ut? Nagra visuella buggar?'"}},"required":["path"]}"""));
+
                 // ---- Ready-made game modules ------------------------------------------
                 if (hasGameModules)
                     tools.Add(new("game_module",
@@ -346,6 +359,8 @@ public sealed class AgentToolExecutor
                 "lookup_knowledge" => Error(call, "lookup_knowledge is not available on this Worker (knowledge base not wired)."),
                 "game_module" when _gameModules is not null => await GameModuleAsync(call, root, ct),
                 "game_module" => Error(call, "game_module is not available on this Worker (module library not wired)."),
+                "vision_review" when _visionReviewer is not null => await VisionReviewAsync(call, root, ct),
+                "vision_review" => Error(call, "vision_review is not available on this Worker (vision analyzer not wired)."),
                 _ => Error(call, $"unknown tool: {call.Name}")
             };
         }
@@ -1090,6 +1105,22 @@ public sealed class AgentToolExecutor
             var (success, output, packagePath, size) = await _packager(root, engine, name, outputDir, ct);
             return success
                 ? new ToolResult(call.Id, call.Name, output)
+                : Error(call, output);
+        }
+
+        private async Task<ToolResult> VisionReviewAsync(ToolCall call, JsonElement args, CancellationToken ct)
+        {
+            if (_visionReviewer is null)
+                return Error(call, "vision_review is not wired.");
+            var path = ResolvePath(RequireString(args, "path"));
+            if (!File.Exists(path))
+                return Error(call, $"image not found: {path}");
+            var question = args.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(q.GetString())
+                ? q.GetString()!
+                : "Beskriv vad du ser. Ser spelet/appen korrekt ut? Lista alla visuella buggar, renderingsfel eller saker som ser ofardiga ut.";
+            var (success, output) = await _visionReviewer(path, question, ct);
+            return success
+                ? new ToolResult(call.Id, call.Name, Truncate(output))
                 : Error(call, output);
         }
 
