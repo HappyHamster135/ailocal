@@ -31,7 +31,9 @@ public sealed class GameRuntimeSmokeTester
         (function(){
         var g = (typeof globalThis !== 'undefined') ? globalThis : this;
         g.__errors = []; g.__warnings = []; g.__requestedIds = []; g.__raf = [];
+        g.__els = []; g.__handlers = { keydown:[], keyup:[], click:[], pointerdown:[], mousedown:[], mouseup:[], mousemove:[] };
         var NOOP = function(){};
+        function listen(type, fn){ if (g.__handlers[type] && typeof fn === 'function') g.__handlers[type].push(fn); }
         function ctx2d(){ return {
           fillStyle:'', strokeStyle:'', lineWidth:1, font:'', globalAlpha:1,
           textAlign:'', textBaseline:'', imageSmoothingEnabled:true,
@@ -51,6 +53,7 @@ public sealed class GameRuntimeSmokeTester
           createPattern:function(){ return {}; }
         }; }
         function makeEl(id){
+          var qcache = {};
           var el = {
             id: id || '', tagName: 'DIV', textContent: '', innerHTML: '', value: '',
             width: 0, height: 0, offsetWidth: 800, offsetHeight: 600,
@@ -59,14 +62,20 @@ public sealed class GameRuntimeSmokeTester
             classList: { add:NOOP, remove:NOOP, toggle:NOOP, contains:function(){ return false; } },
             appendChild: function(x){ if (x) x.parentElement = el; el.children.push(x); return x; },
             removeChild: function(x){ return x; }, remove: NOOP,
-            addEventListener: NOOP, removeEventListener: NOOP,
+            addEventListener: function(type, fn){ listen(type, fn); },
+            removeEventListener: NOOP,
             setAttribute: NOOP, getAttribute: function(){ return null; },
             focus: NOOP, blur: NOOP, click: NOOP,
             getContext: function(){ return ctx2d(); },
-            querySelector: function(){ return makeEl(''); },
+            // Cached per selector: a handler assigned via
+            // el.querySelector('button').onclick must be reachable when the
+            // input driver later iterates __els and clicks everything.
+            querySelector: function(sel){ sel = String(sel);
+              if (!qcache[sel]) qcache[sel] = makeEl(''); return qcache[sel]; },
             querySelectorAll: function(){ return []; },
             getBoundingClientRect: function(){ return { left:0, top:0, right:800, bottom:600, width:800, height:600, x:0, y:0 }; }
           };
+          g.__els.push(el);
           return el;
         }
         var byId = {};
@@ -81,11 +90,13 @@ public sealed class GameRuntimeSmokeTester
             return byId[id]; },
           querySelector: function(){ return makeEl(''); },
           querySelectorAll: function(){ return []; },
-          addEventListener: NOOP, removeEventListener: NOOP
+          addEventListener: function(type, fn){ listen(type, fn); },
+          removeEventListener: NOOP
         };
         g.window = g;
         g.self = g;
-        g.addEventListener = NOOP; g.removeEventListener = NOOP;
+        g.addEventListener = function(type, fn){ listen(type, fn); };
+        g.removeEventListener = NOOP;
         g.location = { reload: NOOP, href: '', search: '', hash: '' };
         g.navigator = { userAgent: 'ailocal-smoke', language: 'sv' };
         g.performance = { now: function(){ return 0; } };
@@ -127,6 +138,48 @@ public sealed class GameRuntimeSmokeTester
           for (var i = 0; i < q.length; i++){
             try { q[i](g.__time); }
             catch(e){ g.__errors.push('frame: ' + (e && e.message ? e.message : String(e))); } } };
+
+        // ---- Input driver: exercise the gameplay code, not just the draw
+        // loop. Games gate update() behind a start click, so without this the
+        // smoke run never reaches the code where most crashes live. ----
+        function ev(extra){ var e = { key:'', offsetX:120, offsetY:120, clientX:120, clientY:120,
+          preventDefault:NOOP, stopPropagation:NOOP, button:0, touches:[] };
+          if (extra) for (var k in extra) e[k] = extra[k]; return e; }
+        function fire(list, e){ for (var i = 0; i < list.length; i++){
+          try { list[i](e); } catch(x){ g.__errors.push('input-handler: ' + (x && x.message ? x.message : String(x))); } } }
+        g.__clickAll = function(){
+          for (var i = 0; i < g.__els.length; i++){ var el = g.__els[i];
+            if (typeof el.onclick === 'function'){
+              try { el.onclick(ev()); } catch(x){ g.__errors.push('onclick: ' + (x && x.message ? x.message : String(x))); } } }
+          fire(g.__handlers.click, ev()); };
+        g.__key = function(key, down){
+          var e = ev({ key: key });
+          var fn = down ? g.document.onkeydown : g.document.onkeyup;
+          if (typeof fn === 'function'){ try { fn(e); } catch(x){ g.__errors.push('onkey: ' + (x && x.message ? x.message : String(x))); } }
+          fire(down ? g.__handlers.keydown : g.__handlers.keyup, e); };
+        g.__mouse = function(x, y, down){
+          for (var i = 0; i < g.__els.length; i++){ var el = g.__els[i];
+            var e = ev({ offsetX:x, offsetY:y, clientX:x, clientY:y });
+            try {
+              if (typeof el.onmousemove === 'function') el.onmousemove(e);
+              if (down && typeof el.onmousedown === 'function') el.onmousedown(e);
+              if (!down && typeof el.onmouseup === 'function') el.onmouseup(e);
+            } catch(x2){ g.__errors.push('mouse-handler: ' + (x2 && x2.message ? x2.message : String(x2))); } }
+          fire(g.__handlers.mousemove, ev({ offsetX:x, offsetY:y }));
+          if (down) fire(g.__handlers.mousedown, ev({ offsetX:x, offsetY:y })); };
+        // One scripted play session: start, run right + jump bursts, aim and
+        // hold fire, tap genre hotkeys, pause-toggle twice near the end.
+        g.__auto = function(f){
+          if (f === 2) g.__clickAll();
+          if (f === 4){ g.__key('1', true); g.__key('1', false); g.__mouse(200, 200, true); }
+          if (f >= 6 && f % 3 === 0) g.__mouse(120 + (f * 5) % 500, 100 + (f * 7) % 350, true);
+          if (f === 8){ g.__key('ArrowRight', true); g.__key('d', true); }
+          if (f % 24 === 10){ g.__key(' ', true); g.__key('w', true); g.__key('ArrowUp', true); }
+          if (f % 24 === 14){ g.__key(' ', false); g.__key('w', false); g.__key('ArrowUp', false); }
+          if (f === 60){ g.__key('ArrowRight', false); g.__key('d', false); g.__key('ArrowLeft', true); g.__key('a', true); }
+          if (f === 100){ g.__key('e', true); g.__key('e', false); g.__key('i', true); g.__key('i', false); }
+          if (f === 120){ g.__key('Escape', true); g.__key('Escape', false); }
+          if (f === 126){ g.__key('Escape', true); g.__key('Escape', false); } };
         })();
         """;
 
@@ -174,7 +227,9 @@ public sealed class GameRuntimeSmokeTester
         {
             try
             {
-                engine.Evaluate("__pump()");
+                // __auto drives a scripted play session (start click, keys,
+                // mouse) so update()-paths behind the start gate actually run.
+                engine.Evaluate($"__auto({i}); __pump()");
                 pumped++;
             }
             catch (Exception ex)

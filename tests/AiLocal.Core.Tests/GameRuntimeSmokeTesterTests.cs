@@ -84,4 +84,26 @@ public class GameRuntimeSmokeTesterTests
         var result = Run("<script>alert('Game Over');</script>");
         Assert.Contains(result.Warnings, w => w.Contains("alert()"));
     }
+
+    [Fact]
+    public void CrashBehindStartGate_IsReachedByTheInputDriver()
+    {
+        // The crash only exists in gameplay: update() early-returns until the
+        // start button is clicked AND a key is held. Without the input driver
+        // this game passes; with it the crash must surface - proving the
+        // smoke run exercises real gameplay code, not just the draw loop.
+        var result = new GameRuntimeSmokeTester().Run("""
+            <button id="startBtn">Start</button><canvas id="c"></canvas>
+            <script>
+            let started = false; const keys = {};
+            document.getElementById('startBtn').onclick = () => { started = true; };
+            addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+            function update(){ if (!started) return;
+              if (keys['arrowright'] || keys['d']) kraschaIGameplay(); }
+            function loop(){ update(); requestAnimationFrame(loop); }
+            loop();
+            </script>
+            """, frames: 60);
+        Assert.Contains(result.Errors, e => e.Contains("kraschaIGameplay"));
+    }
 }
