@@ -2444,7 +2444,11 @@ internal static class Dashboard
           sessionLiveMessages: [],
           sessionSearch: '',
           newSessionFormOpen: false,
-          activeSessionRuns: 0
+          activeSessionRuns: 0,
+          // Sant medan DEN HÄR fliken äger en pågående uppdrags-SSE - då har
+          // fliken färskare data än den persisterade loggen och rehydrering
+          // får inte skriva över den optimistiska vyn (se loadAssignmentLog).
+          assignmentStreamLive: false
         };
 
         const $ = id => document.getElementById(id);
@@ -2639,6 +2643,16 @@ internal static class Dashboard
           $('composer').style.display = local.role === 'Worker' ? 'none' : 'grid';
           $('delegateNavBtn').style.display = local.role === 'Worker' ? 'none' : 'flex';
           if (local.role === 'Worker' && state.activeView === 'delegate') switchView('work');
+          // En Overseer kör sessioner PÅ HOST-DATORN (hela /api/sessions
+          // proxas dit) - den lokala mappväljaren skulle bläddra på fel
+          // maskin, så göm den och förtydliga att sökvägen gäller Hosten.
+          const sessionsOnHost = local.role === 'Overseer';
+          const browseBtn = $('browseNewSessionFolder');
+          if (browseBtn) browseBtn.style.display = sessionsOnHost ? 'none' : '';
+          const folderInput = $('newSessionFolderPath');
+          if (folderInput) folderInput.placeholder = sessionsOnHost
+            ? 'Mappsökväg på HOST-datorn, t.ex. C:\\projekt\\mitt-projekt'
+            : 'Mappsökväg, t.ex. C:\\projekt\\mitt-projekt';
           renderInspector();
         }
 
@@ -5240,6 +5254,50 @@ internal static class Dashboard
         }
 
         // En körning i taget i delegera-vyn: att kunna avfyra en andra
+        // ---- Persistent uppdragshistorik (rehydrering + poll) ----
+        // Stegvisningen levde tidigare BARA i flikens JS-minne: en omladdning
+        // (t.ex. musknapp bak/fram) eller en appomstart visade på sin höjd
+        // slutsvaret, och en pågående körning såg ut som ingenting. Nu byggs
+        // delegera-vyn upp från nodens egen logg (GET /api/assignment-log)
+        // och pollas var 3:e sekund så länge något inlägg är Running.
+        function assignmentLogToMessages(entries) {
+          const msgs = [];
+          [...entries].reverse().forEach(e => {
+            msgs.push({ role: 'user', content: e.Prompt, isAssignment: true, fromLog: true });
+            msgs.push({
+              role: 'assistant', isAssignment: true, fromLog: true,
+              state: e.State,
+              workerName: e.WorkerName || '',
+              steps: e.Steps || [],
+              content: e.FinalAnswer || '',
+              previewPath: e.PreviewPath || null,
+              startedAt: e.State === 'Running' && e.StartedAt ? new Date(e.StartedAt).getTime() : null
+            });
+          });
+          return msgs;
+        }
+
+        // Fliken äger vyn när en egen ström pågår ELLER när den innehåller
+        // lokalt skapade bubblor (planer, nyss körda uppdrag) - loggen får
+        // aldrig skriva över dem; den tar bara över i en "tom" flik.
+        function assignmentViewOwnedLocally() {
+          return state.assignmentStreamLive
+            || state.assignmentMessages.some(m => m.role !== 'user' && !m.fromLog);
+        }
+
+        let assignmentLogTimer = null;
+        async function loadAssignmentLog() {
+          if (assignmentViewOwnedLocally()) return;
+          let entries;
+          try { entries = await fetchJson('/api/assignment-log') ?? []; }
+          catch { return; /* äldre nod utan endpointen - visa som förut */ }
+          state.assignmentMessages = assignmentLogToMessages(entries);
+          renderMessages();
+          clearTimeout(assignmentLogTimer);
+          if (entries.some(e => e.State === 'Running'))
+            assignmentLogTimer = setTimeout(loadAssignmentLog, 3000);
+        }
+
         // chatt/uppdrag ovanpå en pågående (utan kö eller varning) gjorde
         // bara läget förvirrande. Avbryt (✕) eller invänta klart för nästa.
         function delegateBusy() {
@@ -5504,6 +5562,7 @@ internal static class Dashboard
         async function runPlanSubtask(subtask, assignmentText, workerId) {
           const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title, startedAt: Date.now(), steps: [] };
           state.assignmentMessages.push(stepMsg);
+          state.assignmentStreamLive = true;
           renderMessages();
 
           let workerIdUsed = workerId;
@@ -5570,6 +5629,8 @@ internal static class Dashboard
             stepMsg.content = `✗ ${error.message}`;
             summary = error.message;
             renderMessages();
+          } finally {
+            state.assignmentStreamLive = false;
           }
 
           return { success, summary, workerId: workerIdUsed };
@@ -5900,9 +5961,19 @@ internal static class Dashboard
           catch (e) { showGlobalNotice(e.message, true); }
         };
 
+        // Musknapp 4/5 (och Alt+pil) navigerade bak/fram: dashboarden är EN
+        // sida utan historik, så "bakåt" laddade om appen och kastade bort
+        // hela den levande vyn medan agenten fortfarande jobbade (rapporterat).
+        // History-fällan äter navigeringen; preventDefault stoppar X-knapparna.
+        history.pushState(null, '', location.href);
+        window.addEventListener('popstate', () => history.pushState(null, '', location.href));
+        window.addEventListener('mousedown', e => { if (e.button === 3 || e.button === 4) e.preventDefault(); });
+        window.addEventListener('mouseup', e => { if (e.button === 3 || e.button === 4) e.preventDefault(); });
+
         loadProviders();
         refresh();
         setInterval(refresh, 3000);
+        loadAssignmentLog();
         refreshIsolation();
         renderRoles();
         renderNotices();

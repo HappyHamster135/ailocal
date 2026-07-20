@@ -362,10 +362,14 @@ public static class NodeWebHost
                 : Results.Problem(detail: result.Error ?? "Uppdateringen misslyckades.", statusCode: StatusCodes.Status502BadGateway);
         });
 
-        // Sessions are local-only (see SessionStore) and available on every
-        // role, not just Host/Worker - same tier as everything else mapped
-        // in this method, which runs unconditionally before the per-role switch.
-        SessionApi.MapEndpoints(app);
+        // Sessions are local-only (see SessionStore) on every role EXCEPT
+        // Overseer: there the whole /api/sessions surface is proxied to the
+        // primary Host instead (OverseerRole.MapEndpoints), so the operator
+        // can create and run sessions in folders ON THE HOST MACHINE from
+        // their own desk - mapping the local endpoints too would make the
+        // routes ambiguous.
+        if (settings.Role != NodeRole.Overseer)
+            SessionApi.MapEndpoints(app);
         DialogsApi.MapEndpoints(app);
         GitApi.MapEndpoints(app);
         FilesApi.MapEndpoints(app);

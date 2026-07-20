@@ -121,17 +121,27 @@ public sealed class WorkerRegistry
             existing.ModelTiers = node.ModelTiers;
             existing.WorkspacePath = node.WorkspacePath;
             existing.LastSeen = node.LastSeen;
-            // ActiveTasks is Host-tracked (via WorkerSlotBroker) and never part
-            // of a Worker's own heartbeat payload - left untouched here. Status
-            // IS always re-derived from it (not just conditionally upgraded) so
-            // a successful heartbeat always clears a stale Offline flag left by
-            // MarkStale - otherwise a Worker that ever missed one heartbeat
-            // window would show Offline forever, even after reconnecting.
-            existing.Status = existing.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
+            // Two separate load counters, never mixed: ActiveTasks is the
+            // Host's own dispatch counter (WorkerSlotBroker bumps it and MUST
+            // keep decrementing on this exact instance), while the heartbeat's
+            // announced ActiveTasks is the node's SELF-report of agent runs it
+            // started locally - stored in SelfReportedActive. Status is always
+            // re-derived (not conditionally upgraded) so a successful heartbeat
+            // clears a stale Offline flag left by MarkStale; Busy when EITHER
+            // counter is positive, so a locally-started build finally shows.
+            existing.SelfReportedActive = node.ActiveTasks;
+            existing.Status = existing.ActiveTasks > 0 || existing.SelfReportedActive > 0
+                ? NodeStatus.Busy : NodeStatus.Idle;
             Persist();
             return true;
         }
 
+        // First sighting: the announced ActiveTasks is the node's self-report,
+        // never a Host dispatch count - normalize before storing so the two
+        // counters stay separate from the very first heartbeat.
+        node.SelfReportedActive = node.ActiveTasks;
+        node.ActiveTasks = 0;
+        node.Status = node.SelfReportedActive > 0 ? NodeStatus.Busy : NodeStatus.Idle;
         _nodes[node.Id] = node;
         Persist();
         return true;
@@ -739,7 +749,9 @@ public static class HostRole
                 id = n.Id,
                 name = n.Name,
                 status = n.Status.ToString(),
-                activeTasks = n.ActiveTasks,
+                // Max, inte summa: en Host-dispatchad korning raknas av BADA
+                // raknarna (Hostens bump + workerns sjalvrapport).
+                activeTasks = Math.Max(n.ActiveTasks, n.SelfReportedActive),
                 workspacePath = n.WorkspacePath,
                 agentAccess = n.AgentAccess.ToString(),
                 current = inflight.FirstOrDefault(t => t.WorkerName == n.Name) is { } cur
@@ -897,7 +909,7 @@ public static class HostRole
         // through to whichever connected Worker has agent mode enabled.
         app.MapPost("/api/assignment", async (
             AssignmentRequest req, HttpContext ctx, WorkerRegistry registry,
-            IHttpClientFactory httpFactory, TaskBoard board, CancellationToken ct) =>
+            IHttpClientFactory httpFactory, TaskBoard board, AssignmentLog assignmentLog, CancellationToken ct) =>
         {
             // A plan's sequential subtasks pin to one specific Worker (see
             // GoalPlanner) so later steps can see earlier ones' file changes -
@@ -983,6 +995,17 @@ public static class HostRole
             task.State = TaskState.Running;
             board.Save();
 
+            // Omedelbar Busy-markering (utan att vänta på nästa heartbeat) -
+            // den här dispatch-vägen bumpade aldrig räknaren, så workern stod
+            // som "Idle | 0 aktiva" under hela bygget (användarrapport).
+            candidate.ActiveTasks++;
+            candidate.Status = NodeStatus.Busy;
+
+            // Persistent steghistorik: samma logg som lokala körningar skriver,
+            // så dashboarden kan återuppbygga hela stegvisningen efter en
+            // omladdning/appomstart i stället för att bara visa slutsvaret.
+            var logEntry = assignmentLog.Begin(req.Assignment, candidate.Name);
+
             var finalized = false;
             try
             {
@@ -1002,7 +1025,13 @@ public static class HostRole
                     try
                     {
                         using var doc = JsonDocument.Parse(json);
-                        if (doc.RootElement.TryGetProperty("final", out var final))
+                        if (doc.RootElement.TryGetProperty("step", out var step))
+                        {
+                            assignmentLog.AddStep(logEntry,
+                                step.TryGetProperty("Kind", out var k) ? k.GetString() ?? "" : "",
+                                step.TryGetProperty("Detail", out var d) ? d.GetString() ?? "" : "");
+                        }
+                        else if (doc.RootElement.TryGetProperty("final", out var final))
                         {
                             var ok = final.TryGetProperty("Success", out var s) && s.GetBoolean();
                             task.Result = final.TryGetProperty("FinalAnswer", out var fa) ? fa.GetString() : null;
@@ -1029,9 +1058,20 @@ public static class HostRole
                 }
                 task.CompletedAt = DateTimeOffset.UtcNow;
                 board.Save();
+                assignmentLog.Complete(logEntry, task.State == TaskState.Completed, task.Result, previewPath: null);
+                if (candidate.ActiveTasks > 0) candidate.ActiveTasks--;
+                candidate.Status = candidate.ActiveTasks > 0 || candidate.SelfReportedActive > 0
+                    ? NodeStatus.Busy : NodeStatus.Idle;
             }
             return Results.Empty;
         });
+
+        // Persistent uppdragshistorik (prompt + alla steg + utfall) - se
+        // AssignmentLog. Serialiseras med PascalCase (default-serializern,
+        // inte minimal-API:ts camelCase) så stegen har exakt samma form som
+        // SSE-framarna och dashboarden kan återanvända stepRowsHtml rakt av.
+        app.MapGet("/api/assignment-log", (AssignmentLog assignmentLog) =>
+            Results.Text(JsonSerializer.Serialize(assignmentLog.Snapshot()), "application/json"));
 
         // Turns a free-text goal into a reviewable list of agent subtasks
         // (see GoalPlanner) - a separate step from actually running them
@@ -1290,7 +1330,7 @@ public static class HostRole
                 role = worker.Role.ToString(),
                 status = worker.Status.ToString(),
                 endpoint = worker.Endpoint,
-                activeTasks = worker.ActiveTasks,
+                activeTasks = Math.Max(worker.ActiveTasks, worker.SelfReportedActive),
                 skills = worker.Skills
             });
             edges.Add(new { source = hostId, target = worker.Id });
@@ -1885,7 +1925,8 @@ public static class HostRole
                 board.Save();
             }
             if (worker.ActiveTasks > 0) worker.ActiveTasks--;
-            worker.Status = worker.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
+            worker.Status = worker.ActiveTasks > 0 || worker.SelfReportedActive > 0
+                ? NodeStatus.Busy : NodeStatus.Idle;
         }
     }
 
@@ -2138,7 +2179,8 @@ public static class HostRole
             if (worker.ActiveTasks > 0) worker.ActiveTasks--;
             worker.Status = nodeUnreachable
                 ? NodeStatus.Offline
-                : worker.ActiveTasks > 0 ? NodeStatus.Busy : NodeStatus.Idle;
+                : worker.ActiveTasks > 0 || worker.SelfReportedActive > 0
+                    ? NodeStatus.Busy : NodeStatus.Idle;
             board.Save();
             broker.Release();
         }

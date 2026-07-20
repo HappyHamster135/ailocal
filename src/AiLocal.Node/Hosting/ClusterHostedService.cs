@@ -25,6 +25,7 @@ public sealed class ClusterHostedService : BackgroundService
     private readonly ILogger<ClusterHostedService> _log;
     private readonly string _nodeId;
     private readonly PersistentSettingsStore _settingsStore;
+    private readonly AssignmentLog _assignmentLog;
 
     public ClusterHostedService(
         NodeSettings settings,
@@ -36,6 +37,7 @@ public sealed class ClusterHostedService : BackgroundService
         PairingCoordinator pairing,
         RegistrationStatus registrationStatus,
         IHttpClientFactory httpFactory,
+        AssignmentLog assignmentLog,
         ILogger<ClusterHostedService> log)
     {
         _settings = settings;
@@ -48,6 +50,7 @@ public sealed class ClusterHostedService : BackgroundService
         _pairing = pairing;
         _registrationStatus = registrationStatus;
         _httpFactory = httpFactory;
+        _assignmentLog = assignmentLog;
         _log = log;
     }
 
@@ -213,6 +216,11 @@ public sealed class ClusterHostedService : BackgroundService
             {
                 try
                 {
+                    // Heartbeaten bar tidigare aldrig nodens EGEN last - en
+                    // lokalt startad agentkorning syntes darfor aldrig som
+                    // Busy i klustervyn. ActiveTasks har = sjalvrapporten;
+                    // Hosten lagger den i SelfReportedActive (se Upsert).
+                    var activeRuns = _assignmentLog.RunningCount;
                     var info = new NodeInfo
                     {
                         Id = _nodeId,
@@ -220,6 +228,8 @@ public sealed class ClusterHostedService : BackgroundService
                         Role = NodeRole.Worker,
                         Endpoint = SelfEndpoint,
                         TlsEndpoint = SelfTlsEndpoint,
+                        Status = activeRuns > 0 ? NodeStatus.Busy : NodeStatus.Idle,
+                        ActiveTasks = activeRuns,
                         Hardware = _hardware,
                         Skills = [.. _settings.Worker.Skills],
                         MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,

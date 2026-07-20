@@ -97,8 +97,8 @@ public static class WorkerRole
         app.MapPost("/execute/assignment", (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            PersistentSettingsStore settingsStore, CancellationToken ct)
-            => RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, ct, includePreview: false));
+            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, CancellationToken ct)
+            => RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, ct, includePreview: false));
 
         // --- Task isolation (git worktree per task) ---------------------------------
         // Each "employee" (agent run) gets its own worktree+branch so two
@@ -266,7 +266,8 @@ public static class WorkerRole
     internal static async Task<IResult> RunAssignmentAsync(
         AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
         NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-        PersistentSettingsStore settingsStore, CancellationToken ct, bool includePreview = true)
+        PersistentSettingsStore settingsStore, AssignmentLog assignmentLog,
+        CancellationToken ct, bool includePreview = true)
     {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
@@ -440,12 +441,20 @@ public static class WorkerRole
             // at all. Now the production-bar project always lands on disk and
             // the model's job is to EXTEND it. Never touches a non-empty
             // workspace (existing projects must not be overwritten).
+            // Varje steg skrivs BÅDE till SSE-strömmen och den persistenta
+            // uppdragsloggen - så en omladdad/omstartad dashboard kan bygga
+            // upp exakt samma stegvisning igen (se AssignmentLog).
+            var logEntry = assignmentLog.Begin(req.Assignment, settings.NodeName);
+            var logCompleted = false;
             Func<AgentStep, Task> emitAgentStep = async step =>
             {
+                assignmentLog.AddStep(logEntry, step.Kind, step.Detail);
                 await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             };
             Task EmitStep(string kind, string detail) => emitAgentStep(new AgentStep(kind, detail));
+            try
+            {
 
             // Kvalitetsgrindens "skrevs något alls?"-kontroll jämför mot den
             // här tidpunkten - tagen FÖRE förskaffolden så även den räknas
@@ -569,10 +578,21 @@ public static class WorkerRole
                     previewPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, entry).Replace('\\', '/');
             }
 
+            assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath);
+            logCompleted = true;
+
             await ctx.Response.WriteAsync(
                 $"data: {JsonSerializer.Serialize(new { final = result, previewPath })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
+            }
+            finally
+            {
+                // Avbrott/undantag mitt i körningen får aldrig lämna ett evigt
+                // "Running"-inlägg som dashboarden pollar på i all oändlighet.
+                if (!logCompleted)
+                    assignmentLog.Complete(logEntry, success: false, "Körningen avbröts innan den blev klar.", previewPath: null);
+            }
     }
 
     /// <summary>Local (no-cluster) planning + assignment endpoints for the
@@ -610,7 +630,7 @@ public static class WorkerRole
         app.MapPost("/api/assignment", async (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            PersistentSettingsStore settingsStore, CancellationToken ct) =>
+            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, CancellationToken ct) =>
         {
             // Mirror the engine's own early checks BEFORE the response starts,
             // so they still surface as proper HTTP errors instead of dying
@@ -629,8 +649,13 @@ public static class WorkerRole
             await ctx.Response.WriteAsync(
                 $"data: {JsonSerializer.Serialize(new { worker = new { id = "local", name = settings.NodeName } })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
-            return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, ct);
+            return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, ct);
         });
+
+        // Persistent uppdragshistorik för DEN HÄR nodens körningar - samma
+        // PascalCase-form som SSE-framarna (se HostRole:s motsvarighet).
+        app.MapGet("/api/assignment-log", (AssignmentLog assignmentLog) =>
+            Results.Text(JsonSerializer.Serialize(assignmentLog.Snapshot()), "application/json"));
 
         // "Öppna resultatet": serverar det senast byggda projektet direkt
         // från nodens arbetsyta så prompt -> spelbart spel blir ETT klick.

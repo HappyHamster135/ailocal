@@ -32,6 +32,15 @@ public sealed class NodeInfo
     public List<string> ProviderPriority { get; set; } = [];
     public string? LocalModel { get; set; }
     public string? RecommendedModel { get; set; }
+
+    /// <summary>Host-registry bookkeeping: the number of agent runs the node
+    /// itself reported in its latest heartbeat (its announced ActiveTasks).
+    /// Kept SEPARATE from ActiveTasks, which is the Host's own dispatch
+    /// counter - mixing them would let a stale heartbeat clobber an in-flight
+    /// dispatch bump (see WorkerRegistry.Upsert). A node is Busy when EITHER
+    /// is positive, so locally-started assignment runs finally show as Busy
+    /// in the cluster view (user report: worker said Idle while building).</summary>
+    public int SelfReportedActive { get; set; }
     public string? Version { get; set; }
     /// <summary>The registering node's own cluster token, shared with the
     /// Overseer so it can proxy node-to-node calls back using the Host's

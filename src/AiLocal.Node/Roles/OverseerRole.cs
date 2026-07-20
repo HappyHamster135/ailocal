@@ -208,6 +208,88 @@ public static class OverseerRole
         app.MapPut("/api/providers", (ProviderOrderUpdate req, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Put, "/providers", req, ct));
+
+        // Uppdragsloggen (persistent steghistorik) läses från primära Hosten
+        // så delegera-vyn kan återuppbygga stegvisningen även här.
+        app.MapGet("/api/assignment-log", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/assignment-log", null, ct));
+
+        // Sessioner på Host-datorn: hela /api/sessions-ytan proxas till
+        // primära Hosten (buffrat för CRUD, strömmande för /run) så operatören
+        // kan skapa och köra sessioner i mappar PÅ HOST-MASKINEN från sitt
+        // eget skrivbord. Overseerns egna lokala sessions-endpoints är
+        // avstängda (NodeWebHost mappar inte SessionApi för Overseer) - annars
+        // vore rutterna tvetydiga.
+        app.Map("/api/sessions", (HttpContext ctx, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxySessionCall(ctx, locator, hosts, hf, "", ct));
+        app.Map("/api/sessions/{**rest}", (string rest, HttpContext ctx, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxySessionCall(ctx, locator, hosts, hf, "/" + rest, ct));
+    }
+
+    /// <summary>Generic method-preserving proxy for one /api/sessions call to
+    /// the primary Host: buffered for ordinary CRUD, switched to a straight
+    /// stream copy when the upstream answers with SSE (a session /run).</summary>
+    private static async Task<IResult> ProxySessionCall(
+        HttpContext ctx, HostLocator locator, HostRegistry hosts,
+        IHttpClientFactory httpFactory, string subPath, CancellationToken ct)
+    {
+        var candidates = PrimaryCandidates(locator, hosts);
+        if (candidates.Count == 0)
+            return Results.Problem("host not yet discovered");
+
+        byte[]? body = null;
+        if (ctx.Request.ContentLength is > 0 || ctx.Request.Headers.TransferEncoding.Count > 0)
+        {
+            using var ms = new MemoryStream();
+            await ctx.Request.Body.CopyToAsync(ms, ct);
+            body = ms.ToArray();
+        }
+
+        foreach (var endpoint in candidates)
+        {
+            HttpResponseMessage upstream;
+            try
+            {
+                var client = httpFactory.CreateClient("cluster");
+                client.Timeout = Timeout.InfiniteTimeSpan; // /run är SSE och lever tills agenten är klar
+                var request = new HttpRequestMessage(new HttpMethod(ctx.Request.Method),
+                    $"{endpoint.TrimEnd('/')}/api/sessions{subPath}");
+                if (body is not null)
+                {
+                    request.Content = new ByteArrayContent(body);
+                    if (!string.IsNullOrEmpty(ctx.Request.ContentType))
+                        request.Content.Headers.TryAddWithoutValidation("Content-Type", ctx.Request.ContentType);
+                }
+                var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
+                if (!string.IsNullOrWhiteSpace(token))
+                    request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
+                upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            }
+            catch
+            {
+                continue; // denna Host onåbar - prova nästa kandidat
+            }
+
+            using var _ = upstream;
+            var contentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/json";
+            if (contentType.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Response.StatusCode = (int)upstream.StatusCode;
+                ctx.Response.Headers.CacheControl = "no-cache";
+                ctx.Response.ContentType = "text/event-stream";
+                await using var upstreamStream = await upstream.Content.ReadAsStreamAsync(ct);
+                await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
+                return Results.Empty;
+            }
+
+            var payload = await upstream.Content.ReadAsStringAsync(ct);
+            return Results.Content(payload, contentType, statusCode: (int)upstream.StatusCode);
+        }
+
+        return Results.Problem("ingen Host gick att nå för sessionsanropet", statusCode: StatusCodes.Status502BadGateway);
     }
 
     private static async Task<IResult> AggregateNodes(
