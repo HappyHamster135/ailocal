@@ -59,6 +59,15 @@ public sealed class ToolProvisioner
             null,
             null,
             "--version 6000.2.13f1 --accept-license"),
+        // Python: officiella python.org-installern, tyst per-user (ingen
+        // admin), pip inkluderat, PATH uppdaterad for NYA processer. Den
+        // redan korande noden ser inte nya PATH - darfor loser
+        // PythonLocator (Core) upp den absoluta sokvagen for verify/run.
+        ["python"] = new("Python 3.12 (officiell installer)",
+            "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe",
+            null,
+            null,
+            "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0 SimpleInstall=1"),
     };
 
     public ToolProvisioner()
@@ -136,6 +145,15 @@ public sealed class ToolProvisioner
             var note = spec.ArchiveEntry is not null
                 ? $"{spec.Display} nedladdad och extraherad till {dest}."
                 : $"{spec.Display} installerad (körde officiell installer med fasta argument).";
+            if (key.Equals("python", StringComparison.OrdinalIgnoreCase))
+            {
+                // Den korande processen ser inte nya PATH - ge agenten den
+                // absoluta sokvagen direkt sa den kan fortsatta utan omstart.
+                var python = AiLocal.Core.Agent.PythonLocator.Find();
+                note += python is not null
+                    ? $" python.exe: {python} - verify/run hittar den automatiskt; anvand den absoluta sokvagen i run_command."
+                    : " OBS: kunde inte lokalisera python.exe efter installationen - kontrollera %LOCALAPPDATA%\\Programs\\Python\\.";
+            }
             return new(true, note);
         }
         catch (Exception ex)

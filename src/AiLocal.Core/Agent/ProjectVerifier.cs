@@ -117,7 +117,11 @@ public sealed class ProjectVerifier
         ProjectKind.Node => "npm test --if-present && npm run build --if-present",
         ProjectKind.Rust => "cargo build",
         ProjectKind.Go => "go build ./...",
-        ProjectKind.Python => "python -m compileall .",
+        // Absolut sokvag nar python finns installerad men inte pa PATH -
+        // t.ex. direkt efter att provision-verktyget installerat den (den
+        // korande processen ser aldrig nya PATH). Bara "python" gav exit
+        // 9009 och agenten skippade verifieringen helt.
+        ProjectKind.Python => $"{PythonLocator.CommandOrDefault()} -m compileall .",
         _ => ""
     };
 

@@ -92,11 +92,14 @@ public sealed class WorkspaceService
             Directory.GetFiles(root, "*.py").Length > 0)
         {
             var entry = FirstPythonEntry(root);
+            // Absolut python-sokvag nar den inte ar pa PATH (t.ex. nyss
+            // provisionerad) - spegling av ProjectVerifier.
+            var python = AiLocal.Core.Agent.PythonLocator.Find() ?? "python";
             return kind switch
             {
-                "test" => new("python", ["-m", "pytest"], "test"),
-                "run" => new("python", [entry ?? "main.py"], "run"),
-                _ => new("pip", ["install", "-r", "requirements.txt"], "build"),
+                "test" => new(python, ["-m", "pytest"], "test"),
+                "run" => new(python, [entry ?? "main.py"], "run"),
+                _ => new(python, ["-m", "pip", "install", "-r", "requirements.txt"], "build"),
             };
         }
         return null; // unknown project kind - pass through, nothing to do

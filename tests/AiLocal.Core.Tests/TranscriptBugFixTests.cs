@@ -121,4 +121,24 @@ public class TranscriptBugFixTests : IDisposable
         Assert.Null(AgentToolExecutor.DetectTruncation("index.html",
             "<!DOCTYPE html><html><body><script>const x = 1;</script></body></html>"));
     }
+
+    // ---- Python: provisionerbar + lokaliserbar (rapporten: agenten
+    // skippade verify i stallet for att installera python) ------------------
+
+    [Fact]
+    public async Task Provision_KnowsPython_AndUnknownToolListsIt()
+    {
+        var result = await new ToolProvisioner().ProvisionAsync("definitivt-okant", _dir, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Contains("python", result.Output); // katalogen listar python som tillatet namn
+    }
+
+    [Fact]
+    public void PythonLocator_CommandOrDefault_AlwaysYieldsARunnableShape()
+    {
+        var cmd = PythonLocator.CommandOrDefault();
+        // Antingen bara "python" (PATH-fallet) eller en citerad absolut vag.
+        Assert.True(cmd == "python" || (cmd.StartsWith('"') && cmd.EndsWith('"') && cmd.Contains("python", StringComparison.OrdinalIgnoreCase)),
+            $"ovantat kommando: {cmd}");
+    }
 }
