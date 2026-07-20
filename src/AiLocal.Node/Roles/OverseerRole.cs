@@ -102,6 +102,57 @@ public static class OverseerRole
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/api/goal-plan", req, ct, TimeSpan.FromSeconds(180)));
 
+        // Avbryt + live-ström för chattmål: utan dessa två gav ✕-knappen
+        // HTTP 404 från Overseer-vyn och chatten stod på "Working..." utan
+        // ett enda steg tills målet var helt klart.
+        app.MapPost("/api/tasks/{id}/cancel", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, $"/api/tasks/{Esc(id)}/cancel", null, ct));
+
+        app.MapGet("/api/tasks/{id}/stream", async (string id, HttpContext ctx,
+            HostLocator locator, HostRegistry hosts, IHttpClientFactory hf, CancellationToken ct) =>
+        {
+            var candidates = PrimaryCandidates(locator, hosts);
+            if (candidates.Count == 0)
+                return Results.Problem("host not yet discovered");
+
+            foreach (var endpoint in candidates)
+            {
+                HttpResponseMessage upstream;
+                try
+                {
+                    var client = hf.CreateClient("cluster");
+                    client.Timeout = Timeout.InfiniteTimeSpan; // SSE lever tills malet ar klart
+                    var request = new HttpRequestMessage(HttpMethod.Get,
+                        $"{endpoint.TrimEnd('/')}/api/tasks/{Esc(id)}/stream");
+                    var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
+                    if (!string.IsNullOrWhiteSpace(token))
+                        request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
+                    upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                using var _ = upstream;
+                if (!upstream.IsSuccessStatusCode)
+                {
+                    var body = await upstream.Content.ReadAsStringAsync(ct);
+                    return Results.Content(body, upstream.Content.Headers.ContentType?.ToString() ?? "application/json",
+                        statusCode: (int)upstream.StatusCode);
+                }
+
+                ctx.Response.Headers.CacheControl = "no-cache";
+                ctx.Response.ContentType = "text/event-stream";
+                await using var upstreamStream = await upstream.Content.ReadAsStreamAsync(ct);
+                await upstreamStream.CopyToAsync(ctx.Response.Body, ct);
+                return Results.Empty;
+            }
+
+            return Results.Problem("ingen Host gick att nå för strömmen", statusCode: StatusCodes.Status502BadGateway);
+        });
+
         app.MapPost("/api/assignment", async (AssignmentRequest req, HttpContext ctx,
             HostLocator locator, HostRegistry hosts, IHttpClientFactory hf, CancellationToken ct) =>
         {

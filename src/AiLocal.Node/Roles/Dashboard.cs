@@ -4233,6 +4233,7 @@ internal static class Dashboard
           // a page reload; that's a known, intentional limit of this first
           // pass, not an oversight.
           const allMessages = [...state.messages, ...state.assignmentMessages];
+          syncComposerLock();
           if (!allMessages.length) {
             box.innerHTML = `<div class="empty empty-hero">
               <div class="hero-mark">AI</div>
@@ -5235,9 +5236,33 @@ internal static class Dashboard
           globalNoticeTimer = setTimeout(() => { box.className = 'notice'; }, 8000);
         }
 
+        // En körning i taget i delegera-vyn: att kunna avfyra en andra
+        // chatt/uppdrag ovanpå en pågående (utan kö eller varning) gjorde
+        // bara läget förvirrande. Avbryt (✕) eller invänta klart för nästa.
+        function delegateBusy() {
+          const chatLive = (state.messages || []).some(m =>
+            ['Running', 'Dispatched', 'Queued', 'Pending'].includes(m.state));
+          const localLive = state.assignmentMessages.some(m =>
+            (m.isPlan && ['planning', 'running'].includes(m.planState)) ||
+            (!m.isPlan && m.state === 'Running'));
+          return chatLive || localLive;
+        }
+
+        function syncComposerLock() {
+          const btn = $('sendBtn');
+          if (!btn) return;
+          const busy = delegateBusy();
+          btn.disabled = busy;
+          btn.title = busy ? 'En körning pågår - avbryt den (✕) för att skicka nytt' : 'Skicka';
+        }
+
         async function sendMessage() {
           const prompt = $('prompt').value.trim();
           if (!prompt) return;
+          if (delegateBusy()) {
+            showComposerNotice('En körning pågår redan - avbryt den (✕) eller vänta tills den är klar.', true);
+            return;
+          }
           if ($('assignmentMode').checked) {
             await planAndRunGoal(prompt);
             return;
@@ -5258,7 +5283,7 @@ internal static class Dashboard
           } catch (error) {
             showComposerNotice(error.message, true);
           } finally {
-            $('sendBtn').disabled = false;
+            syncComposerLock();
           }
         }
 
@@ -5405,7 +5430,7 @@ internal static class Dashboard
             planMsg.subtasks = [{ title: 'Uppdrag', description: goalText, independent: false, included: true, status: 'pending' }];
           } finally {
             renderMessages();
-            $('sendBtn').disabled = false;
+            syncComposerLock();
           }
         }
 
