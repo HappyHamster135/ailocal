@@ -31,11 +31,19 @@ public sealed class GamePlaytester
 {
     private readonly IHttpClientFactory? _httpFactory;
     private readonly ILogger<GamePlaytester>? _logger;
+    private readonly Func<string, string, CancellationToken, Task<(bool Success, string Text)>>? _visionReview;
+    private readonly BrowserScreenshotter _screenshotter;
 
-    public GamePlaytester(IHttpClientFactory? httpFactory = null, ILogger<GamePlaytester>? logger = null)
+    public GamePlaytester(
+        IHttpClientFactory? httpFactory = null,
+        Func<string, string, CancellationToken, Task<(bool Success, string Text)>>? visionReview = null,
+        ILogger<GamePlaytester>? logger = null,
+        BrowserScreenshotter? screenshotter = null)
     {
         _httpFactory = httpFactory;
+        _visionReview = visionReview;
         _logger = logger;
+        _screenshotter = screenshotter ?? new BrowserScreenshotter();
     }
 
     /// <summary>
@@ -242,10 +250,73 @@ public sealed class GamePlaytester
                     ["Ingen .html eller .exe hittades."], 0, 0, TimeSpan.Zero, null);
         }
 
-        if (gamePath.EndsWith(".html"))
-            return await TestHtml5Async(gamePath, duration, ct);
-        else
-            return await TestExeAsync(gamePath, duration, ct);
+        var result = gamePath.EndsWith(".html")
+            ? await TestHtml5Async(gamePath, duration, ct)
+            : await TestExeAsync(gamePath, duration, ct);
+
+        // ---- Visuell nivå: riktig Chromium-rendering + AI-ögon ----------
+        // Jint-smoken bevisar att koden KÖR; skärmdumpen bevisar att spelet
+        // RITAR något en spelare ser, och vision-modellen (när nycklar finns)
+        // bedömer om det ser ut som ett riktigt spel. En svart/tom canvas
+        // blir ett issue som kvalitetsgrindens fixrundor tvingar agenten
+        // att åtgärda - tidigare kunde ett "grönt" spel rendera ingenting.
+        return await AddVisualReviewAsync(result, gamePath, projectRoot, ct);
+    }
+
+    private async Task<PlaytestResult> AddVisualReviewAsync(
+        PlaytestResult result, string gamePath, string projectRoot, CancellationToken ct)
+    {
+        var screenshotPath = result.ScreenshotPath;
+        var summary = new StringBuilder(result.Summary);
+        var issues = new List<string>(result.Issues);
+
+        if (screenshotPath is null && gamePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            var output = Path.Combine(projectRoot, "screenshots", "playtest.png");
+            var shot = await _screenshotter.CaptureHtmlAsync(gamePath, output, TimeSpan.FromSeconds(5), ct);
+            summary.AppendLine();
+            summary.AppendLine($"### Visuell rendering (Chromium headless)");
+            summary.AppendLine(shot.Output);
+            if (shot.Success)
+                screenshotPath = shot.ImagePath;
+        }
+
+        if (screenshotPath is not null && _visionReview is not null)
+        {
+            try
+            {
+                var (ok, text) = await _visionReview(screenshotPath,
+                    "Detta är en skärmdump av ett spel några sekunder efter start. Bedöm kort på svenska: " +
+                    "1) Ser det ut som ett riktigt spel med titelskärm/spelgrafik och läsbar UI? " +
+                    "2) Är ytan tom, helt svart eller trasig (tecken på kraschad rendering)? " +
+                    "3) Ge de två viktigaste konkreta visuella förbättringarna.", ct);
+                if (ok && !string.IsNullOrWhiteSpace(text))
+                {
+                    summary.AppendLine();
+                    summary.AppendLine("### Visuell granskning (AI)");
+                    summary.AppendLine(text.Trim());
+                    var lower = text.ToLowerInvariant();
+                    if (lower.Contains("helt svart") || lower.Contains("tom canvas") || lower.Contains("tom yta")
+                        || lower.Contains("ingenting renderas") || lower.Contains("completely black"))
+                        issues.Add("Visuellt: skärmdumpen ser tom/svart ut - spelet renderar inget synligt vid start.");
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Vision är ett extra öga, aldrig ett krav - utan nycklar/nät
+                // står skärmdumpen och de andra kontrollerna för sanningen.
+            }
+        }
+        else if (screenshotPath is not null)
+        {
+            summary.AppendLine("(Ingen vision-modell konfigurerad - skärmdumpen sparad utan AI-granskning.)");
+        }
+
+        return result with { Summary = summary.ToString(), Issues = issues, ScreenshotPath = screenshotPath };
     }
 
     // ---- Statisk HTML5-analys -------------------------------------------------

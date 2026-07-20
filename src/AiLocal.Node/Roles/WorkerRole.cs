@@ -336,6 +336,17 @@ public static class WorkerRole
                 };
             }
 
+            // Vision-ögat för playtestens skärmdumpar - samma analysator som
+            // vision_review-verktyget använder. Utan konfigurerade nycklar
+            // misslyckas analysen tyst och skärmdumpen rapporteras ändå.
+            Func<string, string, CancellationToken, Task<(bool Success, string Text)>> BuildVisionReview() =>
+                async (imagePath, question, vct) =>
+                {
+                    var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
+                    var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
+                    return (r.Success, FormatVisionResult(r));
+                };
+
             var gameBuilder = new GameBuilder();
             Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCmd =
                 (cmd, dir, rcCt) =>
@@ -408,7 +419,7 @@ public static class WorkerRole
                 },
                 playtester: async (root, engine, ptCt) =>
                 {
-                    var tester = new GamePlaytester(httpFactory);
+                    var tester = new GamePlaytester(httpFactory, BuildVisionReview());
                     var r = await tester.FullTestAsync(root, engine, TimeSpan.FromSeconds(15), ptCt);
                     return (r.Success, r.Summary, r.AverageFps, r.PeakMemoryMb, r.Duration);
                 },
@@ -577,7 +588,8 @@ public static class WorkerRole
                 workspaceRoot, buildIntent, runStartUtc, runCmd,
                 playtest: async (root, engine, gct) =>
                 {
-                    var r = await new GamePlaytester(httpFactory).FullTestAsync(root, engine, TimeSpan.FromSeconds(10), gct);
+                    var r = await new GamePlaytester(httpFactory, BuildVisionReview())
+                        .FullTestAsync(root, engine, TimeSpan.FromSeconds(10), gct);
                     return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
                 }, ct);
 
