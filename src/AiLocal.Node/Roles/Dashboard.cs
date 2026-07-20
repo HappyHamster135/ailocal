@@ -1415,6 +1415,9 @@ internal static class Dashboard
         a.mini-btn { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); transition: background .15s ease, border-color .15s ease; }
         a.mini-btn:hover { background: var(--surface-2); border-color: var(--accent); }
         .msg-preview { margin-top: 8px; }
+        #benchmarkStatus { white-space: pre-line; color: var(--muted); }
+        .bench-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px; }
+        .bench-table td, .bench-table th { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--kv-line); }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
@@ -2149,6 +2152,21 @@ internal static class Dashboard
                 <label class="field"><span class="small">Max tokens</span><input id="settingMaxTokens" type="number" min="128" max="131072"></label>
                 <label class="field wide"><span class="small">Ollama endpoint</span><input id="settingOllamaEndpoint"></label>
                 <label class="check-field wide"><input id="settingAutoPull" type="checkbox"> Hämta vald lokal modell automatiskt</label>
+              </div>
+              <div class="form-subtitle">Benchmark (självmätning)</div>
+              <div class="form-grid">
+                <label class="field"><span class="small">Omfång</span>
+                  <select id="benchmarkCount">
+                    <option value="1">1 prompt (snabb)</option>
+                    <option value="3" selected>3 promptar</option>
+                    <option value="5">5 promptar (full)</option>
+                  </select>
+                </label>
+                <label class="field"><span class="small">Standardpromptar körs genom nodens egen motor och poängsätts av kvalitetsgrinden - jämför poängen mellan versioner.</span>
+                  <button type="button" class="mini-btn" id="benchmarkRunBtn">Kör benchmark</button>
+                </label>
+                <div class="wide small" id="benchmarkStatus"></div>
+                <div class="wide" id="benchmarkHistory"></div>
               </div>
               <div class="form-subtitle">API-nycklar</div>
               <div class="form-grid">
@@ -5305,6 +5323,42 @@ internal static class Dashboard
             || state.assignmentMessages.some(m => m.role !== 'user' && !m.fromLog);
         }
 
+        // ---- Benchmark (självmätning i Inställningar) ----
+        // Endpointen finns bara där assignment-motorn kör lokalt (Worker/
+        // Launcher) - andra roller får ett tyst 404 och sektionen står tom.
+        let benchmarkTimer = null;
+        async function loadBenchmark() {
+          const box = $('benchmarkHistory');
+          if (!box) return;
+          let data;
+          try { data = await fetchJson('/api/benchmark'); } catch { return; }
+          const btn = $('benchmarkRunBtn');
+          if (btn) btn.disabled = !!data.Running;
+          $('benchmarkStatus').textContent = data.Running
+            ? (data.Progress || []).slice(-3).join('\n')
+            : ((data.Progress || []).slice(-1)[0] || '');
+          const rows = (data.History || []).slice(-8).reverse().map(r =>
+            `<tr><td>v${esc(r.Version)}</td><td>${esc(new Date(r.StartedAt).toLocaleDateString('sv-SE'))}</td><td>${(r.Results || []).length} promptar</td><td><strong>${r.TotalScore}</strong>/100</td></tr>`).join('');
+          box.innerHTML = rows
+            ? `<table class="bench-table"><tr><th>Version</th><th>Datum</th><th>Omfång</th><th>Poäng</th></tr>${rows}</table>`
+            : '<span class="small">Inga benchmarkkörningar ännu.</span>';
+          clearTimeout(benchmarkTimer);
+          if (data.Running) benchmarkTimer = setTimeout(loadBenchmark, 5000);
+        }
+
+        async function runBenchmark() {
+          try {
+            await fetchJson('/api/benchmark/run', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ count: Number($('benchmarkCount').value) || 3 })
+            });
+            loadBenchmark();
+          } catch (error) {
+            $('benchmarkStatus').textContent = error.message;
+          }
+        }
+
         let assignmentLogTimer = null;
         async function loadAssignmentLog() {
           if (assignmentViewOwnedLocally()) return;
@@ -6015,10 +6069,14 @@ internal static class Dashboard
         window.addEventListener('mousedown', e => { if (e.button === 3 || e.button === 4) e.preventDefault(); });
         window.addEventListener('mouseup', e => { if (e.button === 3 || e.button === 4) e.preventDefault(); });
 
+        const benchmarkRunBtn = $('benchmarkRunBtn');
+        if (benchmarkRunBtn) benchmarkRunBtn.onclick = runBenchmark;
+
         loadProviders();
         refresh();
         setInterval(refresh, 3000);
         loadAssignmentLog();
+        loadBenchmark();
         refreshIsolation();
         renderRoles();
         renderNotices();

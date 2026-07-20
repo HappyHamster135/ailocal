@@ -18,6 +18,10 @@ namespace AiLocal.Node.Roles;
 /// itself.</summary>
 public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null);
 
+/// <summary>Body for POST /api/benchmark/run: how many of the standard
+/// prompts to run (default 3, clamped to the catalog size).</summary>
+public sealed record BenchmarkRunRequest(int? Count = null);
+
 /// <summary>Response from POST /execute/isolation/create: the freshly created
 /// worktree+branch for one isolated task.</summary>
 public sealed record IsolationCreated(string TaskId, string Branch, string Worktree);
@@ -502,6 +506,14 @@ public static class WorkerRole
                         "). Skapa INTE ett nytt projekt - läs DESIGN.md och index/koden, och UTÖKA grunden enligt uppdraget (innehåll, mekanik, polish). Verifiera med verify/playtest när du är klar.";
                 }
             }
+            // Projektkontinuitet - spegelbilden av förskaffolden: en uppfölj-
+            // ning ("gör spelet svårare") på en ICKE-tom arbetsyta får det
+            // befintliga projektets kontext (mapp, motor, filer, DESIGN.md)
+            // så standardbeteendet blir FORTSÄTT, aldrig börja om.
+            else if (ProjectContext.Build(workspaceRoot, req.Assignment) is { } projectBrief)
+            {
+                assignmentText = req.Assignment + projectBrief;
+            }
 
             // Same production-grade system prompt as interactive sessions -
             // an assignment dispatched through the cluster used to run with NO
@@ -736,6 +748,31 @@ public static class WorkerRole
         // PascalCase-form som SSE-framarna (se HostRole:s motsvarighet).
         app.MapGet("/api/assignment-log", (AssignmentLog assignmentLog) =>
             Results.Text(JsonSerializer.Serialize(assignmentLog.Snapshot()), "application/json"));
+
+        // Benchmark-sviten: självmätning av NODENS byggförmåga per version.
+        // Lokal-only precis som assignment-motorn den mäter.
+        app.MapGet("/api/benchmark", (BenchmarkService bench) =>
+            Results.Text(JsonSerializer.Serialize(new
+            {
+                bench.Running,
+                Progress = bench.Progress.ToArray(),
+                History = bench.History
+            }), "application/json"));
+
+        app.MapPost("/api/benchmark/run", (BenchmarkRunRequest req, BenchmarkService bench,
+            AssignmentLog assignmentLog, NodeSettings settings) =>
+        {
+            if (settings.Worker.AgentAccess == AgentAccessLevel.Off)
+                return Results.Problem(detail: "Agentläge krävs för benchmark (Inställningar -> Agentläge).",
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (assignmentLog.RunningCount > 0)
+                return Results.Problem(detail: "Ett uppdrag kör redan - benchmarken skulle konkurrera om modellen. Vänta tills det är klart.",
+                    statusCode: StatusCodes.Status409Conflict);
+            var started = bench.TryStart(req.Count ?? 3, settings.Port, SelfUpdater.CurrentVersion);
+            return started
+                ? Results.Ok(new { started = true })
+                : Results.Problem(detail: "En benchmark kör redan.", statusCode: StatusCodes.Status409Conflict);
+        });
 
         // "Öppna resultatet": serverar det senast byggda projektet direkt
         // från nodens arbetsyta så prompt -> spelbart spel blir ETT klick.
