@@ -491,7 +491,19 @@ public sealed class AgentToolExecutor
         var occurrences = content.Split(oldText).Length - 1;
 
         if (occurrences == 0)
+        {
+            // Leverantörsartefakt, inte filkorruption: vissa modellrutter
+            // (PII-filter hos t.ex. gratis OpenRouter-varianter) maskerar
+            // sökvägar m.m. i VERKTYGSRESULTATEN till platshållare som
+            // "[ADDRESS]". Modellen "ser" dem i read_file men de finns aldrig
+            // i filen på disk - och har setts jaga dem i evighetsloopar tills
+            // iterationstaket slog i (search + findstr tomma hela tiden).
+            if (RedactionArtifactIn(oldText) is { } marker)
+                return Error(call,
+                    $"edit_file: oldText innehåller \"{marker}\" - det är en maskningsartefakt från AI-leverantörens integritetsfilter, INTE något som finns i filen. " +
+                    "Filen på disk är oskadad. Sluta leta efter eller \"laga\" sådana markörer - gå vidare med nästa riktiga uppgift.");
             return Error(call, "edit_file failed: oldText was not found in the file. Re-read the file and copy the exact text to replace (whitespace and punctuation must match).");
+        }
         if (!replaceAll && occurrences > 1)
             return Error(call, $"edit_file failed: oldText matched {occurrences} locations and replaceAll is false. Make oldText more specific, or set replaceAll=true to replace all of them.");
 
@@ -574,7 +586,12 @@ public sealed class AgentToolExecutor
         }
 
         if (matches.Count == 0)
-            return new ToolResult(call.Id, call.Name, $"no matches for /{pattern}/ under {baseDir}");
+        {
+            var artifactNote = RedactionArtifactIn(pattern) is { } marker
+                ? $"\nOBS: \"{marker}\" är en maskningsartefakt från AI-leverantörens integritetsfilter - den finns aldrig i filer på disk, bara i vad modellen visas. Jaga den inte; filerna är oskadade."
+                : "";
+            return new ToolResult(call.Id, call.Name, $"no matches for /{pattern}/ under {baseDir}{artifactNote}");
+        }
         var truncated = matches.Count >= maxMatches;
         return new ToolResult(call.Id, call.Name,
             string.Join('\n', matches) + (truncated ? $"\n...({maxMatches} match cap reached)" : ""));
@@ -773,6 +790,23 @@ public sealed class AgentToolExecutor
         var result = await verifier.VerifyAsync(requested,
             (cmd, dir, c) => RunCommandCoreAsync(cmd, dir, c), ct);
         return new ToolResult(call.Id, call.Name, result.Report, IsError: !result.Success);
+    }
+
+    /// <summary>Returns the first provider-redaction placeholder found in
+    /// <paramref name="text"/> (e.g. "[ADDRESS]"), or null. Some model routes
+    /// run PII filters over what the MODEL is shown, masking Windows paths
+    /// and similar as bracketed placeholders - they exist only in the model's
+    /// view, never in files on disk. Public so tests can lock the list.</summary>
+    public static string? RedactionArtifactIn(string text)
+    {
+        string[] markers = ["[ADDRESS]", "[NAME]", "[EMAIL]", "[PHONE]", "[SSN]", "[REDACTED]", "[PII]"];
+        var raw = text ?? "";
+        // Modeller söker ofta med regex-escapade mönster ("\[ADDRESS\]") -
+        // avescapa innan matchning så även de fångas.
+        var unescaped = raw.Replace("\\", "");
+        return markers.FirstOrDefault(m =>
+            raw.Contains(m, StringComparison.OrdinalIgnoreCase)
+            || unescaped.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>After a file write/edit in Full mode, re-verify the project so

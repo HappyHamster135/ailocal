@@ -500,6 +500,35 @@ public static class WorkerRole
             var instructions = await ProjectInstructionsReader.TryReadAsync(workspaceRoot, ct);
             var system = AgentSystemPrompt.Build(workspaceRoot, accessLevel, instructions);
 
+            // Iterationstaket är en KONTROLLPUNKT, inte en giljotin: gjorde
+            // rundan verkliga filändringar fortsätter arbetet med hela
+            // historiken kvar, upp till tre extra rundor (~200 iterationer
+            // totalt). Utan filframsteg står taket kvar som runaway-skydd
+            // precis som förut. (Rapporterat: "den slutar alltid vid 50
+            // iterations även fast den fortfarande jobbar".)
+            async Task<AgentRunResult> RunWithContinuationsAsync(string prompt)
+            {
+                var windowStart = DateTime.UtcNow;
+                var runResult = await loop.RunAsync(prompt, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+                for (var round = 2; runResult.HitIterationCap && round <= 4; round++)
+                {
+                    if (ProjectRootDetector.NewestWriteUtc(workspaceRoot) < windowStart)
+                    {
+                        await EmitStep("tool_error",
+                            "Iterationstaket nåddes utan några filändringar i senaste rundan - avbryter här (runaway-skydd).");
+                        break;
+                    }
+                    await EmitStep("thinking",
+                        $"Iterationstaket nått men arbetet gör framsteg - fortsätter där det slutade (runda {round} av 4).");
+                    windowStart = DateTime.UtcNow;
+                    runResult = await loop.RunAsync(
+                        "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
+                        "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
+                        accessLevel, req.ModelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                }
+                return runResult;
+            }
+
             // ---- Team-läge: arkitekt -> parallella worktree-agenter -> merge.
             // Faller tillbaka till en ensam agent när git saknas/repo inte
             // gick att skapa (TeamBuild returnerar null) - team-läget får
@@ -530,12 +559,11 @@ public static class WorkerRole
                 if (teamResult is null)
                     await teamEmit(new AgentStep("thinking",
                         "Team-läget slutförde inte bygget - kör som en ensam agent i stället."));
-                result = teamResult
-                    ?? await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+                result = teamResult ?? await RunWithContinuationsAsync(assignmentText);
             }
             else
             {
-                result = await loop.RunAsync(assignmentText, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+                result = await RunWithContinuationsAsync(assignmentText);
             }
 
             // ---- Nodens kvalitetsgrind --------------------------------------

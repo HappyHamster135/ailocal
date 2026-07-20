@@ -66,6 +66,19 @@ public sealed class ChangeReviewer
                 || lower.Contains("approved") || lower.Contains("looks good") || lower.Contains("is correct"))
                 return (true, null);
 
+            // Nitpick-filter: granskarprompten FÖRBJUDER stil-, namn- och
+            // felhanterings-avslag, men svaga granskarmodeller avvisar ändå
+            // på exakt de grunderna (transkript: "lacks proper error
+            // handling", "should be a constant ... readonly", "Missing null
+            // check"). Promptregler räcker inte - håll dem deterministiskt:
+            // ett avslag vars motivering är en nitpick failar OPEN.
+            string[] nitpicks = ["error handling", "felhantering", "null check", "null-check",
+                "readonly", "should be named", "borde heta", "naming", "namngivning",
+                "convention", "konvention", "file organization", "consider adding",
+                "consider using", "could be better"];
+            if (nitpicks.Any(n => lower.Contains(n)))
+                return (true, null);
+
             return (false, reason.Length > 0 ? reason : "Ändringen avvisades av granskaren utan angiven orsak.");
         }
 

@@ -21,7 +21,8 @@ public sealed record AgentRunResult(
     IReadOnlyList<AgentStep> Steps,
     int Iterations,
     IReadOnlyList<ChatMessage> Messages,
-    TokenUsage TotalUsage);
+    TokenUsage TotalUsage,
+    bool HitIterationCap = false);
 
 /// <summary>
 /// Runs an assignment to completion: send the conversation (with tools) to
@@ -162,9 +163,14 @@ public sealed class AgentLoop
             }
         }
 
+        // HitIterationCap lets the caller distinguish "ran out of budget mid-
+        // work" from a genuine failure - the assignment engine continues a
+        // capped run that is still making file progress (see WorkerRole),
+        // instead of reporting a half-built project as dead (user report:
+        // "den slutar alltid vid 50 ... så den blir aldrig klar").
         var timeoutMessage = $"Assignment did not complete within {MaxIterations} iterations - stopped to avoid a runaway loop.";
         await Emit(new AgentStep("error", timeoutMessage));
-        return new AgentRunResult(false, timeoutMessage, steps, MaxIterations, messages, Usage());
+        return new AgentRunResult(false, timeoutMessage, steps, MaxIterations, messages, Usage(), HitIterationCap: true);
     }
 
     /// <summary>Augments the caller's system prompt with the verify-loop
