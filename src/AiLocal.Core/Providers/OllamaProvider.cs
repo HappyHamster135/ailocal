@@ -97,10 +97,42 @@ public sealed class OllamaProvider : IChatProvider
 
         if (!response.IsSuccessStatusCode)
         {
-            var outcome = (int)response.StatusCode == 404
-                ? ProviderOutcome.FatalError   // model not pulled
-                : ProviderOutcome.TransientError;
-            return ProviderResponse.Fail(outcome, $"ollama {(int)response.StatusCode}: {Truncate(body)}");
+            // Sjalvlakning vid "model not found": fraga Ollama vilka modeller
+            // som FAKTISKT ar installerade och gor om anropet med den forsta.
+            // Tacker felkonfigurerad OllamaModel, en rekommendation som inte
+            // ar pullad, och aldre noder som skickat vidare ett moln-modellnamn
+            // ("claude-haiku-4-5" -> 404) - anvandaren fick annars totalstopp
+            // trots en fullt fungerande lokal modell.
+            if ((int)response.StatusCode == 404 &&
+                body.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
+                await FirstInstalledTagAsync(ct) is { } installed && installed != model)
+            {
+                payload["model"] = installed;
+                using var retryRequest = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/api/chat")
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+                };
+                try
+                {
+                    response.Dispose();
+                    response = await _http.SendAsync(retryRequest, ct);
+                    body = await response.Content.ReadAsStringAsync(ct);
+                    if (response.IsSuccessStatusCode)
+                        model = installed;
+                }
+                catch (Exception ex)
+                {
+                    return ProviderResponse.Fail(ProviderOutcome.TransientError, $"ollama unreachable: {ex.Message}");
+                }
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var outcome = (int)response.StatusCode == 404
+                    ? ProviderOutcome.FatalError   // model not pulled
+                    : ProviderOutcome.TransientError;
+                return ProviderResponse.Fail(outcome, $"ollama {(int)response.StatusCode}: {Truncate(body)}");
+            }
         }
 
         try
@@ -310,6 +342,28 @@ public sealed class OllamaProvider : IChatProvider
     // ("claude-*", "gpt-*", "anthropic/...", "openai/...", "google/...")
     // are NOT valid Ollama tags, so we refuse to use them and let the
     // caller fall back to the hardware-recommended tag instead of 404ing.
+    /// <summary>First installed model tag from /api/tags, or null when none
+    /// (or Ollama is unreachable). Used by the 404-heal above.</summary>
+    private async Task<string?> FirstInstalledTagAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var response = await _http.GetAsync($"{BaseUrl}/api/tags", ct);
+            if (!response.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            if (!doc.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
+                return null;
+            foreach (var m in models.EnumerateArray())
+                if (m.TryGetProperty("name", out var n) && n.GetString() is { Length: > 0 } tag)
+                    return tag;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool LooksLikeOllamaTag(string name)
     {
         if (name.Contains('/')) return !name.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase)

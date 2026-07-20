@@ -1567,18 +1567,29 @@ public static class HostRole
             // körs målet som ett assignment där i stället: scaffold, verify,
             // playtest, filer på disk. Dispatch-fel faller tillbaka till den
             // vanliga chat-pipelinen så användaren alltid får ett svar.
-            if (IsBuildRequest(req.Prompt))
+            // Kontextuella byggfraser fangas ocksa: "kan du bygga den?" efter
+            // att chatten just tagit fram en spelplan ar en byggbegaran, aven
+            // om artefaktordet bara finns i historiken - transkript visade
+            // modellen svara med en kodvagg i chatten i exakt det laget.
+            var contextualBuild = !IsBuildRequest(req.Prompt)
+                && HasBuildVerb(req.Prompt) && RefersBack(req.Prompt)
+                && contextMessages is { Count: > 0 }
+                && contextMessages.Any(m => HasArtifactWord(m.Content));
+            if (IsBuildRequest(req.Prompt) || contextualBuild)
             {
                 var agentWorker = workers.FirstOrDefault(w => w.AgentAccess != AgentAccessLevel.Off);
                 if (agentWorker is not null && await TryRunAsAssignmentAsync(
-                        root, req, agentWorker, board, httpFactory, streamHub, hostSettings, ct, log))
+                        root, req, agentWorker, contextMessages, board, httpFactory, streamHub, hostSettings, ct, log))
                     return;
             }
 
             var maxParts = Math.Clamp(req.Parallelism ?? workers.Count, 1, Math.Min(workers.Count, 8));
 
             IReadOnlyList<PlannedWorkItem> plan;
-            if (maxParts >= 2)
+            // Trivialt korta prompts ("hej") ska ALDRIG till AI-planeraren -
+            // den hittar pa deluppgifter som "Emotion Detection" + "Greeting
+            // Response" for en halsning och spammar tva modellanrop.
+            if (maxParts >= 2 && LooksMultiPart(req.Prompt))
             {
                 var planner = new AiTaskPlanner(providers, settings.Providers.MaxTokens);
                 plan = await planner.PlanAsync(req.Prompt, maxParts, ct) ?? SimpleTaskPlanner.Plan(req, workers.Count);
@@ -1678,18 +1689,48 @@ public static class HostRole
     /// tool). Both a build verb and an artifact noun must appear - "vad är en
     /// app?" (no verb) or "bygg vidare på resonemanget" (no artifact) don't
     /// count. Word-START matching so "spelet"/"appen" still hit.</summary>
-    internal static bool IsBuildRequest(string prompt)
+    internal static bool IsBuildRequest(string prompt) =>
+        HasBuildVerb(prompt) && HasArtifactWord(prompt);
+
+    internal static bool HasBuildVerb(string prompt)
     {
         var p = (prompt ?? "").ToLowerInvariant();
         string[] verbs = ["bygg", "skapa", "gör ett", "gör en", "gor ett", "gor en",
-            "implementera", "koda", "utveckla", "programmera", "build", "create", "make", "develop", "implement"];
-        // Substring match for the nouns: Swedish compounds put them at the
-        // END ("plattformsspel", "vaderapp"), so word-boundary matching would
-        // miss the most common phrasings. The verb requirement is what keeps
-        // questions ("vad är en app?") off the agent path.
+            "implementera", "koda", "utveckla", "programmera", "build", "create", "make", "develop", "implement",
+            "börja bygga", "borja bygga", "start building", "start programming", "programmering"];
+        return verbs.Any(v => p.Contains(v));
+    }
+
+    /// <summary>Substring match for the nouns: Swedish compounds put them at
+    /// the END ("plattformsspel", "vaderapp"), so word-boundary matching would
+    /// miss the most common phrasings. The verb requirement is what keeps
+    /// questions ("vad är en app?") off the agent path.</summary>
+    internal static bool HasArtifactWord(string? text)
+    {
+        var p = (text ?? "").ToLowerInvariant();
         string[] artifacts = ["app", "spel", "game", "webbsida", "website", "hemsida",
-            "program", "verktyg", "tool", "script", "skript", "bot", "api", "tjänst", "tjanst", "cli"];
-        return verbs.Any(v => p.Contains(v)) && artifacts.Any(a => p.Contains(a));
+            "program", "verktyg", "tool", "script", "skript", "bot", "api", "tjänst", "tjanst", "cli", "projekt"];
+        return artifacts.Any(a => p.Contains(a));
+    }
+
+    /// <summary>True when the prompt refers back to something in the
+    /// conversation ("bygga den", "skapa detta", "build it") rather than
+    /// naming the artifact itself.</summary>
+    internal static bool RefersBack(string prompt)
+    {
+        var p = (prompt ?? "").ToLowerInvariant();
+        string[] refs = [" den", " det", " detta", " denna", " planen", " ovan", " it", " this", " that"];
+        return refs.Any(r => p.Contains(r));
+    }
+
+    /// <summary>Only prompts that plausibly CONTAIN several units of work go
+    /// to the AI planner - a greeting or one-liner is always a single task.</summary>
+    internal static bool LooksMultiPart(string prompt)
+    {
+        var p = (prompt ?? "").Trim();
+        if (p.Length < 80) return false;
+        return p.Contains('\n') || p.Contains(" och ") || p.Contains(" samt ")
+            || p.Contains(" and ") || p.Contains(',') || p.Contains("1.");
     }
 
     /// <summary>Dispatches a build-intent chat goal to an agent-enabled Worker
@@ -1699,10 +1740,24 @@ public static class HostRole
     /// false only on a dispatch-level failure, so the caller falls back to
     /// the ordinary chat pipeline.</summary>
     private static async Task<bool> TryRunAsAssignmentAsync(
-        AgentTask root, SubmitTaskRequest req, NodeInfo worker, TaskBoard board,
+        AgentTask root, SubmitTaskRequest req, NodeInfo worker,
+        IReadOnlyList<ChatMessage>? contextMessages, TaskBoard board,
         IHttpClientFactory httpFactory, TaskStreamHub streamHub, HostSettings hostSettings,
         CancellationToken taskCt, ILogger log)
     {
+        // "Bygg den" efter en plan i chatten: skicka med planen sa agenten
+        // bygger DET som diskuterades, inte gissar fran en naken pronomen.
+        var assignmentText = req.Prompt;
+        var lastPlan = contextMessages?.LastOrDefault(m =>
+            string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(m.Content))?.Content;
+        if (!IsBuildRequest(req.Prompt) && !string.IsNullOrWhiteSpace(lastPlan))
+        {
+            var excerpt = lastPlan.Length > 4000 ? lastPlan[..4000] + "…" : lastPlan;
+            assignmentText = "Bygg följande (planen kommer från konversationen precis innan):\n\n"
+                + excerpt + "\n\nAnvändarens begäran: " + req.Prompt;
+        }
+
         root.AssignedWorkerId = worker.Id;
         root.WorkerName = worker.Name;
         root.RequiredSkill = "coding";
@@ -1721,7 +1776,7 @@ public static class HostRole
             client.Timeout = Timeout.InfiniteTimeSpan;
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{worker.PreferredEndpoint}/execute/assignment")
             {
-                Content = JsonContent.Create(new AssignmentRequest(req.Prompt, req.ModelHint))
+                Content = JsonContent.Create(new AssignmentRequest(assignmentText, req.ModelHint))
             };
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
             if (!response.IsSuccessStatusCode)
@@ -2111,9 +2166,15 @@ public static class HostRole
                 $"Budget nått - dirigerar '{task.Prompt}' till lokal Ollama.");
         }
         var model = modelHint ?? tieredModel;
+        // Chattmal utan egen systemprompt fick ingen alls - modellerna svarade
+        // da pa blandat sprak (halva transkriptet kom pa engelska pa svenska
+        // fragor). Minsta rimliga default: folj anvandarens sprak.
+        var system = string.IsNullOrWhiteSpace(task.System)
+            ? "Du är AiLocal, en hjälpsam assistent i användarens lokala AI-kluster. Svara alltid på samma språk som användaren skriver på. Var konkret och hjälpsam."
+            : task.System;
         var chat = new ChatRequest
         {
-            System = task.System,
+            System = system,
             ModelHint = model,
             PreferredProvider = provider,
             ProviderOrder = providerOrder

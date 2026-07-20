@@ -35,7 +35,8 @@ public sealed class ChangeReviewer
         "You are a strict but fair code reviewer inside an AI agent cluster. " +
         "An agent (often a small local model) wants to write a file. You see the task it was given and the diff of the change. " +
         "Reject only real problems: the change contradicts the task, destroys existing content that clearly should be kept, is syntactically broken for its file type, or is dangerous. " +
-        "Style preferences are NOT a reason to reject. " +
+        "Style, naming, file organization, missing error handling, or 'could be better' are NEVER reasons to reject. " +
+        "If you are unsure, approve. " +
         "Reply with EXACTLY one of:\n" +
         "GODKÄNN\n" +
         "AVVISA: <one short concrete sentence: what is wrong AND what to do instead>\n" +
@@ -54,6 +55,17 @@ public sealed class ChangeReviewer
         {
             var colon = text.IndexOf(':');
             var reason = colon >= 0 ? text[(colon + 1)..].Trim() : "";
+
+            // Motsagelseskydd: svaga granskarmodeller har setts skriva
+            // "AVVISA: ... ar tekniskt korrekt, sa godkand." - ett avslag vars
+            // MOTIVERING ar ett godkannande. En sjalvmotsagelse ar ett trasigt
+            // granskarsvar, och trasiga granskarsvar failar OPEN per klassens
+            // kontrakt - annars blockeras korrekta andringar pa nonsens.
+            var lower = reason.ToLowerInvariant();
+            if (lower.Contains("godkän") || lower.Contains("godkann") || lower.Contains("godkand")
+                || lower.Contains("approved") || lower.Contains("looks good") || lower.Contains("is correct"))
+                return (true, null);
+
             return (false, reason.Length > 0 ? reason : "Ändringen avvisades av granskaren utan angiven orsak.");
         }
 

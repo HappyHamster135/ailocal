@@ -168,8 +168,8 @@ public sealed class AgentToolExecutor
         {
             new("read_file", "Read the text contents of a file. Read the WHOLE file by default, or a slice with offset/limit (1-indexed). Prefer a slice for large files to save context.",
                 """{"type":"object","properties":{"path":{"type":"string","description":"File path to read."},"offset":{"type":"integer","description":"1-indexed line to start reading from (default 1)."},"limit":{"type":"integer","description":"Max number of lines to return (default: whole file)."}},"required":["path"]}"""),
-            new("write_file", "Create or overwrite a text file with the given content. Creates parent directories if needed. Prefer edit_file for changing existing files - it only touches the lines you name.",
-                """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""),
+            new("write_file", "Create or overwrite a text file with the given content, or APPEND to it with append=true. Creates parent directories if needed. LARGE FILES: your output limit truncates very long content - write the first part, then CONTINUE with append=true calls instead of rewriting the whole file. Prefer edit_file for changing existing lines.",
+                """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"append":{"type":"boolean","description":"true = append content to the end of the file instead of overwriting (for writing large files in parts)."}},"required":["path","content"]}"""),
             new("edit_file", "Make a targeted change to an EXISTING file: replace oldText with newText. Does not rewrite the whole file, so it's safe for large files. By default replaces the first match; set replaceAll=true to replace every match. The change is rejected if oldText is not found or is ambiguous (more than one match without replaceAll).",
                 """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string","description":"The exact text to replace. Must match a unique location unless replaceAll is true."},"newText":{"type":"string","description":"The replacement text."},"replaceAll":{"type":"boolean","description":"Replace every occurrence of oldText instead of just the first (default false)."}},"required":["path","oldText","newText"]}"""),
             new("search", "Search file contents across the workspace for a regex pattern (case-insensitive). Returns matching lines with file path and line number. Use to find where something is defined or used. Respects the same path confinement as other tools.",
@@ -416,6 +416,7 @@ public sealed class AgentToolExecutor
     {
         var path = ResolvePath(RequireString(args, "path"));
         var content = RequireString(args, "content");
+        var append = args.TryGetProperty("append", out var ap) && ap.ValueKind == JsonValueKind.True;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
@@ -424,18 +425,56 @@ public sealed class AgentToolExecutor
         // approve every file write before it lands - the agent never writes
         // to disk blindly. No gate (e.g. a Worker's autonomous assignment) ->
         // write immediately, unchanged behavior.
+        string? oldContent = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
+        var newContent = append ? (oldContent ?? "") + content : content;
         if (_approvalGate is not null)
         {
-            string? oldContent = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
-            var decision = await _approvalGate(new FileChangeProposal(path, oldContent, content), ct);
+            var decision = await _approvalGate(new FileChangeProposal(path, oldContent, newContent), ct);
             if (!decision.Approve)
                 return Error(call, decision.Reason ?? "File write was rejected by the operator.");
         }
 
-        await File.WriteAllTextAsync(path, content, ct);
+        await File.WriteAllTextAsync(path, newContent, ct);
+
+        // Truncation tripwire: a weak model whose output limit cut the content
+        // mid-file used to see a clean "wrote N characters" and either declare
+        // victory on a broken file or loop full rewrites forever (observed:
+        // 6+ rewrites of the same 10 KB file until the iteration cap killed
+        // the run). Tell it EXACTLY what happened and how to continue.
+        var truncationNote = DetectTruncation(path, newContent);
+
         var verifyNote = await AutoVerifyIfFullAsync(ct);
         return new ToolResult(call.Id, call.Name,
-            $"wrote {content.Length} characters to {path}" + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
+            (append ? $"appended {content.Length} characters to {path} (file is now {newContent.Length} characters)"
+                    : $"wrote {content.Length} characters to {path}")
+            + (truncationNote is null ? "" : $"\n\n{truncationNote}")
+            + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
+    }
+
+    /// <summary>Cheap end-of-file sanity for the file types agents write
+    /// most: an .html without a closing tag or a .js/.html whose script does
+    /// not parse is almost always output-limit truncation. Returns an
+    /// actionable Swedish warning, or null when the file looks complete.</summary>
+    public static string? DetectTruncation(string path, string content)
+    {
+        const string Advice = "Skriv INTE om hela filen igen (samma gräns kapar den igen) - " +
+            "fortsätt i stället där den slutar med write_file append:true, eller reparera med edit_file.";
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext is ".html" or ".htm")
+        {
+            if (!content.Contains("</html>", StringComparison.OrdinalIgnoreCase))
+                return "VARNING: filen saknar </html> - innehållet ser TRUNKERAT ut (modellens utdatagräns). " + Advice;
+            var jsErrors = JsSyntaxChecker.CheckHtml(content);
+            if (jsErrors.Count > 0)
+                return "VARNING: filens JavaScript parsas inte (" + jsErrors[0] + ") - troligen trunkerad. " + Advice;
+        }
+        else if (ext is ".js" or ".mjs")
+        {
+            if (JsSyntaxChecker.CheckScript(content) is { } err &&
+                JsSyntaxChecker.CheckScript(content, asModule: true) is not null)
+                return $"VARNING: filen parsas inte som JavaScript ({err.Message}, rad {err.Line}) - troligen trunkerad. " + Advice;
+        }
+        return null;
     }
 
     private async Task<ToolResult> EditFileAsync(ToolCall call, JsonElement args, CancellationToken ct)

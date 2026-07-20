@@ -193,7 +193,9 @@ public class AgentLoopTests : IDisposable
         var result = await loop.RunAsync("loop forever", AgentAccessLevel.Sandboxed);
 
         Assert.False(result.Success);
-        Assert.True(provider.CallCount <= 25, $"expected the loop to stop at the iteration cap, but the provider was called {provider.CallCount} times");
+        // Cap raised 25 -> 50 in v1.27.0: real multi-file builds hit 25 (a
+        // football manager died at the cap after 18 min of legitimate work).
+        Assert.True(provider.CallCount <= 50, $"expected the loop to stop at the iteration cap, but the provider was called {provider.CallCount} times");
         Assert.Contains("iterations", result.FinalAnswer, StringComparison.OrdinalIgnoreCase);
     }
 

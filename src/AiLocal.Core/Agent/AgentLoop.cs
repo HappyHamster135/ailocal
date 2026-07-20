@@ -33,7 +33,16 @@ public sealed record AgentRunResult(
 /// </summary>
 public sealed class AgentLoop
 {
-    private const int MaxIterations = 25;
+    // 25 räckte inte för stora byggen: ett riktigt spel med flera filer och
+    // fix-rundor dog på taket efter 18 minuter (observerat). 50 ger utrymme
+    // utan att släppa en äkta runaway fri.
+    private const int MaxIterations = 50;
+
+    // Utan explicit tak föll providers tillbaka på snåla defaults (~4k
+    // tokens) som kapade stora write_file mitt i filen - den enskilt största
+    // orsaken till misslyckade byggen. Providers klampar själva neråt om
+    // deras modell har lägre tak.
+    private const int AgentMaxTokens = 8192;
 
     /// <summary>Just "complete this chat request" - takes a plain delegate
     /// rather than IChatProvider so callers can pass either a single
@@ -110,7 +119,8 @@ public sealed class AgentLoop
                 System = BuildSystemPrompt(system, toolDefs),
                 Messages = messages,
                 ModelHint = modelHint,
-                Tools = toolDefs.ToList()
+                Tools = toolDefs.ToList(),
+                MaxTokens = AgentMaxTokens
             }, ct);
 
             if (!response.IsSuccess)
