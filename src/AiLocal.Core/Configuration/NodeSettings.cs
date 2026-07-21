@@ -199,9 +199,28 @@ public sealed class ModelTiers
     /// complexity tiers above (Anthropic) when nothing matches.</summary>
     public List<ModelRoute> Routes { get; set; } = ModelRoute.Defaults();
 
+    /// <summary>Model ids the auto-selector must NEVER pick (the user's ban list
+    /// from the model picker). ForTask skips banned routes and steps to a
+    /// non-banned tier, so a banned model can't sneak back in via a fallback.</summary>
+    public List<string> BannedModels { get; set; } = [];
+
+    public bool IsBanned(string? model) =>
+        !string.IsNullOrWhiteSpace(model) && BannedModels.Contains(model, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>The model for a 1-5 complexity score (Anthropic-only legacy path).</summary>
     public string ForComplexity(int complexity) =>
         complexity <= 2 ? Simple : complexity <= 4 ? Medium : Complex;
+
+    /// <summary>The complexity tier's model, but never a banned one: steps to
+    /// another (non-banned) tier rather than returning something the user banned.</summary>
+    private string TierModel(int complexity)
+    {
+        var chosen = ForComplexity(complexity);
+        if (!IsBanned(chosen)) return chosen;
+        foreach (var alt in new[] { Complex, Medium, Simple })
+            if (!IsBanned(alt)) return alt;
+        return chosen; // allt bannat - inget bättre att göra
+    }
 
     /// <summary>Pick a (provider, model) for a task. Skill is matched
     /// case-insensitively; if no skill route applies, falls back to the
@@ -214,6 +233,7 @@ public sealed class ModelTiers
 
         var route = Routes
             .Where(r => r.Skill.Equals(norm, StringComparison.OrdinalIgnoreCase) && c >= r.MinComplexity)
+            .Where(r => !IsBanned(r.Model)) // hoppa bannade modeller -> fall vidare till nästa route/tier
             .OrderBy(r => r.MinComplexity == c ? 0 : 1) // exact complexity match first
             .ThenByDescending(r => r.MinComplexity)
             .FirstOrDefault();
@@ -221,12 +241,12 @@ public sealed class ModelTiers
         if (route is not null)
         {
             var model = string.IsNullOrWhiteSpace(route.Model)
-                ? ForComplexity(c) // ollama route with no explicit model -> use tier default
+                ? TierModel(c) // ollama route with no explicit model -> use tier default
                 : route.Model;
             return (route.Provider, model);
         }
 
-        return ("anthropic", ForComplexity(c));
+        return ("anthropic", TierModel(c));
     }
 }
 

@@ -23,6 +23,7 @@ public static class NodeComposition
         services.AddSingleton<AssignmentLog>();
         services.AddSingleton<AssignmentQueue>();
         services.AddSingleton<BenchmarkService>();
+        services.AddSingleton<OpenRouterCatalog>();
         services.AddSingleton<GitService>();
         services.AddSingleton<GitIsolationService>();
         services.AddSingleton<GameScaffoldService>();

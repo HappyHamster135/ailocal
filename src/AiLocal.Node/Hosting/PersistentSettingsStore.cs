@@ -39,6 +39,8 @@ public sealed record SettingsUpdate(
     bool? AutoMergeIsolatedTasks = null,
     decimal? BudgetLimitUsd = null,
     ModelTiers? ModelTiers = null,
+    List<ModelRoute>? ModelRoutes = null,
+    List<string>? BannedModels = null,
     List<AgentRole>? Roles = null,
     CommandGuardLevel? CommandGuard = null,
     List<string>? BlockedCommands = null,
@@ -257,7 +259,9 @@ public sealed class PersistentSettingsStore
                 {
                     simple = _settings.Worker.ModelTiers.Simple,
                     medium = _settings.Worker.ModelTiers.Medium,
-                    complex = _settings.Worker.ModelTiers.Complex
+                    complex = _settings.Worker.ModelTiers.Complex,
+                    routes = _settings.Worker.ModelTiers.Routes,
+                    bannedModels = _settings.Worker.ModelTiers.BannedModels
                 },
                 clusterTokenConfigured = HasClusterToken(),
                 clusterToken = includeSecrets ? GetClusterToken() : null,
@@ -366,6 +370,16 @@ public sealed class PersistentSettingsStore
                 _settings.Worker.ModelTiers.Medium = update.ModelTiers.Medium;
                 _settings.Worker.ModelTiers.Complex = update.ModelTiers.Complex;
             }
+
+            // Modellväljaren skickar routes + banlista explicit (den enkla
+            // inställnings-UI:n gör det inte, så null = "rör inte" - samma
+            // skydd mot att nollställa skill-routes som ovan).
+            if (update.ModelRoutes is not null)
+                _settings.Worker.ModelTiers.Routes = update.ModelRoutes;
+            if (update.BannedModels is not null)
+                _settings.Worker.ModelTiers.BannedModels = update.BannedModels
+                    .Where(b => !string.IsNullOrWhiteSpace(b)).Select(b => b.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             if (update.Roles is not null)
                 _settings.Host.Roles = update.Roles;

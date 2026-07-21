@@ -1205,6 +1205,24 @@ internal static class Dashboard
         .model-tier-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
         .model-tier-grid .tier-field { display: flex; flex-direction: column; gap: 2px; }
         .model-tier-grid .tier-field input { width: 100%; min-height: 34px; padding: 0 9px; }
+        .model-picker { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+        .mp-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .mp-bar button, .mp-bar select { min-height: 32px; }
+        .mp-search { flex: 1; min-width: 130px; min-height: 32px; padding: 0 9px; }
+        .mp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .mp-chip { border: 1px solid rgba(128,128,128,.28); border-radius: var(--radius); padding: 2px 8px; font-size: 12px; }
+        .mp-chip b { color: var(--accent); }
+        .mp-ban { border: 1px solid var(--bad-border); color: var(--bad); background: var(--bad-bg); border-radius: var(--radius); padding: 2px 8px; font-size: 12px; cursor: pointer; }
+        .mp-wrap { max-height: 320px; overflow: auto; border: 1px solid rgba(128,128,128,.22); border-radius: 8px; }
+        .mp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        .mp-table th, .mp-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid rgba(128,128,128,.14); white-space: nowrap; }
+        .mp-table th { position: sticky; top: 0; background: var(--bg); z-index: 1; }
+        .mp-table td.num, .mp-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .mp-table tr.mp-off { opacity: .4; }
+        .mp-table .mp-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+        .mp-table .mp-assign { min-height: 26px; font-size: 12px; }
+        .mp-code { font-weight: 600; }
+        .mp-hint { color: var(--muted); }
         .provider-list { display: grid; gap: 8px; }
         .provider-row {
           display: grid;
@@ -2197,11 +2215,30 @@ internal static class Dashboard
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
                   <div class="model-tier-grid">
                     <label class="tier-field"><span class="small">Enkel (1-2)</span>
-                      <input id="settingTierSimple" placeholder="deepseek/deepseek-chat"></label>
+                      <input id="settingTierSimple" placeholder="deepseek/deepseek-v4-flash"></label>
                     <label class="tier-field"><span class="small">Medel (3-4)</span>
-                      <input id="settingTierMedium" placeholder="deepseek/deepseek-chat"></label>
+                      <input id="settingTierMedium" placeholder="deepseek/deepseek-v4-pro"></label>
                     <label class="tier-field"><span class="small">Komplex (5)</span>
-                      <input id="settingTierComplex" placeholder="moonshotai/kimi-k2"></label>
+                      <input id="settingTierComplex" placeholder="z-ai/glm-5.2"></label>
+                  </div>
+                </div>
+                <div class="field wide" style="margin-top:10px">
+                  <span class="small">Modellkatalog (OpenRouter) - sortera pa kod-index/kostnad, tilldela tier/fardighet, banna oonskade</span>
+                  <div class="model-picker">
+                    <div class="mp-bar">
+                      <button type="button" id="mpLoad">Hamta katalogen</button>
+                      <input id="mpSearch" class="mp-search" placeholder="Sok modell (glm, deepseek, qwen...)">
+                      <select id="mpSort">
+                        <option value="coding">Sortera: kod-index (bast forst)</option>
+                        <option value="in">Sortera: pris in (billigast)</option>
+                        <option value="out">Sortera: pris ut (billigast)</option>
+                        <option value="context">Sortera: kontext (storst)</option>
+                      </select>
+                    </div>
+                    <div id="mpNote" class="small" style="color:var(--bad)"></div>
+                    <div id="mpAssignments" class="mp-chips"></div>
+                    <div id="mpBanned" class="mp-chips"></div>
+                    <div id="mpWrap" class="mp-wrap"><div class="small mp-hint" style="padding:10px">Tryck "Hamta katalogen" for OpenRouters modeller med kod-index och pris. Klicka Tilldela for att satta tier/fardighet, Banna for att utesluta.</div></div>
                   </div>
                 </div>
               </div>
@@ -5004,6 +5041,89 @@ internal static class Dashboard
           renderSettingsProviders();
         }
 
+        // ---- Modellvaljare: OpenRouter-katalog -> tiers/skill-routes + ban ----
+        const ModelPicker = (() => {
+          let catalog = [], routes = [], banned = [], loaded = false, hasConfig = false;
+          const SLOTS = [
+            { key: 'simple', label: 'Billig', tier: 'settingTierSimple' },
+            { key: 'medium', label: 'Mellan', tier: 'settingTierMedium' },
+            { key: 'complex', label: 'Stark', tier: 'settingTierComplex' },
+            { key: 'coding1', label: 'Kod latt', skill: 'coding', minC: 1 },
+            { key: 'coding4', label: 'Kod tung', skill: 'coding', minC: 4 },
+            { key: 'research3', label: 'Research', skill: 'research', minC: 3 },
+            { key: 'vision1', label: 'Vision', skill: 'vision', minC: 1, mm: true }
+          ];
+          const el = id => document.getElementById(id);
+          const routeOf = s => routes.find(r => r.skill === s.skill && r.minComplexity === s.minC);
+          const currentModel = s => s.tier ? (el(s.tier) ? el(s.tier).value.trim() : '') : (routeOf(s) ? routeOf(s).model : '');
+          const note = msg => { const n = el('mpNote'); if (n) n.textContent = msg || ''; };
+          function assign(slotKey, modelId) {
+            const s = SLOTS.find(x => x.key === slotKey); if (!s || !modelId) return;
+            const m = catalog.find(x => x.id === modelId);
+            if (s.mm && m && !m.multimodal) { note('Vision behover en multimodal modell - ' + modelId + ' ar text-only.'); return; }
+            note('');
+            if (s.tier) { const i = el(s.tier); if (i) i.value = modelId; }
+            else { const r = routeOf(s); if (r) r.model = modelId; else routes.push({ skill: s.skill, provider: 'openrouter', model: modelId, minComplexity: s.minC }); }
+            render();
+          }
+          function toggleBan(modelId) {
+            const i = banned.findIndex(b => b.toLowerCase() === modelId.toLowerCase());
+            if (i >= 0) banned.splice(i, 1); else banned.push(modelId);
+            render();
+          }
+          function setConfig(mt) {
+            routes = (mt && Array.isArray(mt.routes)) ? JSON.parse(JSON.stringify(mt.routes)) : [];
+            banned = (mt && Array.isArray(mt.bannedModels)) ? mt.bannedModels.slice() : [];
+            hasConfig = true; if (loaded) render();
+          }
+          async function load() {
+            const w = el('mpWrap'); if (w) w.innerHTML = '<div class="small mp-hint" style="padding:10px">Hamtar katalogen...</div>';
+            try { catalog = (await fetchJson('/api/models/catalog')) || []; loaded = true; render(); }
+            catch (e) { if (w) w.innerHTML = '<div class="small mp-hint" style="padding:10px">Kunde inte hamta katalogen (natverk/OpenRouter).</div>'; }
+          }
+          const money = n => n ? ('$' + (n < 1 ? n.toFixed(3) : n.toFixed(2))) : '-';
+          const codeOf = m => (m.codingIndex == null ? -1 : m.codingIndex);
+          function render() {
+            const a = el('mpAssignments');
+            if (a) a.innerHTML = SLOTS.map(s => '<span class="mp-chip">' + esc(s.label) + ': <b>' + esc(currentModel(s) || '-') + '</b></span>').join('');
+            const b = el('mpBanned');
+            if (b) b.innerHTML = banned.length ? ('<span class="small mp-hint">Bannade:</span> ' + banned.map(x => '<span class="mp-ban" data-unban="' + esc(x) + '">' + esc(x) + ' x</span>').join(' ')) : '';
+            const w = el('mpWrap'); if (!w || !loaded) return;
+            const q = (el('mpSearch') ? el('mpSearch').value : '').toLowerCase();
+            const sort = el('mpSort') ? el('mpSort').value : 'coding';
+            let rows = catalog.filter(m => !q || m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
+            rows.sort((x, y) => sort === 'in' ? (x.inputPerMillion - y.inputPerMillion)
+              : sort === 'out' ? (x.outputPerMillion - y.outputPerMillion)
+              : sort === 'context' ? (y.contextLength - x.contextLength)
+              : (codeOf(y) - codeOf(x)));
+            rows = rows.slice(0, 200);
+            const opts = SLOTS.map(s => '<option value="' + s.key + '">' + esc(s.label) + '</option>').join('');
+            w.innerHTML = '<table class="mp-table"><thead><tr><th>Modell</th><th class="num">Kontext</th><th class="num">$in/M</th><th class="num">$ut/M</th><th class="num">Kod</th><th>Tilldela</th><th></th></tr></thead><tbody>'
+              + rows.map(m => {
+                const off = banned.some(x => x.toLowerCase() === m.id.toLowerCase());
+                return '<tr class="' + (off ? 'mp-off' : '') + '">'
+                  + '<td class="mp-name" title="' + esc(m.id) + '">' + esc(m.name || m.id) + (m.multimodal ? ' <span class="mp-hint">(bild)</span>' : '') + '<br><span class="mp-hint">' + esc(m.id) + '</span></td>'
+                  + '<td class="num">' + (m.contextLength ? (Math.round(m.contextLength / 1000) + 'k') : '-') + '</td>'
+                  + '<td class="num">' + money(m.inputPerMillion) + '</td>'
+                  + '<td class="num">' + money(m.outputPerMillion) + '</td>'
+                  + '<td class="num mp-code">' + (m.codingIndex == null ? '-' : m.codingIndex) + '</td>'
+                  + '<td><select class="mp-assign" data-assign="' + esc(m.id) + '"><option value="">Tilldela...</option>' + opts + '</select></td>'
+                  + '<td><button type="button" class="mp-ban" data-ban="' + esc(m.id) + '">' + (off ? 'Tillat' : 'Banna') + '</button></td>'
+                  + '</tr>';
+              }).join('') + '</tbody></table>';
+          }
+          return { load, setConfig, render, routes: () => routes, banned: () => banned, hasConfig: () => hasConfig, _assign: assign, _ban: toggleBan };
+        })();
+        (function () {
+          const on = (id, ev, fn) => { const e = document.getElementById(id); if (e) e.addEventListener(ev, fn); };
+          on('mpLoad', 'click', () => ModelPicker.load());
+          on('mpSearch', 'input', () => ModelPicker.render());
+          on('mpSort', 'change', () => ModelPicker.render());
+          on('mpWrap', 'change', e => { const t = e.target; if (t && t.dataset && t.dataset.assign) ModelPicker._assign(t.value, t.dataset.assign); });
+          on('mpWrap', 'click', e => { const t = e.target; if (t && t.dataset && t.dataset.ban) ModelPicker._ban(t.dataset.ban); });
+          on('mpBanned', 'click', e => { const t = e.target; if (t && t.dataset && t.dataset.unban) ModelPicker._ban(t.dataset.unban); });
+        })();
+
         function applySettingsData(data) {
           $('settingNodeName').value = data.nodeName ?? '';
           $('settingHostEndpoint').value = data.hostEndpoint ?? '';
@@ -5025,6 +5145,7 @@ internal static class Dashboard
           $('settingTierSimple').value = data.modelTiers?.simple ?? '';
           $('settingTierMedium').value = data.modelTiers?.medium ?? '';
           $('settingTierComplex').value = data.modelTiers?.complex ?? '';
+          ModelPicker.setConfig(data.modelTiers || {});
           $('settingClusterToken').value = '';
           $('clearClusterToken').checked = false;
           $('clusterTokenState').textContent = data.clusterTokenConfigured
@@ -5355,10 +5476,12 @@ internal static class Dashboard
             projectMemoryEnabled: $('settingProjectMemory').checked,
             allowDesktopControl: $('settingAllowDesktopControl').checked,
             modelTiers: {
-              simple: $('settingTierSimple').value.trim() || 'deepseek/deepseek-chat',
-              medium: $('settingTierMedium').value.trim() || 'deepseek/deepseek-chat',
-              complex: $('settingTierComplex').value.trim() || 'moonshotai/kimi-k2'
+              simple: $('settingTierSimple').value.trim() || 'deepseek/deepseek-v4-flash',
+              medium: $('settingTierMedium').value.trim() || 'deepseek/deepseek-v4-pro',
+              complex: $('settingTierComplex').value.trim() || 'z-ai/glm-5.2'
             },
+            modelRoutes: ModelPicker.hasConfig() ? ModelPicker.routes() : undefined,
+            bannedModels: ModelPicker.hasConfig() ? ModelPicker.banned() : undefined,
             clusterToken: $('settingClusterToken').value || null,
             clearClusterToken: $('clearClusterToken').checked,
             operatorToken: $('settingOperatorToken').value || null,

@@ -212,6 +212,14 @@ public static class NodeWebHost
                 [FromServices] WorkerRegistry? registry, IHttpClientFactory hf, ILoggerFactory lf) =>
             UpdateSettings(store, locator, req, registry, hf, lf));
 
+        // Parsed OpenRouter catalog for the model picker: id, name, context,
+        // per-million price and the Artificial Analysis coding_index, so the UI
+        // can sort by coding quality/cost and assign tiers/skills or ban models.
+        // Public endpoint (no key needed), cached in the service; served by every
+        // role so each dashboard hits its own node (the catalog is universal).
+        app.MapGet("/api/models/catalog", async (OpenRouterCatalog catalog, CancellationToken ct) =>
+            Results.Ok(await catalog.GetAsync(ct)));
+
         // Lists the models the configured OpenRouter key can use, so the UI can
         // offer a dropdown instead of making the operator paste a raw model id.
         // OpenRouter's /api/v1/models requires the key; we proxy it here so the

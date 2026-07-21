@@ -107,4 +107,28 @@ public class ModelRoutingTests
         Assert.Contains("qwen", M("vision", 1));                       // vision => multimodal
         Assert.Equal("custom/model", M("coding", 2));                  // eget val orort
     }
+
+    [Fact]
+    public void ForTask_BannadRoutmodell_FallerTillNastaKandidat()
+    {
+        var tiers = new ModelTiers();
+        Assert.Contains("glm", tiers.ForTask("coding", 5).Model);      // default: GLM 5.2 for tung kod
+
+        tiers.BannedModels = ["z-ai/glm-5.2"];
+        var picked = tiers.ForTask("coding", 5).Model;
+        Assert.DoesNotContain("glm", picked);                         // bannad => faller till coding@1
+        Assert.True(tiers.IsBanned("z-ai/glm-5.2"));
+    }
+
+    [Fact]
+    public void ForTask_BannadTier_StegarTillAnnanTier()
+    {
+        var tiers = new ModelTiers { Simple = "a/simple", Medium = "b/medium", Complex = "c/complex", Routes = [] };
+        Assert.Equal("c/complex", tiers.ForTask("okand-skill", 5).Model);   // ingen route => Complex-tiern
+
+        tiers.BannedModels = ["c/complex"];
+        var picked = tiers.ForTask("okand-skill", 5).Model;
+        Assert.NotEqual("c/complex", picked);                          // bannad tier => stegar
+        Assert.Contains(picked, new[] { "b/medium", "a/simple" });
+    }
 }
