@@ -33,7 +33,15 @@ public static class SfxrGenerator
 
     public static byte[] Render(string category, int seed = 0)
     {
-        var p = PresetFor(category.ToLowerInvariant(), new Random(unchecked(seed * 7919 + category.GetHashCode(StringComparison.OrdinalIgnoreCase))));
+        var cat = category.ToLowerInvariant();
+        // Stabil seed per kategori. string.GetHashCode ar RANDOMISERAD per process
+        // i .NET (verifierat: samma strang ger olika hash i skilda korningar), sa
+        // den gamla seedformeln gjorde Render icke-deterministisk mellan korningar
+        // trots doc-loftet. Kategori-INDEX ar stabilt och ger anda en egen
+        // ljudkaraktar per kategori (variationen som A9 efterfragade).
+        var idx = Array.IndexOf(Categories, cat);
+        if (idx < 0) idx = Categories.Length; // okand kategori -> egen stabil seed
+        var p = PresetFor(cat, new Random(unchecked(seed * 7919 + idx * 65537 + 17)));
         var samples = Synthesize(p);
         return WavWriter.Write(samples, SampleRate);
     }
@@ -153,7 +161,8 @@ public static class SfxrGenerator
         for (var i = 0; i < 32; i++) noise[i] = noiseRng.NextDouble() * 2 - 1;
 
         var phase = 0;
-        var lpPole = Math.Pow(p.LpfCutoff, 3) * 0.1;
+        var lpCutoff = p.LpfCutoff;
+        var lpPole = Math.Pow(lpCutoff, 3) * 0.1;
         var lpValue = 0.0;
         var hpValue = 0.0;
         var hpPole = Math.Pow(p.HpfCutoff, 2) * 0.1;
@@ -162,6 +171,15 @@ public static class SfxrGenerator
         {
             fperiod *= fslide;
             if (i == arpSample) fperiod /= p.ArpMod;
+
+            // Lagpassets brytpunkt kan svepa over tiden (LpfSweep) - satt av t.ex.
+            // explosion for ett morknande efterslag. Noll sweep = konstant filter
+            // (byte-identiskt beteende med tidigare for alla andra kategorier).
+            if (p.LpfSweep != 0.0)
+            {
+                lpCutoff = Math.Clamp(lpCutoff + p.LpfSweep * 0.0004, 0.02, 1.0);
+                lpPole = Math.Pow(lpCutoff, 3) * 0.1;
+            }
 
             var rfperiod = fperiod;
             if (p.VibDepth > 0)
@@ -198,7 +216,7 @@ public static class SfxrGenerator
                     2 => Math.Sin(fp * Math.PI * 2),
                     _ => noise[(int)(fp * 32) & 31],
                 };
-                lpValue += (raw - lpValue) * (p.LpfCutoff >= 1.0 ? 1.0 : lpPole * 8);
+                lpValue += (raw - lpValue) * (lpCutoff >= 1.0 ? 1.0 : lpPole * 8);
                 var filtered = lpValue;
                 if (p.HpfCutoff > 0)
                 {

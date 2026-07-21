@@ -34,9 +34,21 @@ public class AssetAndProjectTests : IDisposable
         Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(a, 0, 4));
         Assert.Equal("WAVE", System.Text.Encoding.ASCII.GetString(a, 8, 4));
         Assert.True(a.Length > 4000, "misstänkt kort ljud");
-        Assert.Equal(a, b);              // deterministisk per (kategori, seed)
+        Assert.Equal(a, b);              // deterministisk per (kategori, seed) i processen
         Assert.NotEqual(a.Length, other.Length); // olika kategorier låter olika
+
+        // KRYSSDETERMINISM (A9): Render seedas via kategori-INDEX, inte den
+        // randomiserade string.GetHashCode (verifierat: samma strang gav olika
+        // hash i skilda processer -> ljudet lat olika varje omstart). Langden
+        // bestams enbart av den seedade System.Random (heltalsmatematik, ingen
+        // Math.Sin/Pow) sa guldvardena ar maskin-/process-oberoende och failar
+        // om hash-seedning nagonsin ateranfors.
+        Assert.Equal(JUMP_LEN, a.Length);
+        Assert.Equal(COIN_LEN, SfxrGenerator.Render("coin", seed: 7).Length);
     }
+
+    private const int JUMP_LEN = 27420;
+    private const int COIN_LEN = 25574;
 
     [Theory]
     [InlineData("ljud när spelaren hoppar", "jump")]
