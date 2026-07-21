@@ -59,7 +59,7 @@ public class ModelRoutingTests
         var (_, easyModel) = tiers.ForTask("coding", easyC);
         var (_, hardModel) = tiers.ForTask("coding", hardC);
         Assert.Contains("deepseek", easyModel);
-        Assert.Contains("kimi", hardModel);
+        Assert.Contains("glm", hardModel);   // stark tier = GLM 5.2 (var kimi-k2 0711)
     }
 
     [Fact]
@@ -78,7 +78,33 @@ public class ModelRoutingTests
         Assert.Contains("motorspel", godotReason);
 
         var tiers = new ModelTiers();
-        Assert.Contains("kimi", tiers.ForTask("coding", godot).Model);  // stark modell
+        Assert.Contains("glm", tiers.ForTask("coding", godot).Model);  // stark modell (GLM 5.2)
         Assert.NotEqual(tiers.ForTask("coding", godot).Model, tiers.ForTask("coding", html).Model);
+    }
+
+    [Fact]
+    public void HealRetired_ByterDodaOchTextOnlyRoutes_MenRorInteCustom()
+    {
+        // En nods sparade Routes kan ligga pa retirerade id (deepseek-coder och
+        // hy3:free 404:ar, kimi-k2 pa vision ar text-only). Laddningen ska laka
+        // dem till aktuella modeller men lamna aktade custom-routes ororda.
+        var stored = new List<ModelRoute>
+        {
+            new("coding", "openrouter", "deepseek/deepseek-coder", 1),  // 404
+            new("coding", "openrouter", "moonshotai/kimi-k2", 4),       // gammal, ingen kod-benchmark
+            new("vision", "openrouter", "moonshotai/kimi-k2", 1),       // text-only!
+            new("general", "openrouter", "tencent/hy3:free", 1),        // 404
+            new("coding", "openrouter", "custom/model", 2),             // eget levande val
+        };
+        var healed = ModelRoute.HealRetired(stored);
+        string M(string skill, int c) => healed.First(r => r.Skill == skill && r.MinComplexity == c).Model;
+
+        Assert.Equal(stored.Count, healed.Count);                       // inga borttappade
+        Assert.DoesNotContain(healed, r => r.Model == "deepseek/deepseek-coder");
+        Assert.DoesNotContain(healed, r => r.Model == "tencent/hy3:free");
+        Assert.DoesNotContain(healed, r => r.Model == "moonshotai/kimi-k2");
+        Assert.Contains("glm", M("coding", 4));                        // hard kod => GLM 5.2
+        Assert.Contains("qwen", M("vision", 1));                       // vision => multimodal
+        Assert.Equal("custom/model", M("coding", 2));                  // eget val orort
     }
 }

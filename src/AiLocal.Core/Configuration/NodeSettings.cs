@@ -125,24 +125,55 @@ public sealed class WorkerProfileSettings
 /// of everything funnelling through a single provider.</summary>
 public sealed record ModelRoute(string Skill, string Provider, string Model, int MinComplexity = 1)
 {
+    // Live, current-best-value OpenRouter ids (verified mot katalogen). De tre
+    // gamla var trasiga: deepseek-coder och tencent/hy3:free 404:ar (retirerade),
+    // och kimi-k2 pa vision-routen var TEXT-ONLY - den kunde inte lasa skarm-
+    // dumparna den routades for. GLM 5.2 (coding_index 68.8) tar hard kod, DeepSeek
+    // V4 Flash (billig + coding_index 56.2) tar latt kod, en multimodal for vision.
     public static List<ModelRoute> Defaults() => new()
     {
-        // Coding favours a cheap, capable coder (DeepSeek V3) - not Claude.
-        new("coding", "openrouter", "deepseek/deepseek-coder", 1),
-        new("coding", "openrouter", "moonshotai/kimi-k2", 4),
-        // Writing/creative favours a cheap open model.
-        new("writing", "openrouter", "deepseek/deepseek-chat", 1),
-        // Research: cheap reasoning model, no paid vendor needed.
-        new("research", "openrouter", "deepseek/deepseek-chat", 1),
-        new("research", "openrouter", "moonshotai/kimi-k2", 3),
-        // Data/vision: cheap multimodal-capable open model.
-        new("data", "openrouter", "deepseek/deepseek-chat", 1),
-        new("vision", "openrouter", "moonshotai/kimi-k2", 1),
-        // General: local Ollama when available (cheap, private), else a free
-        // OpenRouter model (Tencent Hunyuan via OpenRouter, very low cost).
+        // Coding: billig kapabel coder for latt jobb, GLM 5.2 for de tunga
+        // byggena (Godot/Unity-spel hamnar har sedan v1.51).
+        new("coding", "openrouter", "deepseek/deepseek-v4-flash", 1),
+        new("coding", "openrouter", "z-ai/glm-5.2", 4),
+        // Writing/creative: billig oppen modell.
+        new("writing", "openrouter", "deepseek/deepseek-v4-flash", 1),
+        // Research: billig for latt, GLM 5.2 for det djupa.
+        new("research", "openrouter", "deepseek/deepseek-v4-flash", 1),
+        new("research", "openrouter", "z-ai/glm-5.2", 3),
+        // Data: billig kapabel modell.
+        new("data", "openrouter", "deepseek/deepseek-v4-flash", 1),
+        // Vision: MASTE vara multimodal (laser skarmdumpar i vision-granskningen).
+        new("vision", "openrouter", "qwen/qwen3.7-plus", 1),
+        // General: lokal Ollama nar den finns (billig, privat), annars billig OR.
         new("general", "ollama", "", 1),
-        new("general", "openrouter", "tencent/hy3:free", 1),
+        new("general", "openrouter", "deepseek/deepseek-v4-flash", 1),
     };
+
+    /// <summary>Modell-id som OpenRouter retirerat (404) eller som hade fel form
+    /// (kimi-k2 pa vision ar text-only). Routes gar INTE att andra i UI:t, sa en
+    /// nods sparade Routes ar bara en gammal kopia av en aldre fabriksdefault -
+    /// darfor byts varje route som fortfarande ligger pa ett retirerat id ut mot
+    /// den aktuella defaulten for samma (skill, komplexitet). Aktade custom-routes
+    /// (levande id vi inte retirerat) ror vi aldrig.</summary>
+    private static readonly HashSet<string> Retired = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "deepseek/deepseek-coder",   // 404
+        "tencent/hy3:free",          // 404
+        "moonshotai/kimi-k2",        // gammal K2 0711: ingen kod-benchmark, text-only (dalig for vision)
+        "deepseek/deepseek-chat",    // ersatt av deepseek-v4-flash (billigare + benchmarkad)
+    };
+
+    public static List<ModelRoute> HealRetired(List<ModelRoute> stored)
+    {
+        if (stored is null || stored.Count == 0) return Defaults();
+        var defaults = Defaults();
+        return stored.Select(r =>
+            !Retired.Contains(r.Model) ? r
+            : defaults.FirstOrDefault(d =>
+                d.Skill.Equals(r.Skill, StringComparison.OrdinalIgnoreCase) && d.MinComplexity == r.MinComplexity) ?? r
+        ).ToList();
+    }
 }
 
 /// <summary>Which model the Host picks for a task, keyed off the task's
@@ -153,15 +184,15 @@ public sealed class ModelTiers
 {
     /// <summary>complexity 1-2 (trivial: summaries, short edits, lookups).
     /// Cheap by default - a free/low-cost OpenRouter model, not a paid Claude.</summary>
-    public string Simple { get; set; } = "deepseek/deepseek-chat";
+    public string Simple { get; set; } = "deepseek/deepseek-v4-flash";
 
     /// <summary>complexity 3-4 (most real work: coding, drafting, analysis).
     /// A strong-but-cheap model (DeepSeek V3 / Kimi) instead of Claude.</summary>
-    public string Medium { get; set; } = "deepseek/deepseek-chat";
+    public string Medium { get; set; } = "deepseek/deepseek-v4-pro";
 
     /// <summary>complexity 5 (hard: architecture, deep research, debugging).
     /// Falls back to a capable cheap model; Claude only if you opt in.</summary>
-    public string Complex { get; set; } = "moonshotai/kimi-k2";
+    public string Complex { get; set; } = "z-ai/glm-5.2";
 
     /// <summary>Provider-aware routes. The router picks the first route whose
     /// skill matches the task and whose MinComplexity is met; falls back to the

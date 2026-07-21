@@ -191,7 +191,14 @@ public sealed class PersistentSettingsStore
         if (Has("Roles") && stored.Roles.Count > 0)
             settings.Host.Roles = stored.Roles;
         if (Has("ModelTiers"))
+        {
             settings.Worker.ModelTiers = stored.ModelTiers;
+            // Routes går inte att ändra i UI:t, så en nods sparade Routes är bara
+            // en gammal kopia av fabriksdefaulten - läk bort retirerade/döda id
+            // (deepseek-coder/hy3:free 404, kimi-k2 på vision var text-only) till
+            // aktuella modeller, annars byter en exe-uppdatering aldrig modell.
+            settings.Worker.ModelTiers.Routes = ModelRoute.HealRetired(settings.Worker.ModelTiers.Routes);
+        }
         if (Has("AllowDesktopControl"))
             settings.Worker.AllowDesktopControl = stored.AllowDesktopControl;
         if (Has("ProviderPriority"))
