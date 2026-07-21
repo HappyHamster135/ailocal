@@ -1,0 +1,69 @@
+using AiLocal.Core.Agent;
+using AiLocal.Core.Providers;
+using AiLocal.Node.Hosting;
+using Xunit;
+
+namespace AiLocal.Core.Tests;
+
+/// <summary>
+/// v1.44.0: motorvalet ("unity eller godot" valde unity; "inte html" kunde
+/// paradoxalt välja html5) och team-lägets tysta git-död (föll tillbaka utan
+/// förklaring när git saknades på maskinen).
+/// </summary>
+public class EnginePickAndTeamGitTests
+{
+    [Theory]
+    [InlineData("bygg ett riktigt spel i unity eller godot inte html", "godot")]
+    [InlineData("2d fotboll manager i godot eller unity", "godot")]
+    [InlineData("gör ett spel i unity", "unity")]
+    [InlineData("3d rymdskjutare", "unity")]
+    [InlineData("ett webbspel som körs i webbläsaren", "html5")]
+    [InlineData("riktigt spel, inte html", "godot")]
+    [InlineData("ett spel, ej i html tack", "godot")]
+    [InlineData("a real game, not html", "godot")]
+    [InlineData("bygg ett plattformsspel", "godot")]
+    public void PickEngine_GodotVinnerVidBadaOchNegeratWebbRaknasAldrig(string prompt, string expected)
+    {
+        Assert.Equal(expected, GameScaffoldService.PickEngine(prompt));
+    }
+
+    [Fact]
+    public async Task IsGitAvailable_PaDenHarMaskinen_Sant()
+    {
+        // Dev/CI-maskinen har git (det här repot ÄR git) - beviset att
+        // kontrollen svarar sant där git faktiskt finns.
+        Assert.True(await new GitService().IsGitAvailableAsync());
+    }
+
+    private sealed class GitlessGitService : GitService
+    {
+        public override Task<bool> IsGitAvailableAsync(CancellationToken ct = default) => Task.FromResult(false);
+        public override Task<bool> IsRepoAsync(string folderPath, CancellationToken ct = default) => Task.FromResult(false);
+        public override Task<bool> InitAsync(string folderPath, CancellationToken ct = default) => Task.FromResult(false);
+    }
+
+    [Fact]
+    public async Task TeamBuild_UtanGit_EmittarOrsakOchFallerTillbaka()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-teamgit-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(dir);
+        var steps = new List<AgentStep>();
+        try
+        {
+            var git = new GitlessGitService();
+            var result = await TeamBuild.RunAsync(
+                "bygg ett spel", 2, dir, AgentAccessLevel.Full, null, "system",
+                complete: (_, _) => throw new InvalidOperationException("modellen ska aldrig anropas när git-grunden saknas"),
+                executorFor: _ => null!,
+                emit: step => { steps.Add(step); return Task.CompletedTask; },
+                git, new GitIsolationService(git), CancellationToken.None);
+
+            Assert.Null(result); // fallback till ensam agent
+            Assert.Contains(steps, s => s.Kind == "tool_error" && s.Detail.Contains("git init misslyckades"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* städning */ }
+        }
+    }
+}

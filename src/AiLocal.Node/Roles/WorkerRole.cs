@@ -765,6 +765,25 @@ public static class WorkerRole
                 await teamEmit(new AgentStep("thinking",
                     $"Team-läge: upp till {Math.Clamp(req.TeamSize.Value, 2, 4)} parallella utvecklare i varsin git-worktree."));
                 var gitService = new GitService();
+                // Team-läget står och faller med git: på en dator utan git
+                // (varken PATH eller provisionerad katalog) dog hela team-
+                // vägen TYST i git init och föll tillbaka utan förklaring
+                // (rapporterat). Nu provisioneras git automatiskt med öppna
+                // steg - precis som python/godot redan provisioneras.
+                if (!await gitService.IsGitAvailableAsync(ct))
+                {
+                    await teamEmit(new AgentStep("tool_call", "provision git (team-läget kräver git för worktrees)"));
+                    try
+                    {
+                        var gitProv = await new ToolProvisioner().ProvisionAsync("git", "", ct);
+                        await teamEmit(new AgentStep(gitProv.Success ? "tool_result" : "tool_error", gitProv.Output));
+                    }
+                    catch (Exception provEx)
+                    {
+                        await teamEmit(new AgentStep("tool_error",
+                            $"git kunde inte provisioneras ({provEx.Message}) - team-läget kommer falla tillbaka till en ensam agent."));
+                    }
+                }
                 // Modelltier-golv för team: fyra parallella utvecklare på den
                 // billigaste tiern producerar prosa i fyra worktrees
                 // (observerat live) - utan uttrycklig hint från anroparen kör

@@ -38,6 +38,16 @@ public class GitService
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
     private const int MaxDiffChars = 100_000;
 
+    /// <summary>True when a git binary is reachable at all (PATH or the
+    /// provisioned tools dir via ToolLocator). Team builds check this BEFORE
+    /// starting - on a machine without git the whole team path used to die
+    /// silently in `git init` and fall back with no explanation.</summary>
+    public virtual async Task<bool> IsGitAvailableAsync(CancellationToken ct = default)
+    {
+        var (exitCode, _, _) = await RunGitAsync(".", ["--version"], ct);
+        return exitCode == 0;
+    }
+
     public virtual async Task<bool> IsRepoAsync(string folderPath, CancellationToken ct = default)
     {
         var (exitCode, _, _) = await RunGitAsync(folderPath, ["rev-parse", "--is-inside-work-tree"], ct);

@@ -51,13 +51,23 @@ public sealed partial class GameScaffoldService
     /// browser/web game - the 16 html5 genre kits are still one word away
     /// ("webbspel"). Unity when named, or for 3D. The agent can always
     /// override by passing an explicit engine.</summary>
-    static string PickEngine(string prompt)
+    internal static string PickEngine(string prompt)
     {
         var p = (prompt ?? "").ToLowerInvariant();
+        // Godot är husmotorn (enda med full verify-/exportkedja): nämns den
+        // uttryckligen vinner den - även över unity. "unity eller godot"
+        // valde tidigare unity, och agenten rev sedan själv unity-kittet och
+        // byggde om i godot mitt i körningen (rapporterat, ~5 min slöseri).
+        if (p.Contains("godot")) return "godot";
         if (p.Contains("unity")) return "unity";
-        if (p.Contains("html") || p.Contains("browser") || p.Contains("webbläsar") || p.Contains("webblasar")
-            || p.Contains("webbspel") || p.Contains("web game") || p.Contains("i webben"))
-            return "html5";
+        // Negerat webb ("inte html", "ej i html", "not html") är ett
+        // AVSTÅNDSTAGANDE - utan vakten valde "riktigt spel, inte html"
+        // paradoxalt nog html5 så fort ingen motor namngavs.
+        var webWish = p.Contains("html") || p.Contains("browser") || p.Contains("webbläsar") || p.Contains("webblasar")
+            || p.Contains("webbspel") || p.Contains("web game") || p.Contains("i webben");
+        var webNegated = System.Text.RegularExpressions.Regex.IsMatch(
+            p, @"\b(inte|ej|utan|not|no)\s+(ett\s+|en\s+|i\s+|a\s+)?(html|browser|webb|web)");
+        if (webWish && !webNegated) return "html5";
         if (p.Contains("3d")) return "unity";
         return "godot";
     }

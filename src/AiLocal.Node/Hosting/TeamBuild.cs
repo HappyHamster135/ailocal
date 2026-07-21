@@ -48,14 +48,27 @@ public static class TeamBuild
         teamSize = Math.Clamp(teamSize, 2, MaxTeamSize);
 
         // ---- 1. Grund: repo + baslinje ----------------------------------
+        // Varje tidigt avhopp EMITTAS med orsak - "Team-läget slutförde inte
+        // bygget" utan förklaring gick inte att felsöka (rapporterat: föll
+        // tillbaka direkt, och orsaken visade sig vara att git saknades på
+        // maskinen).
         if (!await git.InitAsync(workspaceRoot, ct))
+        {
+            await emit(new AgentStep("tool_error",
+                "Team-läget: git init misslyckades i arbetsytan - finns git på den här datorn? " +
+                "(noden försöker provisionera git automatiskt före team-byggen från v1.44.0)."));
             return null;
+        }
         EnsureGitignore(workspaceRoot);
         await git.CommitAsync(workspaceRoot, "AiLocal team: baslinje", ct);
         // Ingen gren = ingen commit gick att göra (tom mapp, trasig git-
         // identitet, ...) - worktrees kräver en riktig HEAD att utgå från.
         if (await git.GetCurrentBranchAsync(workspaceRoot, ct) is null)
+        {
+            await emit(new AgentStep("tool_error",
+                "Team-läget: baslinje-commiten gick inte att skapa (ingen gren/HEAD i arbetsytan)."));
             return null;
+        }
 
         // ---- 2. Arkitekten ----------------------------------------------
         await emit(new AgentStep("tool_call", "teamarkitekt (delar upp arbetet i oberoende spår)"));
