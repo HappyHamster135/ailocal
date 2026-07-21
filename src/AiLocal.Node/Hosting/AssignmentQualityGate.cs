@@ -84,19 +84,39 @@ public static class AssignmentQualityGate
                 "inte ett nytt projekt.");
         }
 
-        if (engine == "html5" && playtest is not null)
+        // Playtesta BÅDE html5 och godot: godot är husmotorn och ska inte bara
+        // headless-importeras utan ocksa spelas (fönstersond + vision + design-
+        // bedömning). FullTestAsync degraderar snällt utan godot/skärm (try/catch
+        // nedan), så en headless ser-nod utan skärm failar aldrig av detta.
+        if ((engine is "html5" or "godot") && playtest is not null)
         {
             try
             {
                 var pt = await playtest(projectRoot, engine, ct);
                 if (!pt.Success)
                 {
-                    hard = true;
-                    issues.Add("Playtest misslyckades: " + pt.Summary);
+                    if (engine == "html5")
+                    {
+                        // HTML5 kör alltid (Jint-smoke) - ett misslyckande är hårt.
+                        hard = true;
+                        issues.Add("Playtest misslyckades: " + pt.Summary);
+                    }
+                    else
+                    {
+                        // Godot-speltest är BEST-EFFORT: utan godot-verktyg/skärm
+                        // (pre-export, headless ser-nod) gick spelet inte att köra -
+                        // degradera i stället för att falskt underkänna. Verify +
+                        // headless-import star for korrektheten; sonden är ett plus.
+                        okSummary.AppendLine("Godot-speltest kunde inte köras (godot/skärm saknas) - hoppade över.");
+                    }
                 }
                 else if (pt.Issues.Count > 0)
                 {
                     issues.AddRange(pt.Issues.Select(i => "Playtest: " + i));
+                    // Ett spel som speldesign-passet bedömer som OSPELBART är ett
+                    // HÅRT fynd - det får en designfixrunda, inte bara en rapportrad.
+                    if (pt.Issues.Any(i => i.Contains("INTE spelbart")))
+                        hard = true;
                 }
                 else
                 {
@@ -130,7 +150,12 @@ public static class AssignmentQualityGate
         "\n\nÅtgärda problemen i de BEFINTLIGA filerna (edit_file/write_file), kör verify igen, " +
         "och avsluta först när allt är grönt. Skapa inte ett nytt projekt. " +
         "Saknas ett verktyg (python, node, godot, ...) - installera det med provision och försök igen. " +
-        "VIKTIGT: anropa verktygen på riktigt via tool-anrop - JSON eller kommandon skrivna som TEXT i svaret kör ingenting.";
+        "VIKTIGT: anropa verktygen på riktigt via tool-anrop - JSON eller kommandon skrivna som TEXT i svaret kör ingenting." +
+        (findings.Report.Contains("SPELDESIGN")
+            ? "\n\nNÅGRA fynd gäller SPELDESIGN, inte buggar: justera balans/svårighet/spelbarhet (fiendehastighet, " +
+              "HP, spawn-antal, tidsgränser, målvillkor) så spelet GÅR att spela och känns rimligt svårt - inte bara " +
+              "att det kompilerar. Ändra VÄRDEN i den befintliga koden och speltesta igen."
+            : "");
 
     private static string FirstLine(string text)
     {

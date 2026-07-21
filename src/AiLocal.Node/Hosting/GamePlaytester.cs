@@ -427,6 +427,38 @@ public sealed class GamePlaytester
             }
         }
 
+        // SPELDESIGN-pass: en speldesigner-bedömning av SPELBARHET och balans -
+        // inte "ser det ut som ett spel" utan "GÅR det att spela, är det rimligt
+        // svårt, fastnar man?". Skillnaden mellan en polerad prototyp och ett spel
+        // värt att spela. Mittspelsdumpen (efter sondens tangenttryck) är underlaget.
+        if (screenshotPath is not null && _visionReview is not null)
+        {
+            try
+            {
+                var (ok, text) = await _visionReview(screenshotPath,
+                    "Bedöm detta som en SPELDESIGNER. Skärmdumpen är MITT I en spelsession, efter att en testare tryckt tangenter. Kort på svenska:\n" +
+                    "1) Går det att förstå målet - vad ska spelaren göra?\n" +
+                    "2) Ser det ut att gå att göra framsteg, eller ser det fruset/fast/omöjligt ut?\n" +
+                    "3) Är svårigheten rimlig, eller FÖR SVÅRT (spelaren död / game over direkt) eller FÖR LÄTT/TOMT (inget händer, ingen utmaning)?\n" +
+                    "Avsluta med EXAKT en av raderna: 'SPELBART: ja' eller 'SPELBART: nej - <kort orsak>'.", ct);
+                if (ok && !string.IsNullOrWhiteSpace(text))
+                {
+                    summary.AppendLine();
+                    summary.AppendLine("### Speldesign-bedömning (AI)");
+                    summary.AppendLine(text.Trim());
+                    issues.AddRange(DesignIssuesFrom(text));
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Speldesign-bedömningen är ett extra öga, aldrig ett krav.
+            }
+        }
+
         return result with
         {
             Summary = summary.ToString(),
@@ -434,6 +466,33 @@ public sealed class GamePlaytester
             ScreenshotPath = screenshotPath,
             TitleScreenshotPath = titleScreenshotPath
         };
+    }
+
+    /// <summary>Design/playability issues parsed from the SPELDESIGN vision pass.
+    /// "SPELBART: nej" becomes a HARD "not playable" finding the gate escalates to
+    /// a design-fix round; softer for-svårt/for-lätt notes steer balance. Pure and
+    /// testable - no vision call needed.</summary>
+    internal static IReadOnlyList<string> DesignIssuesFrom(string visionText)
+    {
+        var issues = new List<string>();
+        var text = visionText ?? "";
+        var lower = text.ToLowerInvariant();
+        var idx = lower.IndexOf("spelbart: nej", StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            var reason = text[(idx + "spelbart: nej".Length)..].TrimStart(' ', '-', ':', '\t');
+            var firstLine = reason.Split('\n')[0].Trim();
+            issues.Add("SPELDESIGN: spelet bedöms INTE spelbart som det är"
+                + (firstLine.Length == 0 ? "." : " - " + firstLine));
+            return issues; // ospelbart trumfar balansanmärkningar
+        }
+        if (lower.Contains("för svår") || lower.Contains("for svar") || lower.Contains("dör direkt")
+            || lower.Contains("game over direkt") || lower.Contains("dog direkt"))
+            issues.Add("SPELDESIGN: verkar för svårt - mjuka upp balansen (färre/långsammare fiender, mer HP, mildare start).");
+        if (lower.Contains("för lätt") || lower.Contains("for latt") || lower.Contains("ingen utmaning")
+            || lower.Contains("inget händer") || lower.Contains("för tomt"))
+            issues.Add("SPELDESIGN: verkar för lätt/tomt - lägg till utmaning (fler/snabbare fiender, tydligt mål, tidspress).");
+        return issues;
     }
 
     // ---- Statisk HTML5-analys -------------------------------------------------
