@@ -61,12 +61,30 @@ public class AssetAndProjectTests : IDisposable
     }
 
     [Theory]
-    [InlineData("bakgrundsmusik till bossstriden", "action")]
+    [InlineData("bakgrundsmusik till bossstriden", "boss")]
     [InlineData("lugn menymusik", "calm")]
     [InlineData("segerfanfar", "victory")]
+    [InlineData("atmosfarisk ambient till menyn", "ambient")]
+    [InlineData("spannande skrackmusik", "tense")]
+    [InlineData("sorgsen melankolisk scen", "sad")]
+    [InlineData("utforskande aventyrsmusik", "exploration")]
     public void Chiptune_MoodFor_Maps(string prompt, string expected)
     {
         Assert.Equal(expected, ChiptuneComposer.MoodFor(prompt));
+    }
+
+    [Fact]
+    public void Chiptune_NyaStamningar_GerGiltigDeterministiskWav()
+    {
+        foreach (var mood in new[] { "ambient", "tense", "boss", "sad", "exploration" })
+        {
+            var a = ChiptuneComposer.Render(mood, seed: 5);
+            Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(a, 0, 4));
+            Assert.True(a.Length > 100_000, $"{mood}: för kort spår");
+            Assert.Equal(a, ChiptuneComposer.Render(mood, seed: 5));   // deterministisk per (mood, seed)
+        }
+        // Ambient (sine-pad, inga trummor) låter inte som action.
+        Assert.NotEqual(ChiptuneComposer.Render("ambient", 5), ChiptuneComposer.Render("action", 5));
     }
 
     // ---- Stilkonsekvens ----------------------------------------------------
