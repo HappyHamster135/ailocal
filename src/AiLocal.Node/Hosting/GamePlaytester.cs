@@ -270,6 +270,26 @@ public sealed class GamePlaytester
         var summary = new StringBuilder(result.Summary);
         var issues = new List<string>(result.Issues);
 
+        // Interaktiv QA: SPELA spelet via DevTools-protokollet - tangenttryck
+        // in, canvas-hash före/efter. Ett spel som ser rätt ut men inte
+        // svarar på spelaren är felklassen inga tidigare kontroller såg.
+        if (gamePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            var probe = await new InteractiveProbe().PlayAsync(
+                gamePath, Path.Combine(projectRoot, "screenshots", "playtest.png"), ct);
+            if (probe.Ran)
+            {
+                summary.AppendLine();
+                summary.AppendLine("### Interaktiv QA (riktig spelsession)");
+                summary.AppendLine(probe.Notes);
+                if (!probe.Responded)
+                    issues.Add("Interaktiv QA: spelet reagerar inte på spelarens input - canvasen är oförändrad efter tangenttryck och klick.");
+                // Sondens slutdump visar spelet MITT I en session - bättre
+                // vision-underlag än en statisk startbild.
+                screenshotPath ??= probe.FinalScreenshotPath;
+            }
+        }
+
         if (screenshotPath is null && gamePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
             var output = Path.Combine(projectRoot, "screenshots", "playtest.png");

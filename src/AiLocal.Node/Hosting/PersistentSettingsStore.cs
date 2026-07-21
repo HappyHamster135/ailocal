@@ -33,6 +33,7 @@ public sealed record SettingsUpdate(
     bool? AutoPullOllamaModel = null,
     string? WorkspacePath = null,
     bool? AiReviewWrites = null,
+    bool? MilestoneApproval = null,
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
     bool? AutoMergeIsolatedTasks = null,
@@ -63,6 +64,7 @@ internal sealed class StoredNodeSettings
     public AgentAccessLevel AgentAccess { get; set; } = AgentAccessLevel.Off;
     public string? WorkspacePath { get; set; }
     public bool AiReviewWrites { get; set; }
+    public bool MilestoneApproval { get; set; }
     public bool AllowInternet { get; set; }
     public bool UseGitIsolation { get; set; }
     public bool AutoMergeIsolatedTasks { get; set; }
@@ -164,6 +166,8 @@ public sealed class PersistentSettingsStore
             settings.Worker.WorkspacePath = stored.WorkspacePath;
         if (Has("AiReviewWrites"))
             settings.Worker.AiReviewWrites = stored.AiReviewWrites;
+        if (Has("MilestoneApproval"))
+            settings.Worker.MilestoneApproval = stored.MilestoneApproval;
         if (Has("AllowInternet"))
             settings.Worker.AllowInternet = stored.AllowInternet;
         if (Has("UseGitIsolation"))
@@ -215,6 +219,7 @@ public sealed class PersistentSettingsStore
                 agentAccess = _settings.Worker.AgentAccess.ToString(),
                 workspacePath = _settings.Worker.WorkspacePath,
                 aiReviewWrites = _settings.Worker.AiReviewWrites,
+                milestoneApproval = _settings.Worker.MilestoneApproval,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
                 autoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks,
@@ -310,6 +315,8 @@ public sealed class PersistentSettingsStore
 
             if (update.AiReviewWrites.HasValue)
                 _settings.Worker.AiReviewWrites = update.AiReviewWrites.Value;
+            if (update.MilestoneApproval.HasValue)
+                _settings.Worker.MilestoneApproval = update.MilestoneApproval.Value;
 
             if (update.AllowInternet.HasValue)
                 _settings.Worker.AllowInternet = update.AllowInternet.Value;
@@ -524,6 +531,7 @@ public sealed class PersistentSettingsStore
         _stored.AgentAccess = _settings.Worker.AgentAccess;
         _stored.WorkspacePath = _settings.Worker.WorkspacePath;
         _stored.AiReviewWrites = _settings.Worker.AiReviewWrites;
+        _stored.MilestoneApproval = _settings.Worker.MilestoneApproval;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;

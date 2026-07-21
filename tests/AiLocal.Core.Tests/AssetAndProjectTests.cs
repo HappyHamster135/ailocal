@@ -117,7 +117,9 @@ public class AssetAndProjectTests : IDisposable
     [Fact]
     public void Snapshots_CaptureListRestore_RoundTrips()
     {
-        var project = Path.Combine(_dir, "spelet");
+        // Unikt namn per körning: snapshotlagret ligger i nodens datamapp och
+        // nycklas på REL-sökvägen - "spelet" skulle samla zippar över körningar.
+        var project = Path.Combine(_dir, "spelet-" + Guid.NewGuid().ToString("n")[..8]);
         Directory.CreateDirectory(project);
         File.WriteAllText(Path.Combine(project, "index.html"), "VERSION 1");
 

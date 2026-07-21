@@ -27,6 +27,10 @@ public sealed record BenchmarkRunRequest(int? Count = null);
 public sealed record ProjectActionRequest(string Rel);
 public sealed record ProjectRestoreRequest(string Rel, string File);
 
+/// <summary>Body for POST /api/assignment/milestone: the operator's verdict
+/// on a paused build's delivery contract.</summary>
+public sealed record MilestoneDecisionRequest(string Id, bool Approve, string? Note = null);
+
 /// <summary>Response from POST /execute/isolation/create: the freshly created
 /// worktree+branch for one isolated task.</summary>
 public sealed record IsolationCreated(string TaskId, string Branch, string Worktree);
@@ -521,6 +525,56 @@ public static class WorkerRole
                 assignmentText = req.Assignment + projectBrief;
             }
 
+            // ---- Regissören: designkontrakt med mätbara kriterier -----------
+            // En stark-modell-tur gör den svaga prompten till ett leverans-
+            // kontrakt ("5 banor", "3 fiendetyper") som grinden följer upp.
+            // Uppföljningar behåller projektets befintliga kontrakt.
+            IReadOnlyList<string> contractCriteria = [];
+            if (buildIntent)
+            {
+                var directorRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
+                if (!DirectorPass.AlreadyContracted(directorRoot))
+                {
+                    await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
+                    var contract = await DirectorPass.RunAsync(
+                        req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct);
+                    contractCriteria = contract.Criteria;
+                    await EmitStep("tool_result", contract.ToMarkdown());
+                    assignmentText += "\n\n" + contract.ToMarkdown() +
+                        "\n\nBygg så att VARJE kontraktspunkt uppfylls - nodens kvalitetsgrind följer upp dem efteråt.";
+                }
+                else
+                {
+                    contractCriteria = DirectorPass.ReadCriteria(directorRoot);
+                }
+            }
+
+            // ---- Milstolpsgodkännande (valbart, bara lokala körningar) ------
+            // Operatören får kontraktet och kan godkänna eller styra om med en
+            // mening innan bygget drar igång. Klusterkörningar pausar aldrig
+            // (ingen sitter och tittar där); timeout auto-godkänner.
+            if (settings.Worker.MilestoneApproval && includePreview && contractCriteria.Count > 0)
+            {
+                var milestoneId = Guid.NewGuid().ToString("n")[..8];
+                await EmitStep("awaiting_milestone", JsonSerializer.Serialize(new
+                {
+                    id = milestoneId,
+                    contract = string.Join("\n", contractCriteria.Select(c => "- " + c))
+                }));
+                var (approved, note) = await MilestoneRegistry.WaitAsync(milestoneId, TimeSpan.FromMinutes(10), ct);
+                if (!approved && !string.IsNullOrWhiteSpace(note))
+                {
+                    assignmentText += "\n\nOPERATÖRENS JUSTERING av inriktningen (väger tyngre än kontraktet där de krockar): " + note;
+                    await EmitStep("thinking", "Operatören justerade inriktningen - bygget fortsätter med ändringen.");
+                }
+                else
+                {
+                    await EmitStep("thinking", approved
+                        ? "Milstolpen godkänd - bygget fortsätter."
+                        : "Milstolpen auto-godkändes (ingen respons inom 10 minuter).");
+                }
+            }
+
             // Same production-grade system prompt as interactive sessions -
             // an assignment dispatched through the cluster used to run with NO
             // system prompt at all, so the same goal came out far worse than
@@ -617,6 +671,32 @@ public static class WorkerRole
                 await EmitStep("tool_call", "kvalitetskontroll (nodens egen verify + playtest)");
                 findings = await InspectAsync();
                 await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+
+                // Regissörens uppföljning: EN modelltur (bara första rundan,
+                // bara när tekniken är grön) som granskar leveransen mot
+                // kontraktet - ouppfyllda punkter blir mjuka fynd som får en
+                // egen fixrunda. Grinden garanterade FUNGERANDE; det här är
+                // den som kräver INTRESSANT.
+                if (round == 0 && findings.Clean && contractCriteria.Count > 0)
+                {
+                    await EmitStep("tool_call", "regissörens uppföljning (leveranskontraktet)");
+                    var unmet = await DirectorPass.ReviewAsync(
+                        contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct);
+                    if (unmet.Count > 0)
+                    {
+                        findings = findings with
+                        {
+                            Clean = false,
+                            Report = "Leveranskontraktet - ouppfyllda punkter:\n" + string.Join("\n", unmet.Select(u => "- " + u))
+                        };
+                        await EmitStep("tool_error", findings.Report);
+                    }
+                    else
+                    {
+                        await EmitStep("tool_result", "Regissören: alla kontraktspunkter bedöms uppfyllda.");
+                    }
+                }
+
                 if (findings.Clean || round >= maxFixRounds) break;
                 result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, req.ModelHint,
                     onStep: emitAgentStep, ct, history: result.Messages, system: system);
@@ -765,6 +845,13 @@ public static class WorkerRole
         // PascalCase-form som SSE-framarna (se HostRole:s motsvarighet).
         app.MapGet("/api/assignment-log", (AssignmentLog assignmentLog) =>
             Results.Text(JsonSerializer.Serialize(assignmentLog.Snapshot()), "application/json"));
+
+        // Milstolpsgodkännandet: dashboarden svarar hit när operatören
+        // klickar Godkänn/Justera på ett pausat bygge.
+        app.MapPost("/api/assignment/milestone", (MilestoneDecisionRequest req) =>
+            MilestoneRegistry.Resolve(req.Id, req.Approve, req.Note)
+                ? Results.Ok(new { resolved = true })
+                : Results.Problem(detail: "Milstolpen är redan avgjord eller okänd.", statusCode: StatusCodes.Status404NotFound));
 
         // Benchmark-sviten: självmätning av NODENS byggförmåga per version.
         // Lokal-only precis som assignment-motorn den mäter.

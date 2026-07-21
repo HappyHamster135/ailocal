@@ -1424,6 +1424,7 @@ internal static class Dashboard
         .project-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
         .project-versions { border-top: 1px solid var(--kv-line); margin-top: 4px; padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
         .project-version-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .milestone-card { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--surface-soft); display: flex; flex-direction: column; gap: 6px; }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
@@ -2091,6 +2092,13 @@ internal static class Dashboard
                 <span class="small" style="display:block;margin-top:-6px">
                   Hostens starkaste modell godkänner varje filskrivning innan den landar på disk under kluster-assignments.
                   Avslag skickas tillbaka till agenten som rättningsinstruktion - byggt för svagare lokala modeller.
+                </span>
+                <label class="check-field wide">
+                  <input id="settingMilestoneApproval" type="checkbox"> Milstolpsgodkännande före bygget
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Lokala byggen pausar efter regissörens leveranskontrakt så att du kan godkänna eller styra om med en mening
+                  innan agenten bygger. Auto-godkänns efter 10 minuter; klusterkörningar pausar aldrig.
                 </span>
                 <label class="check-field wide">
                   <input id="settingAllowInternet" type="checkbox"> Internetåtkomst för agenten
@@ -4881,6 +4889,7 @@ internal static class Dashboard
           $('settingAgentAccess').value = data.agentAccess ?? 'Off';
           $('settingWorkspacePath').value = data.workspacePath ?? '';
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
+          $('settingMilestoneApproval').checked = data.milestoneApproval ?? false;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
@@ -5212,6 +5221,7 @@ internal static class Dashboard
             agentAccess: $('settingAgentAccess').value,
             workspacePath: $('settingWorkspacePath').value.trim() || null,
             aiReviewWrites: $('settingAiReviewWrites').checked,
+            milestoneApproval: $('settingMilestoneApproval').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
@@ -5659,6 +5669,17 @@ internal static class Dashboard
             ? `<div class="msg-preview"><a class="mini-btn" href="${esc(m.previewPath)}" target="_blank" rel="noopener">Öppna resultatet i webbläsaren</a></div>`
             : '';
 
+          const milestone = (running && m.milestone && m.milestone.id)
+            ? `<div class="milestone-card">
+                <strong>Milstolpe - regissörens leveranskontrakt</strong>
+                <div class="msg-text">${esc(m.milestone.contract || '')}</div>
+                <div class="detail-actions">
+                  <button class="mini-btn" data-milestone-approve="${esc(m.milestone.id)}">Godkänn och bygg</button>
+                  <button class="mini-btn" data-milestone-adjust="${esc(m.milestone.id)}">Justera…</button>
+                </div>
+              </div>`
+            : '';
+
           return `
           <article class="message assistant assignment">
             <div class="message-meta">
@@ -5671,6 +5692,7 @@ internal static class Dashboard
               ${statePill}
             </div>
             ${stepsHtml}
+            ${milestone}
             ${answer}
             ${preview}
             ${!running && m.content ? msgActionsHtml : ''}
@@ -5801,7 +5823,7 @@ internal static class Dashboard
           let success = false;
           let summary = '';
 
-          const addStep = step => { stepMsg.steps.push(step); renderMessages(); };
+          const addStep = step => { stepMsg.milestone = null; stepMsg.steps.push(step); renderMessages(); };
 
           try {
             const headers = { 'content-type': 'application/json' };
@@ -5840,7 +5862,15 @@ internal static class Dashboard
                   stepMsg.workerName = payload.worker.name;
                   renderMessages();
                 } else if (payload.step) {
-                  addStep(payload.step);
+                  // Milstolpen renderas som ett godkännandekort i bubblan i
+                  // stället för en rå JSON-stegrad; nästa riktiga steg (efter
+                  // beslutet) rensar kortet via addStep.
+                  if (payload.step.Kind === 'awaiting_milestone') {
+                    try { stepMsg.milestone = JSON.parse(payload.step.Detail); } catch { stepMsg.milestone = null; }
+                    renderMessages();
+                  } else {
+                    addStep(payload.step);
+                  }
                 } else if (payload.final) {
                   success = !!payload.final.Success;
                   summary = payload.final.FinalAnswer || '';
@@ -6206,6 +6236,29 @@ internal static class Dashboard
         if (benchmarkRunBtn) benchmarkRunBtn.onclick = runBenchmark;
         const projectsRefreshBtn = $('projectsRefreshBtn');
         if (projectsRefreshBtn) projectsRefreshBtn.onclick = loadProjects;
+
+        // Milstolpsknapparna byggs om vid varje render - eventdelegering på
+        // dokumentet i stället för omkoppling per render.
+        document.addEventListener('click', async e => {
+          const approve = e.target.closest('[data-milestone-approve]');
+          const adjust = e.target.closest('[data-milestone-adjust]');
+          if (!approve && !adjust) return;
+          const id = approve ? approve.dataset.milestoneApprove : adjust.dataset.milestoneAdjust;
+          let note = null;
+          if (adjust) {
+            note = window.prompt('Hur vill du justera inriktningen? (en mening - bygget fortsätter med den)');
+            if (note === null) return;
+          }
+          try {
+            await fetchJson('/api/assignment/milestone', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id, approve: !!approve, note })
+            });
+          } catch (error) {
+            showComposerNotice(error.message, true);
+          }
+        });
 
         loadProviders();
         refresh();

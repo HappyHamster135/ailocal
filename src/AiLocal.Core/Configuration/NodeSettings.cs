@@ -68,6 +68,11 @@ public sealed class WorkerProfileSettings
     /// failures fail open, this is not a security boundary.</summary>
     public bool AiReviewWrites { get; set; }
 
+    /// <summary>Pause local builds after the director's delivery contract
+    /// until the operator approves or redirects with a note - the studio
+    /// checkpoint. Off by default; cluster runs never pause regardless.</summary>
+    public bool MilestoneApproval { get; set; }
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.

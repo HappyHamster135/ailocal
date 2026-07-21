@@ -9,6 +9,6 @@
     <!-- Bump this with every release tag - SelfUpdater compares it against
          GitHub's latest release tag to decide whether an update is available,
          so a stale value here means that check is wrong, not just cosmetic. -->
-    <Version>1.36.0</Version>
+    <Version>1.37.0</Version>
   </PropertyGroup>
 </Project>
