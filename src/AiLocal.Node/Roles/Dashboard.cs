@@ -1418,6 +1418,12 @@ internal static class Dashboard
         #benchmarkStatus { white-space: pre-line; color: var(--muted); }
         .bench-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px; }
         .bench-table td, .bench-table th { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--kv-line); }
+        .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; padding: 12px; }
+        .project-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; transition: border-color .15s ease; }
+        .project-card:hover { border-color: var(--accent); }
+        .project-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .project-versions { border-top: 1px solid var(--kv-line); margin-top: 4px; padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+        .project-version-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
@@ -1537,6 +1543,7 @@ internal static class Dashboard
               <button class="view-tab" data-view="delegate" id="delegateNavBtn"><span data-icon="send"></span> Delegera till kluster</button>
               <button class="view-tab" data-view="office"><span data-icon="users"></span> Kontorsvy</button>
               <button class="view-tab" data-view="studio"><span data-icon="code"></span> Studio</button>
+              <button class="view-tab" data-view="projects"><span data-icon="folder"></span> Projekt</button>
             </nav>
             <div class="sidebar-section">
               <div class="sidebar-section-head">
@@ -1929,6 +1936,20 @@ internal static class Dashboard
               <div class="empty">Ingen nod vald.</div>
             </div>
           </aside>
+        </main>
+
+        <main class="chat-only-workspace hidden" id="projectsView">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Projekt</h2>
+                <p class="small">Allt som byggts i den här nodens arbetsyta - spela, fortsätt, packa eller rulla tillbaka.</p>
+              </div>
+              <button class="mini-btn" id="projectsRefreshBtn">Uppdatera</button>
+            </div>
+            <div class="notice" id="projectsNotice"></div>
+            <div id="projectsGrid" class="projects-grid"></div>
+          </section>
         </main>
 
         <main class="schedules-workspace hidden" id="schedulesView">
@@ -3570,7 +3591,7 @@ internal static class Dashboard
           }
         }
 
-        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office', 'studio'];
+        const knownViews = ['work', 'network', 'schedules', 'delegate', 'session', 'office', 'studio', 'projects'];
         function switchView(view) {
           const previous = state.activeView;
           state.activeView = knownViews.includes(view) ? view : 'work';
@@ -3581,6 +3602,8 @@ internal static class Dashboard
           $('sessionView').classList.toggle('hidden', state.activeView !== 'session');
           $('officeView').classList.toggle('hidden', state.activeView !== 'office');
           $('studioView').classList.toggle('hidden', state.activeView !== 'studio');
+          $('projectsView').classList.toggle('hidden', state.activeView !== 'projects');
+          if (state.activeView === 'projects') loadProjects();
           // Mjuk in-tonings-animation pa den vy som just visades - klassen
           // tas bort och laggs tillbaka sa animationen spelas om vid varje
           // byte (inte bara forsta gangen).
@@ -5323,6 +5346,116 @@ internal static class Dashboard
             || state.assignmentMessages.some(m => m.role !== 'user' && !m.fromLog);
         }
 
+        // ---- Projekt-vyn: portfölj + rollback ----
+        // Endpointsen finns bara där assignment-motorn kör lokalt (Worker/
+        // Launcher) - andra roller får en ärlig notis i stället för en tom vy.
+        function showProjectsNotice(message, isError = false) {
+          const box = $('projectsNotice');
+          box.textContent = message;
+          box.className = message ? `notice show ${isError ? 'bad' : ''}` : 'notice';
+        }
+
+        async function loadProjects() {
+          const grid = $('projectsGrid');
+          if (!grid) return;
+          let projects;
+          try {
+            projects = await fetchJson('/api/projects') ?? [];
+          } catch {
+            grid.innerHTML = '';
+            showProjectsNotice('Projektvyn finns på noder som bygger lokalt (Worker eller skrivbordsappen).', true);
+            return;
+          }
+          showProjectsNotice('');
+          if (!projects.length) {
+            grid.innerHTML = '<div class="empty">Inga projekt ännu - bygg något i Delegera-vyn så dyker det upp här.</div>';
+            return;
+          }
+          grid.innerHTML = projects.map(p => `
+            <article class="project-card" data-project="${esc(p.Rel)}">
+              <div class="project-card-head">
+                <strong>${esc(p.Name)}</strong>
+                <span class="pill">${esc(p.Engine !== 'unknown' ? p.Engine : p.Kind)}</span>
+              </div>
+              <div class="small">${p.Files} filer · ${esc(new Date(p.LastModified).toLocaleString('sv-SE'))}</div>
+              <div class="small">${p.LatestClean === true ? 'Senaste kvalitet: godkänd' : p.LatestClean === false ? 'Senaste kvalitet: anmärkningar' : 'Ingen kvalitetsdata ännu'}${p.Snapshots ? ` · ${p.Snapshots} versioner` : ''}</div>
+              <div class="detail-actions">
+                ${p.Playable ? `<a class="mini-btn" href="/api/preview/${p.Rel === '.' ? '' : esc(p.Rel) + '/'}index.html" target="_blank" rel="noopener">Spela</a>` : ''}
+                <button class="mini-btn" data-proj-continue="${esc(p.Rel)}" data-proj-name="${esc(p.Name)}">Fortsätt</button>
+                <button class="mini-btn" data-proj-package="${esc(p.Rel)}">Packa</button>
+                <button class="mini-btn" data-proj-folder="${esc(p.Rel)}">Mapp</button>
+                ${p.Snapshots ? `<button class="mini-btn" data-proj-versions="${esc(p.Rel)}">Versioner</button>` : ''}
+                ${p.Rel !== '.' ? `<button class="mini-btn" data-proj-delete="${esc(p.Rel)}">Radera</button>` : ''}
+              </div>
+              <div class="project-versions hidden" data-versions-for="${esc(p.Rel)}"></div>
+            </article>`).join('');
+          wireProjectCards();
+        }
+
+        function wireProjectCards() {
+          document.querySelectorAll('[data-proj-continue]').forEach(btn => btn.onclick = () => {
+            switchView('delegate');
+            const prompt = $('prompt');
+            prompt.value = `Fortsätt på projektet ${btn.dataset.projName}: `;
+            prompt.focus();
+          });
+          document.querySelectorAll('[data-proj-package]').forEach(btn => btn.onclick = async () => {
+            btn.disabled = true;
+            try {
+              const r = await fetchJson('/api/projects/package', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ rel: btn.dataset.projPackage })
+              });
+              showProjectsNotice(r.Success ? `Paketerat: ${r.PackagePath || r.Output}` : r.Output, !r.Success);
+            } catch (error) { showProjectsNotice(error.message, true); }
+            finally { btn.disabled = false; }
+          });
+          document.querySelectorAll('[data-proj-folder]').forEach(btn => btn.onclick = async () => {
+            try {
+              await fetchJson('/api/projects/open-folder', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ rel: btn.dataset.projFolder })
+              });
+            } catch (error) { showProjectsNotice(error.message, true); }
+          });
+          document.querySelectorAll('[data-proj-delete]').forEach(btn => btn.onclick = async () => {
+            if (!window.confirm('Radera projektet permanent? Versionssnapshots blir kvar men projektmappen tas bort.')) return;
+            try {
+              await fetchJson('/api/projects/delete', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ rel: btn.dataset.projDelete })
+              });
+              loadProjects();
+            } catch (error) { showProjectsNotice(error.message, true); }
+          });
+          document.querySelectorAll('[data-proj-versions]').forEach(btn => btn.onclick = async () => {
+            const rel = btn.dataset.projVersions;
+            const box = document.querySelector(`[data-versions-for="${CSS.escape(rel)}"]`);
+            if (!box) return;
+            if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+            try {
+              const versions = await fetchJson(`/api/projects/snapshots?rel=${encodeURIComponent(rel)}`) ?? [];
+              box.innerHTML = versions.map(v => `
+                <div class="project-version-row">
+                  <span class="small">${esc(new Date(v.TakenAt).toLocaleString('sv-SE'))} · ${esc(v.Label)}${v.Clean ? ' · godkänd' : ''}</span>
+                  <button class="mini-btn" data-restore-rel="${esc(rel)}" data-restore-file="${esc(v.File)}">Återställ</button>
+                </div>`).join('') || '<span class="small">Inga versioner.</span>';
+              box.classList.remove('hidden');
+              box.querySelectorAll('[data-restore-rel]').forEach(rb => rb.onclick = async () => {
+                if (!window.confirm('Återställa projektet till den här versionen? Nuvarande filer ersätts.')) return;
+                try {
+                  const r = await fetchJson('/api/projects/restore', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ rel: rb.dataset.restoreRel, file: rb.dataset.restoreFile })
+                  });
+                  showProjectsNotice(r.output || 'Återställt.');
+                  loadProjects();
+                } catch (error) { showProjectsNotice(error.message, true); }
+              });
+            } catch (error) { showProjectsNotice(error.message, true); }
+          });
+        }
+
         // ---- Benchmark (självmätning i Inställningar) ----
         // Endpointen finns bara där assignment-motorn kör lokalt (Worker/
         // Launcher) - andra roller får ett tyst 404 och sektionen står tom.
@@ -6071,6 +6204,8 @@ internal static class Dashboard
 
         const benchmarkRunBtn = $('benchmarkRunBtn');
         if (benchmarkRunBtn) benchmarkRunBtn.onclick = runBenchmark;
+        const projectsRefreshBtn = $('projectsRefreshBtn');
+        if (projectsRefreshBtn) projectsRefreshBtn.onclick = loadProjects;
 
         loadProviders();
         refresh();

@@ -1147,6 +1147,10 @@ public sealed class AgentToolExecutor
             output = string.IsNullOrWhiteSpace(output)
                 ? ResolvePath(Path.Combine("assets", $"{type.Trim().ToLowerInvariant()}-{Guid.NewGuid().ToString("n")[..8]}{extension}"))
                 : ResolvePath(output);
+            // Stilkonsekvens: alla bildpromptar i ett projekt får SAMMA
+            // stilsuffix (från DESIGN.md:s art direction när den finns) så
+            // spelet ser ut att vara ritat av en hand, inte ett collage.
+            prompt = AssetStyle.Apply(_workspaceRoot, type, prompt);
             var (success, result, filePath) = await _assetGenerator(type, prompt, width, height, output, ct);
             return success
                 ? new ToolResult(call.Id, call.Name, filePath is not null ? $"Asset created: {filePath}\n{result}" : result)

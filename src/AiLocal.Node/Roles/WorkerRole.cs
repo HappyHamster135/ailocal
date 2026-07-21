@@ -22,6 +22,11 @@ public sealed record AssignmentRequest(string Assignment, string? ModelHint = nu
 /// prompts to run (default 3, clamped to the catalog size).</summary>
 public sealed record BenchmarkRunRequest(int? Count = null);
 
+/// <summary>Bodies for the project-portfolio endpoints: Rel is the project's
+/// path relative to the workspace ("." = the workspace root itself).</summary>
+public sealed record ProjectActionRequest(string Rel);
+public sealed record ProjectRestoreRequest(string Rel, string File);
+
 /// <summary>Response from POST /execute/isolation/create: the freshly created
 /// worktree+branch for one isolated task.</summary>
 public sealed record IsolationCreated(string TaskId, string Branch, string Worktree);
@@ -411,7 +416,8 @@ public static class WorkerRole
                 },
                 assetGenerator: async (type, prompt, width, height, output, act) =>
                 {
-                    var gen = new AssetGenerator(httpFactory);
+                    var gen = new AssetGenerator(httpFactory,
+                        cloudImages: new CloudImageGenerator(httpFactory, settingsStore.GetApiKey));
                     var r = await gen.GenerateAsync(type, prompt, width, height, output, act);
                     return (r.Success, r.Output, r.FilePath);
                 },
@@ -658,6 +664,17 @@ public static class WorkerRole
                 };
             }
 
+            // Versionshistorik: varje godkänt uppdrag fryser projektet som en
+            // snapshot - ångra-knappen i Projekt-vyn för uppföljningar som
+            // gjorde spelet sämre.
+            if (result.Success && findings?.ProjectRoot is { } snapshotRoot)
+            {
+                var snapshot = ProjectSnapshots.Capture(
+                    workspaceRoot, snapshotRoot, req.Assignment, findings.Clean, findings.Engine);
+                if (snapshot.Success)
+                    await EmitStep("tool_result", $"Projektsnapshot: {snapshot.Output}");
+            }
+
             // Förhandsvisningslänk bara för lokala körningar (Launcher eller
             // fristående Worker) - då kör dashboarden på samma nod som
             // filerna och /api/preview kan servera projektet direkt.
@@ -759,6 +776,99 @@ public static class WorkerRole
                 History = bench.History
             }), "application/json"));
 
+        // ---- Projektvyn: portfölj, paketering, mapp, radering, rollback ----
+        app.MapGet("/api/projects", (NodeSettings settings) =>
+        {
+            var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+            var verifier = new ProjectVerifier();
+            var candidates = new List<string>();
+            if (Directory.Exists(root))
+            {
+                if (verifier.Detect(root) != ProjectVerifier.ProjectKind.Unknown)
+                    candidates.Add(root);
+                try
+                {
+                    candidates.AddRange(Directory.EnumerateDirectories(root)
+                        .Where(d => !Path.GetFileName(d).StartsWith('.')
+                            && verifier.Detect(d) != ProjectVerifier.ProjectKind.Unknown));
+                }
+                catch { /* oläsbar arbetsyta - visa det som gick */ }
+            }
+
+            var projects = candidates.Select(dir =>
+            {
+                var rel = Path.GetRelativePath(root, dir);
+                var latest = ProjectSnapshots.List(root, dir).FirstOrDefault();
+                int files;
+                try { files = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(f => !f.Contains(".git")); }
+                catch { files = 0; }
+                return new
+                {
+                    Rel = rel == "." ? "." : rel.Replace('\\', '/'),
+                    Name = rel == "." ? Path.GetFileName(root) + " (roten)" : Path.GetFileName(dir),
+                    Kind = verifier.Detect(dir).ToString(),
+                    Engine = GameBuilder.DetectEngine(dir),
+                    Files = files,
+                    LastModified = ProjectRootDetector.NewestWriteUtc(dir),
+                    Playable = File.Exists(Path.Combine(dir, "index.html")),
+                    Snapshots = ProjectSnapshots.List(root, dir).Count,
+                    LatestClean = latest?.Clean,
+                    LatestLabel = latest?.Label
+                };
+            }).OrderByDescending(p => p.LastModified).ToList();
+            return Results.Text(JsonSerializer.Serialize(projects), "application/json");
+        });
+
+        app.MapPost("/api/projects/package", async (ProjectActionRequest req, NodeSettings settings,
+            IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            if (ResolveProjectDir(settings, req.Rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            var pkg = new PackageService(httpFactory);
+            var r = await pkg.PackageAsync(dir, "auto", Path.GetFileName(dir), Path.Combine(dir, "dist"), ct);
+            return Results.Text(JsonSerializer.Serialize(new { r.Success, r.Output, r.PackagePath }), "application/json");
+        });
+
+        app.MapPost("/api/projects/open-folder", (ProjectActionRequest req, NodeSettings settings) =>
+        {
+            if (ResolveProjectDir(settings, req.Rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            // Lokala roller = samma maskin som operatören; öppna Utforskaren.
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"")
+            { UseShellExecute = true });
+            return Results.Ok(new { opened = true });
+        });
+
+        app.MapPost("/api/projects/delete", (ProjectActionRequest req, NodeSettings settings) =>
+        {
+            if (req.Rel == ".")
+                return Results.Problem(detail: "Projektet ligger i arbetsytans rot - radera manuellt, inte härifrån.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            if (ResolveProjectDir(settings, req.Rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            Directory.Delete(dir, recursive: true);
+            return Results.Ok(new { deleted = true });
+        });
+
+        app.MapGet("/api/projects/snapshots", (string rel, NodeSettings settings) =>
+        {
+            if (ResolveProjectDir(settings, rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+            return Results.Text(JsonSerializer.Serialize(ProjectSnapshots.List(root, dir)), "application/json");
+        });
+
+        app.MapPost("/api/projects/restore", (ProjectRestoreRequest req, NodeSettings settings) =>
+        {
+            if (ResolveProjectDir(settings, req.Rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+            var (success, output) = ProjectSnapshots.Restore(root, dir, req.File);
+            return success
+                ? Results.Ok(new { restored = true, output })
+                : Results.Problem(detail: output, statusCode: StatusCodes.Status400BadRequest);
+        });
+
         app.MapPost("/api/benchmark/run", (BenchmarkRunRequest req, BenchmarkService bench,
             AssignmentLog assignmentLog, NodeSettings settings) =>
         {
@@ -780,6 +890,24 @@ public static class WorkerRole
         // disk och dubbelklicka index.html.
         app.MapGet("/api/preview", (NodeSettings settings) => PreviewEntry(settings));
         app.MapGet("/api/preview/{**path}", (string path, NodeSettings settings) => ServePreviewFile(settings, path));
+    }
+
+    /// <summary>Resolves a project's rel path against the workspace with a
+    /// traversal guard AND the requirement that the target actually IS a
+    /// recognizable project - the portfolio endpoints must never operate on
+    /// arbitrary folders.</summary>
+    internal static string? ResolveProjectDir(NodeSettings settings, string? rel)
+    {
+        if (string.IsNullOrWhiteSpace(rel)) return null;
+        var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+        string full;
+        try { full = Path.GetFullPath(Path.Combine(root, rel)); }
+        catch { return null; }
+        if (!full.Equals(root, StringComparison.OrdinalIgnoreCase)
+            && !full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (!Directory.Exists(full)) return null;
+        return new ProjectVerifier().Detect(full) != ProjectVerifier.ProjectKind.Unknown ? full : null;
     }
 
     internal static string PreviewWorkspaceRoot(NodeSettings settings) =>

@@ -164,13 +164,15 @@ public sealed partial class GameScaffoldService
 
         // Self-contained procedural sound effects (square-wave WAVs written at
         // scaffold time, so the game has audio with zero downloads).
-        Write(root, "jump.wav", MakeWav(660, 0.12));
+        // Riktiga retro-ljudeffekter (sfxr-syntes) i stället för sinuspip -
+        // fasta seeds så varje scaffold låter likadant och testbart.
+        Write(root, "jump.wav", SfxrGenerator.Render("jump", seed: 7));
         files.Add("jump.wav");
-        Write(root, "coin.wav", MakeWav(1046, 0.10));
+        Write(root, "coin.wav", SfxrGenerator.Render("coin", seed: 7));
         files.Add("coin.wav");
-        Write(root, "hurt.wav", MakeWav(180, 0.18));
+        Write(root, "hurt.wav", SfxrGenerator.Render("hurt", seed: 7));
         files.Add("hurt.wav");
-        Write(root, "win.wav", MakeWav(880, 0.30));
+        Write(root, "win.wav", SfxrGenerator.Render("win", seed: 7));
         files.Add("win.wav");
 
         // App icon (embedded into the exported EXE). No external art.

@@ -64,10 +64,26 @@ public sealed class AssetGenerator
     // agent generating many assets doesn't exhaust sockets.
     private static readonly HttpClient FallbackHttp = new() { Timeout = TimeSpan.FromSeconds(HttpTimeoutSeconds) };
 
-    public AssetGenerator(IHttpClientFactory? httpFactory = null, ILogger<AssetGenerator>? logger = null)
+    private readonly CloudImageGenerator? _cloudImages;
+
+    public AssetGenerator(IHttpClientFactory? httpFactory = null, ILogger<AssetGenerator>? logger = null,
+        CloudImageGenerator? cloudImages = null)
     {
         _httpFactory = httpFactory;
         _logger = logger;
+        _cloudImages = cloudImages;
+    }
+
+    /// <summary>Stabil över processer (string.GetHashCode är randomiserad) -
+    /// samma prompt ska ge samma ljud/musik varje gång.</summary>
+    private static int StableSeed(string s)
+    {
+        unchecked
+        {
+            var hash = 23;
+            foreach (var c in s ?? "") hash = hash * 31 + c;
+            return hash;
+        }
     }
 
     /// <summary>
@@ -95,6 +111,38 @@ public sealed class AssetGenerator
         var outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrEmpty(outDir))
             Directory.CreateDirectory(outDir);
+
+        // ---- Ljud och musik: alltid de lokala synthesizerarna --------------
+        // Deterministiska, gratis och markant bättre än både molnvägen (som
+        // krävde en env-token ingen satte) och de gamla sinuspipen.
+        if (type is "sfx" or "sound" or "ljud" or "ljudeffekt")
+        {
+            var (ok, output, path) = SfxrGenerator.GenerateToFile(
+                SfxrGenerator.CategoryFor(prompt), StableSeed(prompt), outputPath);
+            return new AssetResult(ok, output, ok ? path : null);
+        }
+        if (type is "music" or "audio" or "musik")
+        {
+            var (ok, output, path) = ChiptuneComposer.GenerateToFile(
+                ChiptuneComposer.MoodFor(prompt), StableSeed(prompt), outputPath);
+            return new AssetResult(ok, output, ok ? path : null);
+        }
+
+        // ---- Bilder: appens EGNA nycklar (OpenRouter/Gemini) först ---------
+        // Riktig spelgrafik i stället för procedurell pixel-art så fort en
+        // nyckel finns; varje fel faller tyst vidare till nästa nivå.
+        if (type is "image" or "texture" or "sprite" or "ui" && _cloudImages is { HasAnyKey: true })
+        {
+            var png = await _cloudImages.TryGenerateAsync(prompt, ct);
+            if (png is not null)
+            {
+                var pngPath = Path.ChangeExtension(Path.GetFullPath(outputPath), ".png");
+                await File.WriteAllBytesAsync(pngPath, png, ct);
+                return new AssetResult(true,
+                    $"Bild genererad via molnmodell med appens API-nyckel ({png.Length / 1024} kB png).", pngPath);
+            }
+            _logger?.LogInformation("Molnbildgenerering gav inget resultat - faller vidare för '{Type}'", type);
+        }
 
         // Resolve the API key.
         var apiKey = ResolveApiToken();
