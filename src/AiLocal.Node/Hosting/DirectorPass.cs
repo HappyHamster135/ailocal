@@ -31,6 +31,11 @@ public static class DirectorPass
           for jump/coin/hit", "pause menu with restart") - never vague quality
           words ("fun", "polished").
         - Achievable by one developer in one sitting on the existing scaffold.
+        - When the user message contains INSPIRATION SEEDS: build the twist
+          around them and turn EACH seed into one concrete criterion.
+        - At least TWO criteria must be NEW named mechanics that do NOT exist
+          in a generic starter kit (the kit already has menus, score, save,
+          difficulty levels and basic play) - name each mechanic explicitly.
         """;
 
     public sealed record Contract(string Pillars, string Twist, IReadOnlyList<string> Criteria)
@@ -50,10 +55,11 @@ public static class DirectorPass
         string? strongModelHint,
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
         CancellationToken ct,
-        string? engine = null)
+        string? engine = null,
+        IReadOnlyList<string>? inspirationSeeds = null)
     {
-        var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct)
-            ?? FallbackContract(userPrompt);
+        var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct, inspirationSeeds)
+            ?? FallbackContract(userPrompt, inspirationSeeds);
         // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra
         // på INNEHÅLL (5 banor, 3 fiendetyper) men glömmer KÄNSLAN - och
         // grinden följer bara upp det som står i kontraktet. Punkterna läggs
@@ -172,14 +178,19 @@ public static class DirectorPass
 
     private static async Task<Contract?> AskModelAsync(
         string userPrompt, string? strongModelHint,
-        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, CancellationToken ct)
+        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, CancellationToken ct,
+        IReadOnlyList<string>? inspirationSeeds = null)
     {
         try
         {
+            var message = inspirationSeeds is { Count: > 0 }
+                ? userPrompt + "\n\nINSPIRATION SEEDS (build the twist around these, one criterion each):\n" +
+                  string.Join("\n", inspirationSeeds.Select(s => "- " + s))
+                : userPrompt;
             var response = await complete(new ChatRequest
             {
                 System = DirectorSystem,
-                Messages = [new ChatMessage("user", userPrompt)],
+                Messages = [new ChatMessage("user", message)],
                 ModelHint = strongModelHint,
                 MaxTokens = 600
             }, ct);
@@ -216,11 +227,11 @@ public static class DirectorPass
     }
 
     /// <summary>Deterministic floor when the model can't do JSON.</summary>
-    internal static Contract FallbackContract(string prompt)
+    internal static Contract FallbackContract(string prompt, IReadOnlyList<string>? inspirationSeeds = null)
     {
         var isGame = prompt.Contains("spel", StringComparison.OrdinalIgnoreCase)
             || prompt.Contains("game", StringComparison.OrdinalIgnoreCase);
-        return isGame
+        var contract = isGame
             ? new Contract(
                 "Lätt att lära, svår att bemästra - varje omgång ska kännas rättvis.",
                 "Svårigheten stiger märkbart och belönar skicklighet.",
@@ -240,6 +251,17 @@ public static class DirectorPass
                     "Felhantering med begripliga meddelanden",
                     "Minst 3 automatiska tester som passerar",
                 ]);
+
+        // Fröna blir kriterier RAKT AV i fallbacken: standardkontraktet var
+        // deterministiskt, så nyckellösa/svaga körningar gjorde samma spel
+        // varje gång - nu divergerar även de (fröna slumpas per körning).
+        if (inspirationSeeds is { Count: > 0 })
+            contract = contract with
+            {
+                Twist = "Byggt kring: " + string.Join("; ", inspirationSeeds) + ".",
+                Criteria = [.. contract.Criteria, .. inspirationSeeds.Select(s => "Bygg in mekaniken: " + s)]
+            };
+        return contract;
     }
 
     private static void TryAppendToDesign(string projectRoot, Contract contract)

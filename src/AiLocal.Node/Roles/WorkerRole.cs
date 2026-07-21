@@ -646,10 +646,19 @@ public static class WorkerRole
                 var directorRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
                 if (!DirectorPass.AlreadyContracted(directorRoot))
                 {
+                    // Idéverkstaden: 2-3 slumpade genrefrön per körning gör
+                    // att samma prompt ALDRIG ger samma spel två gånger -
+                    // kitet är det deterministiska golvet, fröna är variationen
+                    // (och svaga modeller bygger bra kring ett GIVET frö).
+                    var ideaSeeds = GenreIdeaBank.PickSeeds(
+                        GameScaffoldService.DetectGenre(req.Assignment), count: 3);
+                    await EmitStep("thinking",
+                        "Inspirationsfrön till regissören: " + string.Join(" · ", ideaSeeds));
                     await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
                     var contract = await DirectorPass.RunAsync(
                         req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct,
-                        engine: GameBuilder.DetectEngine(directorRoot));
+                        engine: GameBuilder.DetectEngine(directorRoot),
+                        inspirationSeeds: ideaSeeds);
                     contractCriteria = contract.Criteria;
                     await EmitStep("tool_result", contract.ToMarkdown());
                     assignmentText += "\n\n" + contract.ToMarkdown() +
