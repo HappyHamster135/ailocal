@@ -29,28 +29,9 @@ public static class WindowCapturer
 
         try
         {
-            // Spelet laddar först - huvudfönstret dyker upp efter någon sekund.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
-            var hwnd = IntPtr.Zero;
-            while (DateTime.UtcNow < deadline)
-            {
-                ct.ThrowIfCancellationRequested();
-                try
-                {
-                    process.Refresh();
-                    if (process.HasExited)
-                        return (false, "Spelet avslutades innan något fönster hann visas.", null);
-                    hwnd = process.MainWindowHandle;
-                }
-                catch
-                {
-                    return (false, "Spelprocessen gick inte att läsa.", null);
-                }
-                if (hwnd != IntPtr.Zero && IsWindowVisible(hwnd)) break;
-                await Task.Delay(250, ct);
-            }
+            var hwnd = await WaitForVisibleWindowAsync(process, TimeSpan.FromSeconds(8), ct);
             if (hwnd == IntPtr.Zero)
-                return (false, "Spelprocessen visade aldrig något fönster (headless miljö?).", null);
+                return (false, "Spelprocessen visade aldrig något fönster (headless miljö/avslutad process?).", null);
 
             // Låt titelskärmen ritas klart innan dumpen tas.
             await Task.Delay(settle, ct);
@@ -70,13 +51,43 @@ public static class WindowCapturer
         }
     }
 
-    internal static (bool Success, string Output, string? ImagePath) Capture(IntPtr hwnd, string outputPath)
+    /// <summary>Väntar in ett synligt huvudfönster från processen (spel
+    /// laddar först, fönstret kommer efter någon sekund). IntPtr.Zero när
+    /// processen dog, inte gick att läsa, eller aldrig visade fönster.</summary>
+    internal static async Task<IntPtr> WaitForVisibleWindowAsync(
+        System.Diagnostics.Process process, TimeSpan timeout, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            IntPtr hwnd;
+            try
+            {
+                process.Refresh();
+                if (process.HasExited) return IntPtr.Zero;
+                hwnd = process.MainWindowHandle;
+            }
+            catch
+            {
+                return IntPtr.Zero;
+            }
+            if (hwnd != IntPtr.Zero && IsWindowVisible(hwnd)) return hwnd;
+            await Task.Delay(250, ct);
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>Rå RGBA-fångst av fönstret (PrintWindow → skärmkopie-fallback
+    /// vid svart), utan PNG-omvägen - fönstersondens pixeljämförelser läser
+    /// samma bild flera gånger per sekund.</summary>
+    internal static (byte[]? Rgba, int Width, int Height) TryCaptureRgba(IntPtr hwnd)
     {
         if (!GetWindowRect(hwnd, out var rect))
-            return (false, "Kunde inte läsa fönstrets rektangel.", null);
+            return (null, 0, 0);
         int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
         if (width < 40 || height < 40)
-            return (false, $"Fönstret är för litet för en meningsfull dump ({width}x{height}).", null);
+            return (null, 0, 0);
 
         var rgba = CapturePixels(hwnd, rect, width, height, useScreenCopy: false);
         if (rgba is null || LooksBlack(rgba))
@@ -87,8 +98,14 @@ public static class WindowCapturer
             if (screenCopy is not null && (rgba is null || !LooksBlack(screenCopy)))
                 rgba = screenCopy;
         }
+        return (rgba, width, height);
+    }
+
+    internal static (bool Success, string Output, string? ImagePath) Capture(IntPtr hwnd, string outputPath)
+    {
+        var (rgba, width, height) = TryCaptureRgba(hwnd);
         if (rgba is null)
-            return (false, "Kunde inte läsa fönstrets pixlar.", null);
+            return (false, "Kunde inte läsa fönstrets pixlar (saknas/för litet fönster?).", null);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
         File.WriteAllBytes(outputPath, AssetGenerator.EncodePng(width, height, rgba));

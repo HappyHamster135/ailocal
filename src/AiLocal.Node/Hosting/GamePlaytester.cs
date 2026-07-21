@@ -151,13 +151,14 @@ public sealed class GamePlaytester
             using var timeoutCts = new CancellationTokenSource(duration);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
-            // Fönsterdumpen tas parallellt med övervakningen, medan spelet
-            // lever: vänta in fönstret, låt titelskärmen ritas, fånga.
-            var captureTask = screenshotDir is null
+            // Interaktiv QA parallellt med övervakningen, medan spelet lever:
+            // sonden väntar in fönstret, SPELAR (tangenttryck via PostMessage),
+            // pixeljämför före/efter och lämnar en dump till vision-granskningen
+            // - motorspelens motsvarighet till HTML5-spelens CDP-sond.
+            var probeTask = screenshotDir is null
                 ? null
-                : WindowCapturer.CaptureProcessWindowAsync(
-                    proc, Path.Combine(screenshotDir, "playtest-window.png"),
-                    TimeSpan.FromSeconds(3), linked.Token);
+                : GodotWindowProbe.PlayAsync(
+                    proc, Path.Combine(screenshotDir, "playtest-window.png"), linked.Token);
 
             try
             {
@@ -178,12 +179,11 @@ public sealed class GamePlaytester
             var elapsed = DateTimeOffset.UtcNow - startTime;
 
             string? screenshotPath = null;
-            string? captureNote = null;
-            if (captureTask is not null)
+            WindowProbeResult? probe = null;
+            if (probeTask is not null)
             {
-                var capture = await captureTask;
-                captureNote = capture.Output;
-                if (capture.Success) screenshotPath = capture.ImagePath;
+                probe = await probeTask;
+                screenshotPath = probe.ScreenshotPath;
             }
 
             // Läses FÖRE Kill: efter Kill är ExitCode alltid -1, vilket gav
@@ -211,12 +211,17 @@ public sealed class GamePlaytester
             summary.AppendLine($"- **Genomsnittlig FPS:** {avgFps:F0}");
             summary.AppendLine($"- **Genomsnittligt minne:** {avgMem:F1} MB");
             summary.AppendLine($"- **Högsta minne:** {peakMem:F1} MB");
-            if (captureNote is not null)
-                summary.AppendLine($"- **Fönsterdump:** {captureNote}");
+            if (probe is not null)
+                summary.AppendLine($"- **Interaktiv QA (fönster):** {probe.Notes}");
             summary.AppendLine();
 
             if (exitedOnItsOwn && proc.ExitCode != 0)
                 issues.Add($"Spelet avslutade med felkod {proc.ExitCode}");
+
+            // Samma felklass som CDP-sondens "reagerar inte": ser rätt ut men
+            // svarar inte på spelaren - grindens fixrundor får jobba på det.
+            if (probe is { Ran: true, Responded: false, ContinuouslyAnimating: false })
+                issues.Add("Interaktiv QA: spelet reagerar inte på spelarens tangenttryck - fönstret är oförändrat efter piltangenter/WASD/Enter/Space.");
 
             if (!string.IsNullOrWhiteSpace(stderr))
             {

@@ -648,7 +648,8 @@ public static class WorkerRole
                 {
                     await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
                     var contract = await DirectorPass.RunAsync(
-                        req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct);
+                        req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct,
+                        engine: GameBuilder.DetectEngine(directorRoot));
                     contractCriteria = contract.Criteria;
                     await EmitStep("tool_result", contract.ToMarkdown());
                     assignmentText += "\n\n" + contract.ToMarkdown() +

@@ -49,12 +49,46 @@ public static class DirectorPass
         string projectRoot,
         string? strongModelHint,
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engine = null)
     {
         var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct)
             ?? FallbackContract(userPrompt);
+        // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra
+        // på INNEHÅLL (5 banor, 3 fiendetyper) men glömmer KÄNSLAN - och
+        // grinden följer bara upp det som står i kontraktet. Punkterna läggs
+        // FÖRE skrivningen till DESIGN.md så uppföljningar läser tillbaka dem.
+        contract = contract with { Criteria = EnsureEngineFeelCriteria(contract.Criteria, engine) };
         TryAppendToDesign(projectRoot, contract);
         return contract;
+    }
+
+    /// <summary>Standing production criteria for engine games (godot/unity):
+    /// sound on actions, visible feedback, screen transitions, and difficulty
+    /// levels that actually differ. Only criteria whose topic the contract
+    /// does not already cover are added - the director's own wording wins.</summary>
+    internal static IReadOnlyList<string> EnsureEngineFeelCriteria(IReadOnlyList<string> criteria, string? engine)
+    {
+        if (engine is not ("godot" or "unity"))
+            return criteria;
+
+        (string[] Keywords, string Criterion)[] feel =
+        [
+            (["ljud", "sound", "sfx", "audio"],
+                "Ljudeffekt på varje viktig spelarhandling (välja/köpa/träffa/plocka) och tydlig ljudsignal vid vinst och förlust"),
+            (["animation", "feedback", "blink", "skaka", "shake"],
+                "Synlig feedback på varje interaktion: knapptryck, träffar och poängändringar ska märkas direkt (animation/färgblink/skalpuls)"),
+            (["övergång", "overgang", "transition", "fade"],
+                "Mjuka övergångar mellan skärmarna (titel/spel/resultat) - inga hårda klipp"),
+            (["svårighet", "svarighet", "difficulty"],
+                "Svårighetsgraderna ska kännas mätbart olika i spel (olika startvärden/fiendefart), inte bara heta olika"),
+        ];
+
+        var result = new List<string>(criteria);
+        foreach (var (keywords, criterion) in feel)
+            if (!result.Any(c => keywords.Any(k => c.Contains(k, StringComparison.OrdinalIgnoreCase))))
+                result.Add(criterion);
+        return result;
     }
 
     public static bool AlreadyContracted(string projectRoot)

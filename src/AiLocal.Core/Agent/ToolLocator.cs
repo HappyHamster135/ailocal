@@ -43,8 +43,13 @@ public static class ToolLocator
         // godot-kedjan (headless-parse, exe-export, spelkörning i grinden)
         // trodde godot saknades TROTS lyckad provisionering. Mönstret
         // "Godot_v*" undviker GodotSharp\Tools\GodotTools.*-exen.
+        // Huvudexen FÖRE _console-varianten: console-wrappern öppnar spel-
+        // fönstret i en BARNPROCESS, så fönstersonden/dumpen (som tittar på
+        // den startade processens MainWindowHandle) ser aldrig spelet.
         "godot" => FirstExisting(
-            GlobFilesDeep(ToolsRoot, "Godot_v*.exe"),
+            GlobFilesDeep(ToolsRoot, "Godot_v*.exe")
+                .OrderBy(f => f.Contains("_console", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .ThenByDescending(f => f, StringComparer.OrdinalIgnoreCase),
             [@"C:\Program Files\Godot\godot.exe", @"C:\Program Files (x86)\Godot\godot.exe"]),
         "blender" => FirstExisting(
             GlobFilesDeep(ToolsRoot, "blender*.exe"),
