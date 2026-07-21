@@ -12,9 +12,33 @@ public partial class GameScaffoldService
     /// LAST of the five: its "top-down"/"adventure" keywords describe camera/
     /// flavour that other genres share ("en top-down shooter" is a shooter),
     /// so the more specific genres get first pick.</summary>
-    internal static string DetectGenre(string prompt)
+    internal static string DetectGenre(string prompt) =>
+        MatchGenre((prompt ?? "").ToLowerInvariant()) ?? "platformer";
+
+    /// <summary>Whether a build request is for a GAME rather than a plain
+    /// app/tool. The pre-scaffold AND the quality gate both hinge on this:
+    /// without it a genre-named prompt with no literal "spel"/"game"
+    /// ("Football Manager Tycoon", "en roguelike") fell through to the app
+    /// scaffolder and the agent shipped a C# console app that the gate then
+    /// waved through - not a playable game at all.</summary>
+    internal static bool LooksLikeGame(string prompt)
     {
         var p = (prompt ?? "").ToLowerInvariant();
+        if (p.Contains("spel") || p.Contains("game") || p.Contains("godot") || p.Contains("unity"))
+            return true;
+        // Platformer/metroidvania live only as DetectGenre's fallback, so name
+        // them explicitly here (an English "a platformer" has no other signal).
+        if (WordStart(p, "platformer", "plattformar", "plattforms", "metroidvania"))
+            return true;
+        // Any specific genre keyword (tycoon, roguelike, football manager, ...).
+        return MatchGenre(p) is not null;
+    }
+
+    /// <summary>The specific genre a prompt names, or null when nothing matched
+    /// (DetectGenre then defaults to platformer). Split out so LooksLikeGame can
+    /// tell "named a game genre" apart from "no game signal at all".</summary>
+    private static string? MatchGenre(string p)
+    {
         // Word-START matching, not raw substring: "plattfORMsspel" must not
         // trigger the snake keyword "orm", "moBIL" must not trigger "bil".
         // Word-start (not whole-word) so Swedish compounds still hit:
@@ -45,7 +69,7 @@ public partial class GameScaffoldService
             || WordExact(p, "td") || WordStart(p, "torn", "wave")) return "towerdefense";
         if (WordStart(p, "rpg", "adventure", "aventyr", "äventyr")
             || p.Contains("top-down") || p.Contains("topdown")) return "rpg";
-        return "platformer";
+        return null;
     }
 
     private static bool WordStart(string text, params string[] prefixes) =>

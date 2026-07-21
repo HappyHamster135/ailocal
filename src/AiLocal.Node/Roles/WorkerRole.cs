@@ -544,6 +544,13 @@ public static class WorkerRole
             // som producerat arbete.
             var runStartUtc = DateTime.UtcNow;
             var buildIntent = HostRole.IsBuildRequest(req.Assignment);
+            // Spel (Godot/HTML5/Unity) vs en ren app/verktyg. Bredare än "sager
+            // det 'spel'": ett genrenamngivet uppdrag ("Football Manager Tycoon",
+            // "en roguelike") ar ocksa ett spel - sa forskaffolden lagger ett
+            // spel-kit OCH grinden kraver en spelbar spelleverans i stallet for
+            // att godkanna en C#-konsolapp (rapporterat: fotbollsmanager blev en
+            // textbaserad dotnet-app som grinden vinkade igenom).
+            var wantsGame = GameScaffoldService.LooksLikeGame(req.Assignment);
 
             // ---- Uppgiftsmedveten modellroutning (kostnadsfokus) ------------
             // ModelTiers kostnadstrappar fanns hela tiden (coding: billig
@@ -570,8 +577,6 @@ public static class WorkerRole
             var assignmentText = req.Assignment;
             if (buildIntent && WorkspaceIsEmpty(workspaceRoot))
             {
-                var wantsGame = req.Assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
-                    || req.Assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
                 (bool Success, string Output) scaffold;
                 if (wantsGame)
                 {
@@ -603,8 +608,6 @@ public static class WorkerRole
                 && ProjectRootDetector.Detect(workspaceRoot) is { } existingRoot
                 && ProjectContext.SeemsUnrelated(existingRoot, req.Assignment))
             {
-                var wantsGame = req.Assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
-                    || req.Assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
                 (bool Success, string Output) scaffold;
                 if (wantsGame)
                 {
@@ -841,7 +844,7 @@ public static class WorkerRole
                     var r = await new GamePlaytester(httpFactory, BuildVisionReview())
                         .FullTestAsync(root, engine, TimeSpan.FromSeconds(10), gct);
                     return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
-                }, ct);
+                }, ct, gameExpected: buildIntent && wantsGame);
 
             // Auto-provisionera godot + exportmallar när projektet är Godot -
             // annars degraderar grinden tyst till statisk kontroll (inga

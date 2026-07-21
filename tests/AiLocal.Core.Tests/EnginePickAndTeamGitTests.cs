@@ -27,6 +27,25 @@ public class EnginePickAndTeamGitTests
         Assert.Equal(expected, GameScaffoldService.PickEngine(prompt));
     }
 
+    [Theory]
+    // Genre-namngivna spel UTAN literalen "spel"/"game" - rotorsaken bakom att
+    // "Football Manager Tycoon" blev en C#-konsolapp i stallet for Godot-kitet.
+    [InlineData("Football Manager Tycoon", true)]
+    [InlineData("football manager tycoon", true)]
+    [InlineData("bygg ett fotbollsmanager-spel", true)]
+    [InlineData("en roguelike med permadeath", true)]
+    [InlineData("a platformer", true)]
+    [InlineData("gör en tower defense", true)]
+    [InlineData("ett spel i godot", true)]
+    // Riktiga appar/verktyg far INTE klassas som spel (app-vagen ska leva kvar).
+    [InlineData("bygg ett enkelt budgetverktyg i python", false)]
+    [InlineData("skapa en rest-api i python", false)]
+    [InlineData("ett verktyg som sorterar filer", false)]
+    public void LooksLikeGame_GenreOrdRaknasSomSpel_MenInteVerktyg(string prompt, bool expected)
+    {
+        Assert.Equal(expected, GameScaffoldService.LooksLikeGame(prompt));
+    }
+
     [Fact]
     public async Task IsGitAvailable_PaDenHarMaskinen_Sant()
     {

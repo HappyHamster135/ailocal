@@ -33,6 +33,48 @@ public class QualityGateTests : IDisposable
         <body><canvas id="game"></canvas><script>const x = 1;</script></body></html>
         """;
 
+    // ---- Grind-vakt: speluppdrag maste ge en spelmotor-titel ---------------
+
+    private void WriteConsoleApp(string subfolder)
+    {
+        var proj = Path.Combine(_dir, subfolder);
+        Directory.CreateDirectory(proj);
+        File.WriteAllText(Path.Combine(proj, subfolder + ".csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType>" +
+            "<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(proj, "Program.cs"), "System.Console.WriteLine(\"hi\");");
+    }
+
+    [Fact]
+    public async Task Gate_GameRequested_ButConsoleApp_HardFails()
+    {
+        // Rapporterat: agenten frilansade en C#-konsolapp for "Football Manager"
+        // och grinden godkande den. Ett speluppdrag ska underkannas nar motorn
+        // inte ar godot/unity/html5 (DetectEngine => "unknown").
+        WriteConsoleApp("FootballManager");
+        var findings = await AssignmentQualityGate.InspectAsync(
+            _dir, buildIntent: true, DateTime.MinValue,
+            runCommand: (_, _, _) => Task.FromResult((0, "Build succeeded")),
+            playtest: null, CancellationToken.None, gameExpected: true);
+
+        Assert.True(findings.HardFail);
+        Assert.Contains("ingen spelmotor-titel", findings.Report);
+    }
+
+    [Fact]
+    public async Task Gate_AppRequested_ConsoleApp_NotBlockedByGameGuard()
+    {
+        // Samma konsolapp men gameExpected:false (ett verktyg, inte ett spel):
+        // spelmotor-vakten far INTE sla till - app-vagen ska leva kvar.
+        WriteConsoleApp("budget");
+        var findings = await AssignmentQualityGate.InspectAsync(
+            _dir, buildIntent: true, DateTime.MinValue,
+            runCommand: (_, _, _) => Task.FromResult((0, "Build succeeded")),
+            playtest: null, CancellationToken.None, gameExpected: false);
+
+        Assert.DoesNotContain("ingen spelmotor-titel", findings.Report);
+    }
+
     // ---- ProjectRootDetector ----------------------------------------------
 
     [Fact]

@@ -131,7 +131,8 @@ public sealed class BenchmarkService
                 var r = await new GamePlaytester().FullTestAsync(root, engine, TimeSpan.FromSeconds(8), ct);
                 return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
             },
-            CancellationToken.None);
+            CancellationToken.None,
+            gameExpected: GameScaffoldService.LooksLikeGame(prompt));
 
         var files = CountFiles(workspace);
         var score = Score(success, findings, files);

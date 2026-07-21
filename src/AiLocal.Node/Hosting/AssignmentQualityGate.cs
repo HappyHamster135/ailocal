@@ -26,7 +26,8 @@ public static class AssignmentQualityGate
         DateTime runStartUtc,
         Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
         Func<string, string, CancellationToken, Task<(bool Success, string Summary, IReadOnlyList<string> Issues)>>? playtest,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool gameExpected = false)
     {
         var projectRoot = ProjectRootDetector.Detect(workspaceRoot);
         if (projectRoot is null)
@@ -65,6 +66,24 @@ public static class AssignmentQualityGate
         }
 
         var engine = GameBuilder.DetectEngine(projectRoot);
+
+        // A game was requested but the deliverable is not a game-engine project.
+        // DetectEngine returns "unknown" for a plain C#/CLI app (no project.godot,
+        // no Assets/ProjectSettings, no index.html) - exactly what the agent
+        // freelanced for "Football Manager" instead of using the Godot kit. A
+        // console/CLI app is not a playable game, so fail the gate and steer the
+        // fix-round back to a real engine rather than shipping it as done.
+        if (gameExpected && engine is not ("godot" or "unity" or "html5"))
+        {
+            hard = true;
+            issues.Add(
+                "Uppdraget var ett SPEL men det byggda projektet är ingen spelmotor-titel (motor: \"" +
+                engine + "\"). En textbaserad konsol-/CLI-app räknas inte - användaren ska få en spelbar " +
+                "exe eller ett spel som öppnas i Godot/Unity/HTML. Bygg om det som ett Godot-spel " +
+                "(scaffold_game med engine=godot) eller ett HTML5-spel i den BEFINTLIGA arbetsmappen, " +
+                "inte ett nytt projekt.");
+        }
+
         if (engine == "html5" && playtest is not null)
         {
             try
