@@ -80,9 +80,31 @@ public class InteractiveProbe
 
             await Task.Delay(1200, ct); // låt spelet ladda och rita
 
+            // Stabilisera FÖRE input: hasha tills två prov i rad är lika.
+            // Utan detta kunde första provet tas innan sidans initiala
+            // ritning hunnit ske (CPU-last) - en statisk sida såg då
+            // "förändrad" ut och räknades felaktigt som responsiv.
             var before = await CanvasHashAsync(cdp, ct);
             if (before is null)
                 return new(true, false, "Interaktiv QA: ingen canvas hittades på sidan.", null);
+            var stable = false;
+            for (var i = 0; i < 8 && !stable; i++)
+            {
+                await Task.Delay(300, ct);
+                var again = await CanvasHashAsync(cdp, ct);
+                stable = again == before;
+                before = again;
+            }
+            if (!stable)
+            {
+                // Kontinuerlig animation: hash-jämförelse kan inte isolera
+                // inputrespons från animationens egna förändringar - ge
+                // spelet benefit of the doubt i stället för falska fynd.
+                var animShot = await CaptureAsync(cdp, screenshotOut, ct);
+                return new(true, true,
+                    "Interaktiv QA: canvasen animerar kontinuerligt - spelet renderar levande innehåll (inputrespons kan inte isoleras via pixeljämförelse).",
+                    animShot);
+            }
 
             // Spela: starta (Enter/Space/klick i mitten) + styr åt båda håll.
             await ClickAsync(cdp, 640, 400, ct);
@@ -91,19 +113,7 @@ public class InteractiveProbe
             await Task.Delay(1500, ct); // låt spel-loopen svara
 
             var after = await CanvasHashAsync(cdp, ct);
-
-            string? shotPath = null;
-            try
-            {
-                var shot = await cdp.SendAsync("Page.captureScreenshot", new { format = "png" }, ct);
-                if (shot.TryGetProperty("data", out var data) && data.GetString() is { } b64)
-                {
-                    shotPath = Path.GetFullPath(screenshotOut);
-                    Directory.CreateDirectory(Path.GetDirectoryName(shotPath)!);
-                    await File.WriteAllBytesAsync(shotPath, Convert.FromBase64String(b64), ct);
-                }
-            }
-            catch { /* dumpen är bonus */ }
+            var shotPath = await CaptureAsync(cdp, screenshotOut, ct);
 
             var responded = before != after;
             return new(true, responded,
@@ -147,6 +157,23 @@ public class InteractiveProbe
         return result.TryGetProperty("result", out var r) && r.TryGetProperty("value", out var v)
             ? v.ValueKind == JsonValueKind.String ? v.GetString() : null
             : null;
+    }
+
+    private static async Task<string?> CaptureAsync(CdpSession cdp, string screenshotOut, CancellationToken ct)
+    {
+        try
+        {
+            var shot = await cdp.SendAsync("Page.captureScreenshot", new { format = "png" }, ct);
+            if (shot.TryGetProperty("data", out var data) && data.GetString() is { } b64)
+            {
+                var path = Path.GetFullPath(screenshotOut);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllBytesAsync(path, Convert.FromBase64String(b64), ct);
+                return path;
+            }
+        }
+        catch { /* dumpen är bonus */ }
+        return null;
     }
 
     private static async Task PressKeyAsync(CdpSession cdp, string key, CancellationToken ct)

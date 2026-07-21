@@ -491,6 +491,28 @@ public static class WorkerRole
             var runStartUtc = DateTime.UtcNow;
             var buildIntent = HostRole.IsBuildRequest(req.Assignment);
 
+            // ---- Uppgiftsmedveten modellroutning (kostnadsfokus) ------------
+            // ModelTiers kostnadstrappar fanns hela tiden (coding: billig
+            // coder upp till komplexitet 3, stark modell från 4) men uppdrags-
+            // vägen frågade aldrig - allt gick till kedjans första modell
+            // oavsett uppgift. Komplexiteten skattas deterministiskt (gratis),
+            // valet visas öppet, och grindens eskalering lyfter till stark
+            // tier vid hårda fel precis som förut. En uttrycklig hint från
+            // anroparen respekteras alltid.
+            var modelHint = req.ModelHint;
+            if (modelHint is null && buildIntent)
+            {
+                var (complexity, reason) = TaskComplexity.Estimate(req.Assignment, req.TeamSize);
+                var (routeProvider, routedModel) = settings.Worker.ModelTiers.ForTask("coding", complexity);
+                if (!string.IsNullOrWhiteSpace(routedModel))
+                {
+                    modelHint = routedModel;
+                    await EmitStep("thinking",
+                        $"Modellval: {routedModel} ({routeProvider}-rutt) - komplexitet {complexity}/5 ({reason}). " +
+                        $"Hårda fel eskalerar automatiskt till {settings.Worker.ModelTiers.Complex}.");
+                }
+            }
+
             var assignmentText = req.Assignment;
             if (buildIntent && WorkspaceIsEmpty(workspaceRoot))
             {
@@ -592,7 +614,7 @@ public static class WorkerRole
             async Task<AgentRunResult> RunWithContinuationsAsync(string prompt)
             {
                 var windowStart = DateTime.UtcNow;
-                var runResult = await loop.RunAsync(prompt, accessLevel, req.ModelHint, onStep: emitAgentStep, ct, system: system);
+                var runResult = await loop.RunAsync(prompt, accessLevel, modelHint, onStep: emitAgentStep, ct, system: system);
                 for (var round = 2; runResult.HitIterationCap && round <= 4; round++)
                 {
                     if (ProjectRootDetector.NewestWriteUtc(workspaceRoot) < windowStart)
@@ -607,7 +629,7 @@ public static class WorkerRole
                     runResult = await loop.RunAsync(
                         "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
                         "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
-                        accessLevel, req.ModelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                        accessLevel, modelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
                 }
                 return runResult;
             }
@@ -632,7 +654,7 @@ public static class WorkerRole
                     $"Team-läge: upp till {Math.Clamp(req.TeamSize.Value, 2, 4)} parallella utvecklare i varsin git-worktree."));
                 var gitService = new GitService();
                 var teamResult = await TeamBuild.RunAsync(
-                    assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, req.ModelHint,
+                    assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, modelHint,
                     system, provider.CompleteAsync, BuildExecutor, teamEmit,
                     gitService, new GitIsolationService(gitService), ct);
                 // null = git saknas/repo gick inte att skapa ELLER inget spår
@@ -698,7 +720,7 @@ public static class WorkerRole
                 }
 
                 if (findings.Clean || round >= maxFixRounds) break;
-                result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, req.ModelHint,
+                result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, modelHint,
                     onStep: emitAgentStep, ct, history: result.Messages, system: system);
             }
 
@@ -710,7 +732,7 @@ public static class WorkerRole
                 // Saknas providern för tiern faller kedjan ändå tillbaka till
                 // samma lokala modell, vilket bara kostar en extra runda.
                 var strong = settings.Worker.ModelTiers.Complex;
-                if (!string.IsNullOrWhiteSpace(strong) && !string.Equals(strong, req.ModelHint, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(strong) && !string.Equals(strong, modelHint, StringComparison.OrdinalIgnoreCase))
                 {
                     await EmitStep("thinking", $"Hårda fel kvarstår efter åtgärdsrundorna - eskalerar till starkare modell ({strong}) för en sista runda.");
                     result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, strong,
