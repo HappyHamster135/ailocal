@@ -7,6 +7,33 @@ releasenotiser (v1.20.0–v1.48.0).
 
 ## A. Finslipningsplan (prioriterad)
 
+> **STATUS (uppdaterad 2026-07-22, v1.63.0).** Nästan hela Del A är gjord — läs
+> detta innan du gräver i punkterna nedan (de flesta är redan avbockade).
+> - **A1** KLART (README omskriven kring "prompt → spelbar exe", v1.49).
+> - **A2** KLART (v1.63.0): de sista två varningarna (CS8604 i ScaffoldGodot)
+>   borta; NU1510/CS0649/testvarningarna var redan fixade tidigare. `dotnet
+>   build` är varningsfri (verifierat med ren ombyggnad).
+> - **A3** KLART (kövisibilitet: QueuedCount i NodeInfo/AssignmentQueue/
+>   Dashboard, v1.49).
+> - **A4** KLART (sjätte benchmarkprompten "bygg ett fotbollsmanager-spel" kör
+>   hela godot-kedjan, v1.49).
+> - **A5** KLART (gammal-nod-tooltip i klustervyn, v1.49).
+> - **A6** git-sidan REN (worktree avregistrerad, ingen `claude/*`-gren) men den
+>   FYSISKA mappen `.claude/worktrees/happy-noyce-ecc19f` är låst av en process
+>   ("Device or resource busy" — ingen process med sökväg dit hittades, trolig
+>   CWD/mount från en parallell session). Kräver omstart av datorn för att tas
+>   bort. Ofarlig — påverkar varken app eller repo.
+> - **A7** KLART: README dokumenterar Unity som best-effort (rekommendation (a)).
+> - **A8** ÖPPET men rör inte förrän Dashboard.cs skaver på riktigt.
+> - **A9** KLART: `_remote_assignment.log` borttagen, `docs/PLAN.md` arkiverad
+>   (banner → ROADMAP), SfxrGenerator äkta deterministisk (seedades via
+>   randomiserad `string.GetHashCode` — nu kategori-index) + LpfSweep inkopplad
+>   (v1.63.0).
+>
+> **Del B:** B1 (fler godot-kit: racing/pussel/3D), B7 (webexport) och B8
+> (studiominne) är KLARA (v1.55–v1.62). Öppet: B2 iterationsknapp, B3 replay-GIF,
+> B4 delbar leverans, B5 uppdragsbudget/uppdrag, B6 klustergalleri.
+
 ### A1. README är 48 releaser gammal (störst synlighet, minst risk)
 README.md beskriver appen som "intentionally small" och nämner inget om
 uppdragspipelinen, kvalitetsgrinden, genrekiten, spelbara exe-leveranser,
