@@ -1081,7 +1081,13 @@ internal static class Dashboard
           border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
           background: rgba(0,0,0,.25); color: inherit; font-size: 13px;
         }
-        .composer-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .composer-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        /* Verktygsraden i tre semantiska grupper (åtkomst/modell | körning |
+           lägen) - en tunn avdelare i stället för chips/boxar, och gruppens
+           label+fält radbryts som EN enhet i stället för att slitas isär. */
+        .tool-group { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+        .tool-group + .tool-group { padding-left: 10px; border-left: 1px solid var(--line); }
+        .composer-tools .check-field { min-height: 28px; gap: 6px; }
         .composer-tools select {
           min-height: 28px;
           font-size: 12px;
@@ -1687,32 +1693,38 @@ internal static class Dashboard
                 <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
                 <div class="composer-toolbar">
                   <div class="composer-tools">
-                    <button class="icon" id="delegateAttachBtn" data-icon="plus" title="Bifoga filer (förhandsvisning - skickas inte till klustret ännu)"></button>
-                    <select id="delegateModeSelect" class="mode-select" title="Agentens behörighet på den här datorn - ändras direkt, gäller alla sessioner på noden">
-                      <option value="Off">Behörighet: av (endast chatt)</option>
-                      <option value="Sandboxed">Begränsad arbetsyta</option>
-                      <option value="Full">Full åtkomst (bypass)</option>
-                    </select>
-                    <select id="modelSelect" title="Vilken modell Hosten använder - 'Auto' väljer efter uppgiftens komplexitet så du inte alltid betalar för den dyraste. Standard är billiga OpenRouter-modeller (DeepSeek/Kimi/Tencent), inte dyra Claude.">
-                      <option value="">Auto (efter komplexitet - billiga modeller)</option>
-                      <option value="deepseek/deepseek-chat">DeepSeek V3 (billig, generellt)</option>
-                      <option value="deepseek/deepseek-coder">DeepSeek Coder (billig, kod)</option>
-                      <option value="moonshotai/kimi-k2">Kimi K2 (billig, stark)</option>
-                      <option value="tencent/hy3:free">Tencent Hunyuan (gratis)</option>
-                      <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5 (betald)</option>
-                      <option value="anthropic/claude-sonnet-5">Claude Sonnet 5 (betald)</option>
-                      <option value="anthropic/claude-opus-4-8">Claude Opus 4.8 (betald, dyr)</option>
-                    </select>
-                    <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
-                    <input id="parallelism" type="number" min="1" max="32" value="4">
-                    <label class="small" for="workerSelect" title="Vilken Worker uppdraget körs på - filerna hamnar på DEN datorn. Auto låter Hosten välja.">Worker</label>
-                    <select id="workerSelect"><option value="">Auto</option></select>
-                    <label class="check-field small" style="min-height:28px" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
-                      <input id="assignmentMode" type="checkbox"> Agentläge (kör på Worker)
-                    </label>
-                    <label class="check-field small" style="min-height:28px" title="PÅ = uppdraget byggs av ett team: en arkitekt delar upp arbetet i oberoende spår, parallella utvecklaragenter bygger i varsin git-worktree, och grenarna mergas ihop. Parallellitet-fältet styr teamstorleken (2-4). Kräver Agentläge.">
-                      <input id="teamMode" type="checkbox"> Team-läge
-                    </label>
+                    <div class="tool-group">
+                      <button class="icon" id="delegateAttachBtn" data-icon="plus" title="Bifoga filer (förhandsvisning - skickas inte till klustret ännu)"></button>
+                      <select id="delegateModeSelect" class="mode-select" title="Agentens behörighet på den här datorn - ändras direkt, gäller alla sessioner på noden">
+                        <option value="Off">Behörighet: av (endast chatt)</option>
+                        <option value="Sandboxed">Begränsad arbetsyta</option>
+                        <option value="Full">Full åtkomst (bypass)</option>
+                      </select>
+                      <select id="modelSelect" title="Vilken modell Hosten använder - 'Auto' väljer efter uppgiftens komplexitet så du inte alltid betalar för den dyraste. Standard är billiga OpenRouter-modeller (DeepSeek/Kimi/Tencent), inte dyra Claude.">
+                        <option value="">Auto (efter komplexitet - billiga modeller)</option>
+                        <option value="deepseek/deepseek-chat">DeepSeek V3 (billig, generellt)</option>
+                        <option value="deepseek/deepseek-coder">DeepSeek Coder (billig, kod)</option>
+                        <option value="moonshotai/kimi-k2">Kimi K2 (billig, stark)</option>
+                        <option value="tencent/hy3:free">Tencent Hunyuan (gratis)</option>
+                        <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5 (betald)</option>
+                        <option value="anthropic/claude-sonnet-5">Claude Sonnet 5 (betald)</option>
+                        <option value="anthropic/claude-opus-4-8">Claude Opus 4.8 (betald, dyr)</option>
+                      </select>
+                    </div>
+                    <div class="tool-group">
+                      <label class="small" for="parallelism" title="Hur många deluppgifter som får köras samtidigt">Parallellitet</label>
+                      <input id="parallelism" type="number" min="1" max="32" value="4">
+                      <label class="small" for="workerSelect" title="Vilken Worker uppdraget körs på - filerna hamnar på DEN datorn. Auto låter Hosten välja.">Worker</label>
+                      <select id="workerSelect"><option value="">Auto</option></select>
+                    </div>
+                    <div class="tool-group">
+                      <label class="check-field small" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
+                        <input id="assignmentMode" type="checkbox"> Agentläge (kör på Worker)
+                      </label>
+                      <label class="check-field small" title="PÅ = uppdraget byggs av ett team: en arkitekt delar upp arbetet i oberoende spår, parallella utvecklaragenter bygger i varsin git-worktree, och grenarna mergas ihop. Parallellitet-fältet styr teamstorleken (2-4). Kräver Agentläge.">
+                        <input id="teamMode" type="checkbox"> Team-läge
+                      </label>
+                    </div>
                   </div>
                   <div class="composer-tools">
                     <span class="composer-hint">Enter skickar · Shift+Enter ny rad</span>
@@ -2157,11 +2169,11 @@ internal static class Dashboard
                   <span class="small">Modell per komplexitet (Hosten väljer, slipper alltid den dyraste)</span>
                   <div class="model-tier-grid">
                     <label class="tier-field"><span class="small">Enkel (1-2)</span>
-                      <input id="settingTierSimple" placeholder="claude-haiku-4-5"></label>
+                      <input id="settingTierSimple" placeholder="deepseek/deepseek-chat"></label>
                     <label class="tier-field"><span class="small">Medel (3-4)</span>
-                      <input id="settingTierMedium" placeholder="claude-sonnet-5"></label>
+                      <input id="settingTierMedium" placeholder="deepseek/deepseek-chat"></label>
                     <label class="tier-field"><span class="small">Komplex (5)</span>
-                      <input id="settingTierComplex" placeholder="claude-opus-4-8"></label>
+                      <input id="settingTierComplex" placeholder="moonshotai/kimi-k2"></label>
                   </div>
                 </div>
               </div>
@@ -2545,7 +2557,9 @@ internal static class Dashboard
           copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><rect x="4" y="4" width="11" height="11" rx="2"/>',
           'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>',
           shield: '<polygon points="12 3 20 6 20 12 12 21 4 12 4 6"/>',
-          users: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15 14.5a5 5 0 0 1 6 5.5"/>'
+          users: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.6"/><path d="M15 14.5a5 5 0 0 1 6 5.5"/>',
+          code: '<polyline points="8 6 3 12 8 18"/><polyline points="16 6 21 12 16 18"/><line x1="13.5" y1="5" x2="10.5" y2="19"/>',
+          play: '<polygon points="8 5 19 12 8 19"/>'
         };
         const icon = (name, size = 16) =>
           `<svg class="icon-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
@@ -2770,10 +2784,15 @@ internal static class Dashboard
         }
 
         function renderNodes() {
-          const online = state.nodes.filter(n => statusText(n.status) !== 'Offline');
-          const busy = state.nodes.filter(n => statusText(n.status) === 'Busy');
-          const offline = state.nodes.filter(n => statusText(n.status) === 'Offline');
-          $('nodeCount').textContent = `${state.nodes.length} workers`;
+          // Moln-API-rader (id "cloud:*") är visningsrader, inte maskiner -
+          // de räknas aldrig in i worker-/online-siffrorna.
+          const isCloud = n => String(n.id).startsWith('cloud:');
+          const physical = state.nodes.filter(n => !isCloud(n));
+          const cloudRows = state.nodes.filter(isCloud);
+          const online = physical.filter(n => statusText(n.status) !== 'Offline');
+          const busy = physical.filter(n => statusText(n.status) === 'Busy');
+          const offline = physical.filter(n => statusText(n.status) === 'Offline');
+          $('nodeCount').textContent = `${physical.length} workers` + (cloudRows.length ? ` · ${cloudRows.length} moln` : '');
           $('onlineCount').textContent = online.length;
           $('busyCount').textContent = busy.length;
           $('offlineCount').textContent = offline.length;
@@ -2787,17 +2806,21 @@ internal static class Dashboard
           // hover state, so skip the rewrite when the serialized markup is
           // identical. Selection highlight is handled separately below.
           const listHtml = state.nodes.length ? state.nodes.map(n => {
-            const role = roleName[n.role] ?? n.role;
+            const cloud = isCloud(n);
+            const role = cloud ? 'Moln-API' : (roleName[n.role] ?? n.role);
             const status = statusText(n.status);
             const hardware = n.hardware ? (n.hardware.gpu || n.hardware.cpu) : 'Okänd hårdvara';
             const providers = n.providerPriority?.map(id => providerLabels[id] ?? id).join(' -> ') || 'Ingen provider';
             const skills = (n.skills || ['general']).join(', ');
+            const meta = cloud
+              ? 'Redo | uppdrag routas via Hostens API-nyckel'
+              : `${esc(status)} | ${n.activeTasks ?? 0} aktiva | ${esc(ago(n.lastSeen))}`;
             return `<div class="node ${state.selectedNodeId === n.id ? 'selected' : ''}" data-node-id="${esc(n.id)}">
               <div class="node-main">
                 <div class="node-status"><span class="dot ${statusClass(n.status)}"></span><strong>${esc(n.name)}</strong></div>
                 <span class="pill">${esc(role)}</span>
               </div>
-              <div class="small">${esc(status)} | ${n.activeTasks ?? 0} aktiva | ${esc(ago(n.lastSeen))}</div>
+              <div class="small">${meta}</div>
               <div class="small">${esc(trunc(hardware, 48))}</div>
               <div class="small">${esc(trunc(skills, 52))}</div>
               <div class="small">${esc(trunc(providers, 52))}</div>
@@ -5231,9 +5254,9 @@ internal static class Dashboard
             projectMemoryEnabled: $('settingProjectMemory').checked,
             allowDesktopControl: $('settingAllowDesktopControl').checked,
             modelTiers: {
-              simple: $('settingTierSimple').value.trim() || 'claude-haiku-4-5',
-              medium: $('settingTierMedium').value.trim() || 'claude-sonnet-5',
-              complex: $('settingTierComplex').value.trim() || 'claude-opus-4-8'
+              simple: $('settingTierSimple').value.trim() || 'deepseek/deepseek-chat',
+              medium: $('settingTierMedium').value.trim() || 'deepseek/deepseek-chat',
+              complex: $('settingTierComplex').value.trim() || 'moonshotai/kimi-k2'
             },
             clusterToken: $('settingClusterToken').value || null,
             clearClusterToken: $('clearClusterToken').checked,

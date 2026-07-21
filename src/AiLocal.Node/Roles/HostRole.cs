@@ -797,7 +797,11 @@ public static class HostRole
 
         app.MapGet("/api/host", (NodeSettings settings) =>
             Results.Ok(new { host = $"http://127.0.0.1:{settings.Port}" }));
-        app.MapGet("/api/nodes", (WorkerRegistry reg) => Results.Ok(reg.All));
+        // Moln-API:er som pseudo-workers: enbart visningsrader (aldrig i
+        // registret, aldrig i dispatch) - /cluster/nodes lämnas orörd så
+        // nod-till-nod-logik aldrig ser dem.
+        app.MapGet("/api/nodes", (WorkerRegistry reg, PersistentSettingsStore store) =>
+            Results.Ok(reg.All.Concat(CloudPseudoWorkers.For(store.GetApiKey))));
         app.MapGet("/api/topology", BuildTopology);
         app.MapGet("/api/nodes/{id}", (string id, WorkerRegistry reg) =>
             reg.Get(id) is { } node ? Results.Ok(node) : Results.NotFound());

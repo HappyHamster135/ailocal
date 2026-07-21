@@ -28,6 +28,14 @@ public partial class GameScaffoldService
         if (WordStart(p, "memory", "minnesspel", "kortspel", "card", "pairs")) return "memory";
         if (WordStart(p, "tetris", "tetromino", "block")) return "blockpuzzle";
         if (WordStart(p, "roguelike", "rogue", "dungeon", "grotta", "permadeath")) return "roguelike";
+        // Sport FÖRE management/simulator: "fotbollsmanager"/"fotbolls­simulator"
+        // ska bli lag-/säsongsstyrning (management-kitet), ALDRIG bondgårds-
+        // kitet - rotorsaken bakom "skördespel i stället för fotboll".
+        // Vanliga felstavningar (fotball, manegment) täcks medvetet.
+        if (WordStart(p, "fotboll", "fotball", "football", "soccer", "hockey", "handboll", "basket", "tennis", "sport"))
+            return p.Contains("manag") || p.Contains("maneg") || p.Contains("tycoon") || p.Contains("sim")
+                || WordStart(p, "liga", "säsong", "sasong", "trupp", "tränar", "tranar") || WordExact(p, "lag")
+                ? "management" : "rpg";
         if (WordStart(p, "tycoon", "manage", "kiosk", "butik", "restaurang", "företag", "foretag", "affär", "affar")) return "management";
         if (WordStart(p, "sim", "farm", "bondgård", "bondgard", "odla", "skörda", "skorda")) return "simulator";
         if (WordStart(p, "shooter", "bullet", "shmup", "skjut", "shoot")) return "shooter";
@@ -725,32 +733,36 @@ loop();
 </style>
 </head>
 <body>
-<div id='hud'>Guld <span id='gold'>0</span> &middot; Per klick <span id='cv'>1</span> &middot; Per sekund <span id='ps'>0</span></div>
+<div id='hud'>Guld <span id='gold'>0</span> &middot; Per klick <span id='cv'>1</span> &middot; Per sekund <span id='ps'>0</span> &middot; Prestige <span id='pr'>x1.0</span></div>
 <button id='mine'>&#9935;</button>
 <div class='shop'>
   <button id='buyPick'>Battre hacka (+1/klick)<br>Kostar <span id='pickCost'>10</span></button>
   <button id='buyMiner'>Gruvarbetare (+1/s)<br>Kostar <span id='minerCost'>25</span></button>
   <button id='buyRig'>Borrigg (+8/s)<br>Kostar <span id='rigCost'>200</span></button>
+  <button id='prestige'>Prestige (+50%/niva)<br>Krav <span id='prReq'>2500</span> guld</button>
 </div>
 <canvas id='c' width='420' height='60' style='margin-top:10px'></canvas>
 <script>" + ProductionKitJs + @"
 const GOAL=10000;
-let gold=0,perClick=1,perSec=0,pickCost=10,minerCost=25,rigCost=200,anim=0;
+let gold=0,perClick=1,perSec=0,pickCost=10,minerCost=25,rigCost=200,anim=0,prLevel=0,mult=1;
 const ctx=document.getElementById('c').getContext('2d');
 const el=id=>document.getElementById(id);
 
 el('mine').onclick=()=>{
   if(!PKit.started||PKit.paused||PKit.ended)return;
-  gold+=perClick;PKit.sfx.coin();};
+  gold+=perClick*mult;PKit.sfx.coin();};
 el('buyPick').onclick=()=>{if(PKit.ended||gold<pickCost)return;gold-=pickCost;perClick++;pickCost=Math.ceil(pickCost*1.6);PKit.sfx.place();};
 el('buyMiner').onclick=()=>{if(PKit.ended||gold<minerCost)return;gold-=minerCost;perSec+=1;minerCost=Math.ceil(minerCost*1.7);PKit.sfx.place();};
 el('buyRig').onclick=()=>{if(PKit.ended||gold<rigCost)return;gold-=rigCost;perSec+=8;rigCost=Math.ceil(rigCost*1.8);PKit.sfx.place();};
+// Prestige: borja om fran noll mot +50% produktion per niva - det klassiska
+// idle-vagvalet (kortsiktigt guld mot langsiktig multiplikator).
+el('prestige').onclick=()=>{if(PKit.ended||gold<2500)return;prLevel++;mult=1+prLevel*0.5;gold=0;perClick=1;perSec=0;pickCost=10;minerCost=25;rigCost=200;PKit.sfx.place();};
 
 let tick=0;
 function update(){
   if(!PKit.started||PKit.paused||PKit.ended)return;
   tick++;anim=(anim+1)%60;
-  if(tick%60===0&&perSec>0){gold+=perSec;}
+  if(tick%60===0&&perSec>0){gold+=perSec*mult;}
   if(gold>=GOAL)PKit.end(true,gold);
 }
 
@@ -764,6 +776,8 @@ function draw(){
   el('buyPick').disabled=gold<pickCost;
   el('buyMiner').disabled=gold<minerCost;
   el('buyRig').disabled=gold<rigCost;
+  el('pr').textContent='x'+mult.toFixed(1);
+  el('prestige').disabled=gold<2500;
   // progress-bar mot malet med skimmer-anim
   ctx.fillStyle='#242030';ctx.fillRect(0,0,420,60);
   const w=Math.min(1,gold/GOAL)*412;
@@ -774,7 +788,7 @@ function draw(){
   ctx.fillText('Mal: '+GOAL+' guld',150,34);
 }
 function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
-PKit.init('Guldgruvan','Klicka pa gruvan for guld · kop uppgraderingar · na '+GOAL+' guld','idle',null);
+PKit.init('Guldgruvan','Klicka pa gruvan for guld · kop uppgraderingar · prestige ger +50%/niva · na '+GOAL+' guld','idle',null);
 loop();
 </script>
 </body>
@@ -784,8 +798,9 @@ loop();
         "# Idle / Clicker (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
         "**\n\nEtt klickspel med tre uppgraderingsspar och ett tydligt mal (10 000 guld) sa rundan har ett slut.\n\n" +
         "## Mekanik\n- **Klick:** +guld per klick\n- **Uppgraderingar:** hacka (+1/klick), gruvarbetare (+1/s), borrigg (+8/s); priser vaxer exponentiellt\n" +
+        "- **Prestige:** aterstall allt for +50% produktion per niva (krav 2 500 guld) - kortsiktigt guld mot langsiktig multiplikator\n" +
         "- **Vinst:** 10 000 guld\n\n## Produktion\n- Titelskarm, paus (Esc/P), vinst-overlay med omstart\n- WebAudio-SFX (klick, kop)\n" +
-        "- Skimmer-animation pa progressbaren, tryck-animation pa knappen\n- Highscore i localStorage\n\n## Extension\n- Prestige-system\n- Fler byggnader\n- Offline-produktion\n";
+        "- Skimmer-animation pa progressbaren, tryck-animation pa knappen\n- Highscore i localStorage\n\n## Extension\n- Fler byggnader\n- Offline-produktion\n- Achievements\n";
 
     // ---- Breakout (HTML5) --------------------------------------------------------
     internal static string Html5Breakout(string prompt) => @"<!DOCTYPE html>
@@ -1092,7 +1107,7 @@ loop();
 const COLS=15,ROWS=11,T=40,FINAL=5;
 const c=document.getElementById('c'),ctx=c.getContext('2d');
 c.width=COLS*T;c.height=ROWS*T;
-let grid=[],player={x:1,y:1,hp:20,maxHp:20,gold:0},floor=1,enemies=[],stairs={x:0,y:0},anim=0;
+let grid=[],player={x:1,y:1,hp:20,maxHp:20,gold:0},floor=1,enemies=[],stairs={x:0,y:0},anim=0,bossMsg=0;
 
 function genFloor(){
   grid=[];enemies=[];
@@ -1106,6 +1121,8 @@ function genFloor(){
     if(cx<stairs.x&&Math.random()<0.6)cx++;else if(cy<stairs.y)cy++;else if(cx<stairs.x)cx++;
     grid[cy][cx]=0;}
   for(let i=0;i<3+floor;i++)placeThing(t=>enemies.push({x:t.x,y:t.y,hp:5+floor*2,frame:0}));
+  // Sista vaningen vaktas av en boss - trappan ar last tills den ar besegrad.
+  if(floor===FINAL)placeThing(t=>enemies.push({x:t.x,y:t.y,hp:24,frame:0,boss:true}));
   for(let i=0;i<4;i++)placeThing(t=>grid[t.y][t.x]=2); // guld
   for(let i=0;i<2;i++)placeThing(t=>grid[t.y][t.x]=3); // brygd
 }
@@ -1128,13 +1145,16 @@ function turn(dx,dy){
   if(nx<0||ny<0||nx>=COLS||ny>=ROWS||grid[ny][nx]===1)return;
   const foe=enemies.find(e=>e.x===nx&&e.y===ny);
   if(foe){foe.hp-=4;PKit.sfx.hit();
-    if(foe.hp<=0){enemies=enemies.filter(e=>e!==foe);player.gold+=5;PKit.sfx.coin();}}
+    if(foe.hp<=0){enemies=enemies.filter(e=>e!==foe);player.gold+=foe.boss?50:5;PKit.sfx.coin();}}
   else{
     player.x=nx;player.y=ny;
     if(grid[ny][nx]===2){grid[ny][nx]=0;player.gold+=15;PKit.sfx.coin();}
     if(grid[ny][nx]===3){grid[ny][nx]=0;player.hp=Math.min(player.maxHp,player.hp+8);PKit.sfx.jump();}
     if(nx===stairs.x&&ny===stairs.y){
-      if(floor>=FINAL){PKit.end(true,player.gold+floor*100);return;}
+      if(floor>=FINAL){
+        // Trappan ut ar last sa lange bossen lever.
+        if(enemies.some(e=>e.boss)){bossMsg=90;PKit.sfx.hit();return;}
+        PKit.end(true,player.gold+floor*100);return;}
       floor++;genFloor();return;}}
   // Fiendernas tur: ga mot spelaren, sla om intill.
   for(const en of enemies){
@@ -1142,7 +1162,7 @@ function turn(dx,dy){
     const tx=en.x+(Math.abs(player.x-en.x)>=Math.abs(player.y-en.y)?ex:0);
     const ty=en.y+(Math.abs(player.x-en.x)>=Math.abs(player.y-en.y)?0:ey);
     if(Math.abs(player.x-en.x)+Math.abs(player.y-en.y)===1){
-      player.hp-=2+(floor>>1);PKit.sfx.hit();
+      player.hp-=en.boss?5:2+(floor>>1);PKit.sfx.hit();
       if(player.hp<=0){PKit.end(false,player.gold+floor*50);return;}}
     else if(grid[ty]&&grid[ty][tx]===0&&!(tx===player.x&&ty===player.y)
       &&!enemies.some(o=>o!==en&&o.x===tx&&o.y===ty)){en.x=tx;en.y=ty;}}
@@ -1160,14 +1180,18 @@ function draw(){
     ctx.strokeStyle='#0c0a10';ctx.strokeRect(x*T,y*T,T,T);}
   ctx.fillStyle='#9a7db8';ctx.fillRect(stairs.x*T+8,stairs.y*T+8,T-16,T-16);
   for(const en of enemies){if(anim%15===0)en.frame^=1;
-    ctx.fillStyle='#d04848';ctx.fillRect(en.x*T+8,en.y*T+8+(en.frame?2:0),T-16,T-16);}
+    const pad=en.boss?4:8;
+    ctx.fillStyle=en.boss?'#e0762e':'#d04848';
+    ctx.fillRect(en.x*T+pad,en.y*T+pad+(en.frame?2:0),T-2*pad,T-2*pad);}
   ctx.fillStyle='#5ab8f0';ctx.fillRect(player.x*T+7,player.y*T+7,T-14,T-14);
+  if(bossMsg>0){bossMsg--;ctx.fillStyle='#fff';ctx.font='16px monospace';
+    ctx.fillText('Besegra bossen forst!',c.width/2-95,24);}
   document.getElementById('hp').textContent=Math.max(0,player.hp);
   document.getElementById('gold').textContent=player.gold;
   document.getElementById('fl').textContent=floor;
 }
 function loop(){try{draw();}catch(e){}requestAnimationFrame(loop);}
-PKit.init('Grottan','Piltangenter/WASD - turordning: du gar, fienderna gar · na trappan pa vaning '+FINAL,'roguelike',genFloor);
+PKit.init('Grottan','Piltangenter/WASD - turordning: du gar, fienderna gar · besegra bossen och na trappan pa vaning '+FINAL,'roguelike',genFloor);
 loop();
 </script>
 </body>
@@ -1175,13 +1199,14 @@ loop();
 
     internal static string Html5RoguelikeDesignDoc(string prompt) =>
         "# Roguelike (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
-        "**\n\nTurordningsbaserad grott-roguelike: procedurgenererade vaningar, permadeath, na trappan pa vaning 5.\n\n" +
+        "**\n\nTurordningsbaserad grott-roguelike: procedurgenererade vaningar, permadeath, besegra bossen och na trappan pa vaning 5.\n\n" +
         "## Mekanik\n- **Turordning:** spelaren gar, sedan gar alla fiender ett steg mot spelaren\n" +
         "- **Strid:** ga in i en fiende for att sla (4 skada); intilliggande fiender slar tillbaka\n" +
+        "- **Boss:** vaning 5 vaktas av en boss (24 HP, 5 skada, +50 guld) - trappan ut ar last tills den ar besegrad\n" +
         "- **Plock:** guld (+15), brygder (+8 HP)\n- **Procedur:** slumpade vaggar med garanterad grav vag till trappan\n" +
         "- **Svarighet:** fler och starkare fiender per vaning\n\n" +
         "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (strid, plock, brygd)\n" +
-        "- Animation: fackel-flimmer pa vaggar, fiende-bob\n- Highscore i localStorage\n\n## Extension\n- Utrustning\n- Fiendetyper\n- Boss pa sista vaningen\n";
+        "- Animation: fackel-flimmer pa vaggar, fiende-bob\n- Highscore i localStorage\n\n## Extension\n- Utrustning\n- Fiendetyper\n- Fler bossar/miniboss per vaning\n";
 
     // ---- Memory / Card (HTML5) ---------------------------------------------------
     internal static string Html5Memory(string prompt) => @"<!DOCTYPE html>
@@ -1370,7 +1395,7 @@ loop();
 </style>
 </head>
 <body>
-<div id='hud'>Poang <span id='sc'>0</span> &middot; Liv <span id='lv'>3</span> &middot; Fraga <span id='qn'>1</span>/10</div>
+<div id='hud'>Poang <span id='sc'>0</span> &middot; Liv <span id='lv'>3</span> &middot; Fraga <span id='qn'>1</span>/<span id='qt'>20</span></div>
 <canvas id='c' width='640' height='14'></canvas>
 <div id='q'>...</div>
 <div class='answers'>
@@ -1388,7 +1413,17 @@ const QS=[
  {q:'Vilket land har flest invanare?',a:['USA','Indien','Kina','Ryssland'],r:1},
  {q:'Hur manga minuter ar en fotbollsmatch?',a:['80','90','100','120'],r:1},
  {q:'Vilken ar varldens langsta flod?',a:['Amazonfloden','Nilen','Yangtze','Mississippi'],r:1},
- {q:'Vad heter var galax?',a:['Andromeda','Orion','Vintergatan','Centaurus'],r:2}];
+ {q:'Vad heter var galax?',a:['Andromeda','Orion','Vintergatan','Centaurus'],r:2},
+ {q:'Hur manga ben har en spindel?',a:['6','8','10','12'],r:1},
+ {q:'Vilket grundamne har symbolen O?',a:['Guld','Syre','Silver','Osmium'],r:1},
+ {q:'Vilket ar Sveriges hogsta berg?',a:['Kebnekaise','Sarektjakka','Helags','Akka'],r:0},
+ {q:'Vem malade Mona Lisa?',a:['Rembrandt','Picasso','Leonardo da Vinci','Monet'],r:2},
+ {q:'Vilket land har flest invanare?',a:['Indien','USA','Kina','Indonesien'],r:0},
+ {q:'Vad ar 12 x 12?',a:['124','132','144','156'],r:2},
+ {q:'Vilken planet ligger narmast solen?',a:['Venus','Merkurius','Mars','Jorden'],r:1},
+ {q:'Hur manga strangar har en klassisk gitarr?',a:['4','5','6','7'],r:2},
+ {q:'Vilket ar det snabbaste landdjuret?',a:['Gepard','Lejon','Struts','Antilop'],r:0},
+ {q:'I vilken stad ligger Colosseum?',a:['Aten','Rom','Istanbul','Kairo'],r:1}];
 const TIME=900; // 15 s i frames
 const ctx=document.getElementById('c').getContext('2d');
 let qi=0,score=0,lives=3,timer=TIME,answered=false,advanceT=0,flash=0,anim=0;
@@ -1430,7 +1465,8 @@ function draw(){
   el('qn').textContent=Math.min(qi+1,QS.length);
 }
 function loop(){try{update();draw();}catch(e){}requestAnimationFrame(loop);}
-PKit.init('Fragesport','10 fragor · 15 sekunder per fraga · 3 liv · snabba svar ger bonus','quiz',show);
+document.getElementById('qt').textContent=QS.length;
+PKit.init('Fragesport',QS.length+' fragor · 15 sekunder per fraga · 3 liv · snabba svar ger bonus','quiz',show);
 loop();
 </script>
 </body>
@@ -1438,9 +1474,9 @@ loop();
 
     internal static string Html5QuizDesignDoc(string prompt) =>
         "# Fragesport / Quiz (HTML5)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
-        "**\n\nEn fragesport med 10 inbyggda fragor, tidspress och liv-system.\n\n" +
+        "**\n\nEn fragesport med 20 inbyggda fragor (blandade amnen), tidspress och liv-system. HUD och intro laser antalet fran QS.length - fler fragor kraver bara nya rader i arrayen.\n\n" +
         "## Mekanik\n- **Timer:** 15 s per fraga; snabbt ratt svar ger tidsbonus\n- **Liv:** 3; fel svar eller timeout kostar ett\n" +
-        "- **Vinst:** alla 10 fragor med liv kvar (+100/liv)\n\n" +
+        "- **Vinst:** alla fragor med liv kvar (+100/liv)\n\n" +
         "## Produktion\n- Titelskarm, paus (Esc/P), vinst/forlust-overlay\n- WebAudio-SFX (ratt, fel)\n" +
         "- Animation: timer-bar med fargskifte, ratt/fel-blink\n- Highscore i localStorage\n\n## Extension\n- Fler fragor/kategorier\n- Svarighetsniva\n- Blandade svarsordningar\n";
 

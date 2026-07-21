@@ -69,6 +69,10 @@ internal sealed class StoredNodeSettings
     public bool UseGitIsolation { get; set; }
     public bool AutoMergeIsolatedTasks { get; set; }
     public decimal BudgetLimitUsd { get; set; }
+    public CommandGuardLevel CommandGuard { get; set; } = CommandGuardLevel.Block;
+    public List<string> BlockedCommands { get; set; } = [];
+    public bool ProjectMemoryEnabled { get; set; }
+    public List<AgentRole> Roles { get; set; } = [];
     public ModelTiers ModelTiers { get; set; } = new();
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
@@ -172,6 +176,20 @@ public sealed class PersistentSettingsStore
             settings.Worker.AllowInternet = stored.AllowInternet;
         if (Has("UseGitIsolation"))
             settings.Worker.UseGitIsolation = stored.UseGitIsolation;
+        if (Has("AutoMergeIsolatedTasks"))
+            settings.Worker.AutoMergeIsolatedTasks = stored.AutoMergeIsolatedTasks;
+        if (Has("BudgetLimitUsd"))
+            settings.Worker.BudgetLimitUsd = stored.BudgetLimitUsd;
+        if (Has("CommandGuard"))
+            settings.Worker.CommandGuard = stored.CommandGuard;
+        if (Has("BlockedCommands"))
+            settings.Worker.BlockedCommands = stored.BlockedCommands;
+        if (Has("ProjectMemoryEnabled"))
+            settings.Worker.ProjectMemoryEnabled = stored.ProjectMemoryEnabled;
+        // Tom lista = "aldrig anpassat" -> behåll AgentRoles.Defaults() från
+        // NodeSettings i stället för att ge Hosten noll roller.
+        if (Has("Roles") && stored.Roles.Count > 0)
+            settings.Host.Roles = stored.Roles;
         if (Has("ModelTiers"))
             settings.Worker.ModelTiers = stored.ModelTiers;
         if (Has("AllowDesktopControl"))
@@ -331,7 +349,16 @@ public sealed class PersistentSettingsStore
                 _settings.Worker.BudgetLimitUsd = update.BudgetLimitUsd.Value;
 
             if (update.ModelTiers is not null)
-                _settings.Worker.ModelTiers = update.ModelTiers;
+            {
+                // Fältvis, INTE helobjektsersättning: dashboarden skickar bara
+                // simple/medium/complex, och JSON-bindningen ger då ett objekt
+                // vars Routes är fabriksdefault - en helersättning nollställde
+                // operatörens skill-routes (coding->X, writing->Y) vid varje
+                // spara. Routes rörs därför aldrig härifrån.
+                _settings.Worker.ModelTiers.Simple = update.ModelTiers.Simple;
+                _settings.Worker.ModelTiers.Medium = update.ModelTiers.Medium;
+                _settings.Worker.ModelTiers.Complex = update.ModelTiers.Complex;
+            }
 
             if (update.Roles is not null)
                 _settings.Host.Roles = update.Roles;
@@ -536,6 +563,10 @@ public sealed class PersistentSettingsStore
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;
         _stored.BudgetLimitUsd = _settings.Worker.BudgetLimitUsd;
+        _stored.CommandGuard = _settings.Worker.CommandGuard;
+        _stored.BlockedCommands = [.. _settings.Worker.BlockedCommands];
+        _stored.ProjectMemoryEnabled = _settings.Worker.ProjectMemoryEnabled;
+        _stored.Roles = [.. _settings.Host.Roles];
         _stored.ModelTiers = _settings.Worker.ModelTiers;
         _stored.AllowDesktopControl = _settings.Worker.AllowDesktopControl;
         // do not overwrite them from NodeSettings here (NodeSettings has no field

@@ -535,7 +535,42 @@ public static class WorkerRole
                     await EmitStep("tool_result", scaffold.Output);
                     assignmentText = req.Assignment +
                         "\n\nOBS: En komplett, spelbar/körbar projektgrund är REDAN skapad i arbetsmappen (" + scaffold.Output +
-                        "). Skapa INTE ett nytt projekt - läs DESIGN.md och index/koden, och UTÖKA grunden enligt uppdraget (innehåll, mekanik, polish). Verifiera med verify/playtest när du är klar.";
+                        "). Skapa INTE ett nytt projekt - läs DESIGN.md och index/koden, och UTÖKA grunden enligt uppdraget (innehåll, mekanik, polish). " +
+                        "Kittet kan ha ett generiskt platshållartema (t.ex. plattformare/kiosk) - matchar det inte uppdraget: BYT TEMA som första steg " +
+                        "(alla texter, entiteter, README/DESIGN ska följa uppdragets tema). Verifiera med verify/playtest när du är klar.";
+                }
+            }
+            // Tema-vakt FÖRE kontinuiteten: nämner begäran ett tema som det
+            // befintliga projektet saknar varje spår av ("fotboll" mot ett
+            // bondgårdsprojekt) startas ett NYTT projekt i en undermapp i
+            // stället - kontinuiteten fick annars agenten att bygga vidare
+            // på fel spel (rapporterat: skördespel i stället för fotboll).
+            else if (buildIntent
+                && ProjectRootDetector.Detect(workspaceRoot) is { } existingRoot
+                && ProjectContext.SeemsUnrelated(existingRoot, req.Assignment))
+            {
+                var wantsGame = req.Assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
+                    || req.Assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
+                (bool Success, string Output) scaffold;
+                if (wantsGame)
+                {
+                    var g = new GameScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                    scaffold = (g.Success, g.Output);
+                }
+                else
+                {
+                    var a = new AppScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                    scaffold = (a.Success, a.Output);
+                }
+                if (scaffold.Success)
+                {
+                    await EmitStep("tool_call", "nytt projekt (begäran gäller ett annat tema än det befintliga projektet)");
+                    await EmitStep("tool_result", scaffold.Output);
+                    assignmentText = req.Assignment +
+                        "\n\nOBS: Begäran gäller ett ANNAT tema än det befintliga projektet i arbetsytan, så en NY projektgrund är skapad (" +
+                        scaffold.Output + "). Arbeta i den nya projektmappen och rör inte det gamla projektet. " +
+                        "Kittet är en generisk grund - BYT TEMA som första steg: alla texter, entiteter och benämningar " +
+                        "ska följa användarens begärda tema, inte kittets platshållartema.";
                 }
             }
             // Projektkontinuitet - spegelbilden av förskaffolden: en uppfölj-
@@ -629,6 +664,23 @@ public static class WorkerRole
                     runResult = await loop.RunAsync(
                         "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
                         "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
+                        accessLevel, modelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                }
+
+                // Plan-i-stället-för-utförande-vakten: svaga modeller avslutar
+                // ibland med en presenterad plan eller en lov-fråga ("Let me
+                // know if this plan meets your expectations!") - körningen ser
+                // klar ut men inget byggdes. Ingen människa läser eller svarar
+                // under ett bygge, så noden svarar åt operatören: utför.
+                for (var push = 1; push <= 2 && buildIntent && runResult.Success
+                     && PlanOnlyDetector.LooksUnexecuted(runResult.FinalAnswer); push++)
+                {
+                    await EmitStep("thinking",
+                        "Agenten avslutade med en plan/fråga i stället för att utföra - noden svarar automatiskt: utför planen.");
+                    runResult = await loop.RunAsync(
+                        "Planen är godkänd. UTFÖR den nu i sin helhet - fråga aldrig om lov eller bekräftelse; " +
+                        "ingen människa läser eller svarar under bygget. Bygg alla delar, kör verify, och avsluta " +
+                        "först när allt är klart och verifierat.",
                         accessLevel, modelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
                 }
                 return runResult;
