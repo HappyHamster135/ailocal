@@ -71,8 +71,9 @@ public class ContinuityAndBenchmarkTests : IDisposable
     [Fact]
     public void BenchmarkPrompts_AreFixedAndCoverBothPaths()
     {
-        Assert.Equal(5, BenchmarkService.StandardPrompts.Length);
+        Assert.Equal(6, BenchmarkService.StandardPrompts.Length);
         Assert.Contains(BenchmarkService.StandardPrompts, p => p.Contains("webbspel"));
         Assert.Contains(BenchmarkService.StandardPrompts, p => p.Contains("python"));
+        Assert.Contains(BenchmarkService.StandardPrompts, p => p.Contains("manager")); // Godot management-serie
     }
 }

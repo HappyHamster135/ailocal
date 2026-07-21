@@ -87,7 +87,7 @@ public class GameScaffoldHtml5Tests : IDisposable
             RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true
-        });
+        })!;
         node.StandardInput.Write(js);
         node.StandardInput.Close();
         node.WaitForExit(5000);

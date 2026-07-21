@@ -51,7 +51,7 @@ public class GameScaffoldProductionTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Genres))]
-    public void EveryGenreScaffold_ParsesAndMeetsTheProductionBar(string prompt, string expectedGenre)
+    public async Task EveryGenreScaffold_ParsesAndMeetsTheProductionBar(string prompt, string expectedGenre)
     {
         Assert.Equal(expectedGenre, GameScaffoldService.DetectGenre(prompt));
 
@@ -67,9 +67,8 @@ public class GameScaffoldProductionTests : IDisposable
             $"{expectedGenre}: scaffold has JS syntax errors:\n{string.Join("\n", syntaxErrors)}");
 
         // (2) The polish gate the agent itself is held to.
-        var playtest = new GamePlaytester()
-            .TestHtml5Async(Path.Combine(root, "index.html"), TimeSpan.FromSeconds(1), CancellationToken.None)
-            .GetAwaiter().GetResult();
+        var playtest = await new GamePlaytester()
+            .TestHtml5Async(Path.Combine(root, "index.html"), TimeSpan.FromSeconds(1), CancellationToken.None);
         Assert.True(playtest.Success, playtest.Summary);
         Assert.True(playtest.Issues.Count == 0,
             $"{expectedGenre}: scaffold fails its own production bar:\n{string.Join("\n", playtest.Issues)}");

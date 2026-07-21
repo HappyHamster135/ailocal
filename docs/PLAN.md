@@ -1,3 +1,8 @@
+> **ARKIVERAD (2026-07-21).** Den levande roadmapen är nu
+> [`docs/ROADMAP.md`](ROADMAP.md), och överlämningen till nya sessioner är
+> [`CLAUDE.md`](../CLAUDE.md). Den här filen behålls bara som historik
+> ("Done"-sektionerna nedan är load-bearing) — lägg inte till ny backlog här.
+
 # AiLocal Plan
 
 This file tracks what exists, what's broken, and what's next. "Done" sections

@@ -2848,13 +2848,27 @@ internal static class Dashboard
             const providers = n.providerPriority?.map(id => providerLabels[id] ?? id).join(' -> ') || 'Ingen provider';
             const skills = (n.skills || ['general']).join(', ');
             const hostVersion = state.updateInfo?.currentVersion || null;
+            // Noder < v1.40 saknar /execute/self-update och kan inte flottuppdateras.
+            const vParts = String(n.version || '').split('.').map(x => parseInt(x, 10) || 0);
+            const tooOldForRemote = !cloud && n.version && (vParts[0] < 1 || (vParts[0] === 1 && vParts[1] < 40));
             const stale = !cloud && n.version && hostVersion && n.version !== hostVersion;
+            const versionTitle = tooOldForRemote
+              ? 'För gammal för fjärruppdatering (< v1.40) - uppdatera manuellt en gång, sedan går pilknappen'
+              : stale
+                ? 'Äldre än Hostens v' + esc(hostVersion) + ' - uppdatera via pilknappen ovanför listan'
+                : 'Samma version som Hosten';
+            const versionSuffix = tooOldForRemote ? ' (för gammal)' : (stale ? ' (äldre)' : '');
             const versionTag = !cloud && n.version
-              ? ` | <span class="${stale ? 'node-version-stale' : ''}" title="${stale ? 'Äldre än Hostens v' + esc(hostVersion) + ' - uppdatera via pilknappen ovanför listan' : 'Samma version som Hosten'}">v${esc(n.version)}${stale ? ' (äldre)' : ''}</span>`
+              ? ` | <span class="${stale || tooOldForRemote ? 'node-version-stale' : ''}" title="${versionTitle}">v${esc(n.version)}${versionSuffix}</span>`
               : '';
+            // ActiveTasks är rått på Hosten (lokalt startade byggen ligger i
+            // selfReportedActive); RunningCount räknar även köade, så bygger = running - köade.
+            const running = Math.max(n.activeTasks || 0, n.selfReportedActive || 0);
+            const queued = !cloud ? (n.queuedCount || 0) : 0;
+            const building = Math.max(running - queued, 0);
             const meta = cloud
               ? 'Redo | uppdrag routas via Hostens API-nyckel'
-              : `${esc(status)} | ${n.activeTasks ?? 0} aktiva | ${esc(ago(n.lastSeen))}${versionTag}`;
+              : `${esc(status)} | ${building} aktiva${queued > 0 ? ` +${queued} i kö` : ''} | ${esc(ago(n.lastSeen))}${versionTag}`;
             return `<div class="node ${state.selectedNodeId === n.id ? 'selected' : ''}" data-node-id="${esc(n.id)}">
               <div class="node-main">
                 <div class="node-status"><span class="dot ${statusClass(n.status)}"></span><strong>${esc(n.name)}</strong></div>

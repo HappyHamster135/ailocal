@@ -23,7 +23,7 @@ public class GameBuilderTests
             builder = (engine, root, ct) =>
             {
                 captured = engine + "|" + root;
-                return Task.FromResult((true, "built ok", "C:/game/build/PixelRush.exe"));
+                return Task.FromResult((true, "built ok", (string?)"C:/game/build/PixelRush.exe"));
             };
 
         var executor = new AgentToolExecutor(

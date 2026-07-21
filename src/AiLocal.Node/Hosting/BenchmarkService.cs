@@ -22,8 +22,10 @@ public sealed record BenchmarkRun(
 public sealed class BenchmarkService
 {
     /// <summary>Fixed across releases on purpose - changing the prompts would
-    /// invalidate every historical comparison. Mix: engine default (godot),
-    /// three html5 kit genres, and the app path.</summary>
+    /// invalidate every historical comparison, so only ever APPEND. Mix: engine
+    /// default (godot platformer), three html5 kit genres, the app path, and a
+    /// Godot management build that exercises the full new chain (kit -> grind ->
+    /// window probe -> exe) as a fresh series from v1.49 onward.</summary>
     public static readonly string[] StandardPrompts =
     [
         "bygg ett 2d plattformsspel",
@@ -31,6 +33,7 @@ public sealed class BenchmarkService
         "bygg ett breakout-spel som webbspel",
         "bygg ett quiz-spel som webbspel",
         "bygg ett enkelt budgetverktyg i python",
+        "bygg ett fotbollsmanager-spel",
     ];
 
     private readonly object _lock = new();

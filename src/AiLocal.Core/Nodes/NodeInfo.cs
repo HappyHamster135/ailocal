@@ -41,6 +41,12 @@ public sealed class NodeInfo
     /// is positive, so locally-started assignment runs finally show as Busy
     /// in the cluster view (user report: worker said Idle while building).</summary>
     public int SelfReportedActive { get; set; }
+
+    /// <summary>Builds waiting in this node's AssignmentQueue behind the active
+    /// one, self-reported in the heartbeat (separate from the running count).
+    /// Lets the cluster view show "bygger + N köade" so a queued-up backlog
+    /// ("ställ tre spel på kö") is visible from outside.</summary>
+    public int QueuedCount { get; set; }
     public string? Version { get; set; }
     /// <summary>The registering node's own cluster token, shared with the
     /// Overseer so it can proxy node-to-node calls back using the Host's

@@ -130,6 +130,7 @@ public sealed class WorkerRegistry
             // clears a stale Offline flag left by MarkStale; Busy when EITHER
             // counter is positive, so a locally-started build finally shows.
             existing.SelfReportedActive = node.ActiveTasks;
+            existing.QueuedCount = node.QueuedCount;
             existing.Status = existing.ActiveTasks > 0 || existing.SelfReportedActive > 0
                 ? NodeStatus.Busy : NodeStatus.Idle;
             Persist();

@@ -93,6 +93,11 @@ svenska (commits i ASCII-svenska, utan åäö).
   via port-PID (netstat), ALDRIG `taskkill /IM`.
 - Långa kommandon: skriv utdata till fil OCH läs filen (parallella
   processer kan radera harness-utdatafiler).
+- Release-PUBLICERINGEN måste köras i PowerShell, ALDRIG via bash-verktyget:
+  git-bash manglar `/p:`-switcharna (MSYS-vägkonvertering => MSB1008 "Only one
+  project can be specified") och lämnar då TYST kvar gamla exe i publish/ =>
+  releasen får fel FileVersion. Verifiera ALLTID FileVersion på båda exe efter
+  publicering, före taggen (annars shippas gammal binär med ny version).
 
 **Kod/UI-konventioner:**
 - UI: svenska, INGA emoji (SVG-ikonuppsättningen ICONS i Dashboard.cs —

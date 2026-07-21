@@ -61,12 +61,9 @@ public static class SfxrGenerator
         public int WaveType;          // 0 square, 1 saw, 2 sine, 3 noise
         public double BaseFreq;       // 0..1
         public double FreqSlide;      // -1..1
-        public double FreqDeltaSlide;
         public double Duty = 0.5;
-        public double DutySweep;
         public double VibDepth;
         public double VibSpeed;
-        public double EnvAttack;      // sekunder
         public double EnvSustain;
         public double EnvPunch;       // extra volym i sustain-start 0..1
         public double EnvDecay;
@@ -140,18 +137,16 @@ public static class SfxrGenerator
 
     private static short[] Synthesize(Params p)
     {
-        var attack = (int)(p.EnvAttack * SampleRate);
         var sustain = Math.Max(1, (int)(p.EnvSustain * SampleRate));
         var decay = Math.Max(1, (int)(p.EnvDecay * SampleRate));
-        var total = attack + sustain + decay;
+        var total = sustain + decay;
         var samples = new short[total];
 
         // fperiod-modellen ur sfxr: period styrs av basfrekvens och glider.
         var fperiod = 100.0 / (p.BaseFreq * p.BaseFreq + 0.001);
         var fslide = 1.0 - Math.Pow(p.FreqSlide, 3) * 0.01;
-        var fdslide = -Math.Pow(p.FreqDeltaSlide, 3) * 0.000001;
         var arpSample = p.ArpTime > 0 ? (int)(p.ArpTime * SampleRate) : int.MaxValue;
-        var duty = p.Duty;
+        var duty = Math.Clamp(p.Duty, 0.05, 0.5);
         var vibPhase = 0.0;
         var noise = new double[32];
         var noiseRng = new Random(1234);
@@ -165,7 +160,6 @@ public static class SfxrGenerator
 
         for (var i = 0; i < total; i++)
         {
-            fslide += fdslide;
             fperiod *= fslide;
             if (i == arpSample) fperiod /= p.ArpMod;
 
@@ -176,15 +170,13 @@ public static class SfxrGenerator
                 rfperiod = fperiod * (1.0 + Math.Sin(vibPhase) * p.VibDepth);
             }
             var period = Math.Max(8, (int)rfperiod);
-            duty = Math.Clamp(duty + p.DutySweep * 0.0001, 0.05, 0.5);
 
-            // Envelope
+            // Envelope (attack-rampen var alltid 0 i sfxr-presetsen: punch-sustain -> decay)
             double env;
-            if (i < attack) env = attack == 0 ? 1 : (double)i / attack;
-            else if (i < attack + sustain)
-                env = 1.0 + p.EnvPunch * (1.0 - (double)(i - attack) / sustain);
+            if (i < sustain)
+                env = 1.0 + p.EnvPunch * (1.0 - (double)i / sustain);
             else
-                env = 1.0 - (double)(i - attack - sustain) / decay;
+                env = 1.0 - (double)(i - sustain) / decay;
             env = Math.Max(0, env);
 
             // 8x översampling per utsample för renare kanter (sfxr gör detta).

@@ -32,18 +32,22 @@ public class BrowserScreenshotter
         // Registrets App Paths är den kanoniska uppslagningen - fångar
         // per-user-Edge och ovanliga installationsvägar (utvecklingsmaskinen
         // saknade Edge på BÅDA standardvägarna; bara Chrome fanns).
-        foreach (var exe in new[] { "msedge.exe", "chrome.exe" })
+        // OperatingSystem.IsWindows() är plattformsvakten CA1416 känner igen.
+        if (OperatingSystem.IsWindows())
         {
-            try
+            foreach (var exe in new[] { "msedge.exe", "chrome.exe" })
             {
-                if (Microsoft.Win32.Registry.GetValue(
-                        $@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}",
-                        null, null) is string value && File.Exists(value))
-                    return value;
-            }
-            catch
-            {
-                // Registret otillgängligt (icke-Windows/behörighet) - fall igenom.
+                try
+                {
+                    if (Microsoft.Win32.Registry.GetValue(
+                            $@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}",
+                            null, null) is string value && File.Exists(value))
+                        return value;
+                }
+                catch
+                {
+                    // Registret otillgängligt (behörighet) - fall igenom.
+                }
             }
         }
 

@@ -177,9 +177,11 @@ public sealed class FallbackChatProvider
         }
     }
 
-    private IReadOnlyList<IChatProvider> BuildChain(ChatRequest request)
+    // request is null when ProviderNames asks for the default chain (no goal in
+    // hand) - fall back to the configured priority order rather than NRE.
+    private IReadOnlyList<IChatProvider> BuildChain(ChatRequest? request)
     {
-        var names = request.ProviderOrder is { Count: > 0 }
+        var names = request?.ProviderOrder is { Count: > 0 }
             ? request.ProviderOrder
             : _settings.Priority;
 
@@ -191,7 +193,7 @@ public sealed class FallbackChatProvider
         // A preferred provider (set by the task router) goes first, then the
         // configured order as backup - so a writing task hits ChatGPT but still
         // degrades to Claude/Ollama if OpenAI is down.
-        if (!string.IsNullOrWhiteSpace(request.PreferredProvider) &&
+        if (!string.IsNullOrWhiteSpace(request?.PreferredProvider) &&
             !ordered.Contains(request.PreferredProvider, StringComparer.OrdinalIgnoreCase))
         {
             ordered.Insert(0, request.PreferredProvider);

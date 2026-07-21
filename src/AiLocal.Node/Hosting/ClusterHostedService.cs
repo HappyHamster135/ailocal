@@ -26,6 +26,7 @@ public sealed class ClusterHostedService : BackgroundService
     private readonly string _nodeId;
     private readonly PersistentSettingsStore _settingsStore;
     private readonly AssignmentLog _assignmentLog;
+    private readonly AssignmentQueue _queue;
 
     public ClusterHostedService(
         NodeSettings settings,
@@ -38,6 +39,7 @@ public sealed class ClusterHostedService : BackgroundService
         RegistrationStatus registrationStatus,
         IHttpClientFactory httpFactory,
         AssignmentLog assignmentLog,
+        AssignmentQueue queue,
         ILogger<ClusterHostedService> log)
     {
         _settings = settings;
@@ -51,6 +53,7 @@ public sealed class ClusterHostedService : BackgroundService
         _registrationStatus = registrationStatus;
         _httpFactory = httpFactory;
         _assignmentLog = assignmentLog;
+        _queue = queue;
         _log = log;
     }
 
@@ -230,6 +233,7 @@ public sealed class ClusterHostedService : BackgroundService
                         TlsEndpoint = SelfTlsEndpoint,
                         Status = activeRuns > 0 ? NodeStatus.Busy : NodeStatus.Idle,
                         ActiveTasks = activeRuns,
+                        QueuedCount = _queue.WaitingCount,
                         Hardware = _hardware,
                         Skills = [.. _settings.Worker.Skills],
                         MaxConcurrentTasks = _settings.Worker.MaxConcurrentTasks,
