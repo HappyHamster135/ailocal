@@ -68,7 +68,9 @@ public sealed partial class GameScaffoldService
         var webNegated = System.Text.RegularExpressions.Regex.IsMatch(
             p, @"\b(inte|ej|utan|not|no)\s+(ett\s+|en\s+|i\s+|a\s+)?(html|browser|webb|web)");
         if (webWish && !webNegated) return "html5";
-        if (p.Contains("3d")) return "unity";
+        // 3D gar till GODOT (verifierat 3D-kit) i stallet for otestad best-effort-
+        // Unity; unity valjs bara nar den namns uttryckligen (fangat ovan).
+        if (p.Contains("3d")) return "godot";
         return "godot";
     }
 
@@ -139,6 +141,11 @@ public sealed partial class GameScaffoldService
         // Management/sim/idle får tycoon-grunden; rpg/roguelike/shooter får
         // top-down-grunden; övriga genrer behåller plattformaren tills fler
         // kit finns.
+        // 3D far det dedikerade 3D-kitet (Kuben) fore genre-routningen - genren
+        // ar 2D-orienterad, men "3d" ar en motor-/dimensionssignal.
+        if ((prompt ?? "").Contains("3d", StringComparison.OrdinalIgnoreCase))
+            return ScaffoldGodot3D(root, prompt);
+
         var genre = DetectGenre(prompt);
         if (genre is "management" or "simulator" or "idle")
             return ScaffoldGodotManagement(root, prompt);

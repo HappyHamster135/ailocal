@@ -119,6 +119,23 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void TreDimensionelltIGodot_FarKubenKitet()
+    {
+        const string prompt = "bygg ett 3d samlarspel i godot";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("godot", GameScaffoldService.PickEngine(prompt));
+            Assert.Contains("Kuben", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("CharacterBody3D", script);
+            Assert.Contains("Camera3D", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void PusselIGodot_FarTvatusenKitet()
     {
         const string prompt = "bygg ett pusselspel i godot dar man slajdar ihop lika";

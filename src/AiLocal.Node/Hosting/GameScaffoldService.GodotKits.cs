@@ -600,6 +600,261 @@ func _save_best(v: int) -> void:
         f.store_string(str(v))
 """;
 
+    /// <summary>3D: ett komplett Godot 3D-samlarspel (CharacterBody3D, kamera,
+    /// ljus, meshar - allt i kod). Fyller 3D-luckan dar 3D tidigare betydde
+    /// otestad best-effort-Unity. Godot gor 3D bra och kan verifieras headless.</summary>
+    internal static string[] ScaffoldGodot3D(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Kuben"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node3D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotThreeDMain);
+        files.Add("Main.gd");
+        foreach (var (name, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "lose"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotThreeDDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Kuben - 3D-samlarspel (Godot 4, GDScript)\n\n" +
+            "Komplett spelbart 3D-spel: styr kuben (CharacterBody3D) pa en bana, samla\n" +
+            "alla mynt innan tiden tar slut. Kamera, ljus, mark och meshar byggs i kod.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
+            "3D byggs helt i _build_world - byt tema via farger/former/mekanik dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotThreeDDesignDoc(string prompt) =>
+        "# 3D-samlarspel (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nStyr kuben i 3D och samla alla mynt innan tiden tar slut. Hela scenen byggs\n" +
+        "programmatiskt (mark, riktat ljus, foljande kamera, spelare, mynt).\n\n" +
+        "## Mekaniker (klara)\n- CharacterBody3D med gravitation + move_and_slide, WASD/piltangenter\n" +
+        "- Foljande Camera3D, DirectionalLight3D + Environment\n- Snurrande mynt, plock via avstand, poang\n" +
+        "- Tre svarighetsgrader (tid + fart), tidsgrans, basta resultat sparas (user://)\n" +
+        "- Titel/vinst/forlust-overlay, ljud\n\n## Bygg vidare\n- Hopp, hinder/fiender i 3D, plattformar, forsta-persons-kamera, fler banor\n";
+
+    const string GodotThreeDMain = """
+extends Node3D
+# Kuben - ett litet 3D-samlarspel: styr kuben, samla alla mynt innan tiden tar
+# slut. Hela scenen (mark/ljus/kamera/spelare/mynt) byggs i kod. BYT TEMA:
+# farger/former i _build_world och mal/tid i konstanterna.
+
+const SAVE_PATH := "user://kuben_best.txt"
+const COINS := 8
+
+var state := "title"
+var difficulty := 1
+var player: CharacterBody3D
+var coins: Array[Node3D] = []
+var collected := 0
+var time_left := 0.0
+var best := 0
+var snd := {}
+var ui: CanvasLayer
+var cam: Camera3D
+
+func _ready() -> void:
+    randomize()
+    _setup_audio()
+    best = _load_best()
+    _build_world()
+    ui = CanvasLayer.new()
+    add_child(ui)
+    _show_title()
+
+func _setup_audio() -> void:
+    for key in ["click", "coin", "hurt", "win"]:
+        var p := AudioStreamPlayer.new()
+        var s = load("res://%s.wav" % key)
+        if s:
+            p.stream = s
+        add_child(p)
+        snd[key] = p
+
+func _play(key: String) -> void:
+    if snd.has(key) and snd[key].stream:
+        snd[key].play()
+
+func _mat(c: Color) -> StandardMaterial3D:
+    var m := StandardMaterial3D.new()
+    m.albedo_color = c
+    return m
+
+func _build_world() -> void:
+    var light := DirectionalLight3D.new()
+    light.rotation_degrees = Vector3(-55, -30, 0)
+    light.light_energy = 1.1
+    add_child(light)
+    var env := WorldEnvironment.new()
+    var e := Environment.new()
+    e.background_mode = Environment.BG_COLOR
+    e.background_color = Color(0.14, 0.16, 0.24)
+    e.ambient_light_color = Color(0.5, 0.5, 0.6)
+    e.ambient_light_energy = 0.6
+    env.environment = e
+    add_child(env)
+    var ground := MeshInstance3D.new()
+    var gm := BoxMesh.new()
+    gm.size = Vector3(40, 1, 40)
+    ground.mesh = gm
+    ground.position = Vector3(0, -0.5, 0)
+    ground.material_override = _mat(Color(0.2, 0.45, 0.25))
+    add_child(ground)
+    var gbody := StaticBody3D.new()
+    var gcol := CollisionShape3D.new()
+    var gshape := BoxShape3D.new()
+    gshape.size = Vector3(40, 1, 40)
+    gcol.shape = gshape
+    gbody.add_child(gcol)
+    gbody.position = Vector3(0, -0.5, 0)
+    add_child(gbody)
+    cam = Camera3D.new()
+    add_child(cam)
+    player = CharacterBody3D.new()
+    var pm := MeshInstance3D.new()
+    var pbox := BoxMesh.new()
+    pbox.size = Vector3(1, 1, 1)
+    pm.mesh = pbox
+    pm.material_override = _mat(Color(0.3, 0.6, 1.0))
+    player.add_child(pm)
+    var pcol := CollisionShape3D.new()
+    var pshape := BoxShape3D.new()
+    pshape.size = Vector3(1, 1, 1)
+    pcol.shape = pshape
+    player.add_child(pcol)
+    player.position = Vector3(0, 1, 0)
+    add_child(player)
+
+func _clear_ui() -> void:
+    for c in ui.get_children():
+        c.queue_free()
+
+func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(320, 46)
+    b.position = Vector2(416, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+
+func _show_title() -> void:
+    state = "title"
+    _clear_ui()
+    _label("KUBEN", 80, 72, Color(0.5, 0.8, 1))
+    _label("Samla alla %d mynt innan tiden tar slut. WASD / piltangenter." % COINS, 190, 22)
+    _label("Basta: %d mynt" % best, 226, 22, Color(0.7, 0.9, 1))
+    var names := ["Latt", "Medel", "Svar"]
+    for i in range(3):
+        var d := i
+        _button(names[i], 290 + i * 58, func(): _start(d))
+
+func _start(d: int) -> void:
+    difficulty = d
+    _play("click")
+    collected = 0
+    var times: Array[float] = [60.0, 45.0, 30.0]
+    time_left = times[d]
+    player.position = Vector3(0, 1, 0)
+    player.velocity = Vector3.ZERO
+    _spawn_coins()
+    _clear_ui()
+    var hud := _label("", 12, 26)
+    hud.name = "Hud"
+    state = "playing"
+
+func _spawn_coins() -> void:
+    for c in coins:
+        if is_instance_valid(c):
+            c.queue_free()
+    coins = []
+    for i in range(COINS):
+        var coin := MeshInstance3D.new()
+        var cm := SphereMesh.new()
+        cm.radius = 0.5
+        cm.height = 1.0
+        coin.mesh = cm
+        coin.material_override = _mat(Color(1, 0.85, 0.2))
+        coin.position = Vector3(randf_range(-17, 17), 1, randf_range(-17, 17))
+        add_child(coin)
+        coins.append(coin)
+
+func _physics_process(delta: float) -> void:
+    if state != "playing":
+        return
+    time_left -= delta
+    var fz := Input.get_action_strength("ui_down") - Input.get_action_strength("ui_up")
+    var fx := Input.get_action_strength("ui_right") - Input.get_action_strength("ui_left")
+    var speeds: Array[float] = [7.0, 9.0, 11.0]
+    var speed := speeds[difficulty]
+    player.velocity.x = fx * speed
+    player.velocity.z = fz * speed
+    if player.is_on_floor():
+        player.velocity.y = 0.0
+    else:
+        player.velocity.y -= 24.0 * delta
+    player.move_and_slide()
+    cam.position = player.position + Vector3(0, 14, 14)
+    cam.look_at(player.position, Vector3.UP)
+    for coin in coins:
+        if is_instance_valid(coin):
+            coin.rotate_y(delta * 3.0)
+            if player.position.distance_to(coin.position) < 1.3:
+                coin.queue_free()
+                collected += 1
+                _play("coin")
+    var hud := ui.get_node_or_null("Hud")
+    if hud:
+        hud.text = "Mynt %d/%d   Tid %.0f s" % [collected, COINS, max(0.0, time_left)]
+    if collected >= COINS:
+        _finish(true)
+    elif time_left <= 0.0:
+        _finish(false)
+
+func _finish(won: bool) -> void:
+    state = "over"
+    _play("win" if won else "hurt")
+    if collected > best:
+        best = collected
+        _save_best(collected)
+    _clear_ui()
+    _label("DU VANN!" if won else "TIDEN TOG SLUT", 200, 56, Color(0.6, 0.9, 0.4) if won else Color(1, 0.5, 0.4))
+    _label("Mynt: %d/%d   Basta: %d" % [collected, COINS, best], 280, 26)
+    _button("Spela igen", 340, func(): _show_title())
+
+func _load_best() -> int:
+    if not FileAccess.file_exists(SAVE_PATH):
+        return 0
+    var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    return int(f.get_as_text()) if f else 0
+
+func _save_best(v: int) -> void:
+    var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if f:
+        f.store_string(str(v))
+""";
+
     static string GodotKitProject(string name) =>
         "[application]\n" +
         $"config/name=\"{name}\"\n" +
