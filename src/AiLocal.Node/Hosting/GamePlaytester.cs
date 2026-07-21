@@ -19,7 +19,8 @@ public sealed record PlaytestResult(
     double AverageFps,
     double PeakMemoryMb,
     TimeSpan Duration,
-    string? ScreenshotPath);
+    string? ScreenshotPath,
+    string? TitleScreenshotPath = null);
 
 /// <summary>
 /// Automatiserad speltestning: kör spelet, skickar simulerade inputs,
@@ -244,7 +245,8 @@ public sealed class GamePlaytester
             if (elapsed.TotalSeconds < 2)
                 issues.Add("Spelet avslutades mycket snabbt — kan vara en krasch direkt vid start");
 
-            return new PlaytestResult(true, summary.ToString(), issues, avgFps, peakMem, elapsed, screenshotPath);
+            return new PlaytestResult(true, summary.ToString(), issues, avgFps, peakMem, elapsed,
+                screenshotPath, probe?.TitleScreenshotPath);
         }
         catch (Exception ex)
         {
@@ -320,6 +322,7 @@ public sealed class GamePlaytester
         PlaytestResult result, string gamePath, string projectRoot, CancellationToken ct)
     {
         var screenshotPath = result.ScreenshotPath;
+        var titleScreenshotPath = result.TitleScreenshotPath;
         var summary = new StringBuilder(result.Summary);
         var issues = new List<string>(result.Issues);
 
@@ -340,6 +343,7 @@ public sealed class GamePlaytester
                 // Sondens slutdump visar spelet MITT I en session - bättre
                 // vision-underlag än en statisk startbild.
                 screenshotPath ??= probe.FinalScreenshotPath;
+                titleScreenshotPath ??= probe.TitleScreenshotPath;
             }
         }
 
@@ -389,7 +393,47 @@ public sealed class GamePlaytester
             summary.AppendLine("(Ingen vision-modell konfigurerad - skärmdumpen sparad utan AI-granskning.)");
         }
 
-        return result with { Summary = summary.ToString(), Issues = issues, ScreenshotPath = screenshotPath };
+        // Titelskärmen granskas SEPARAT: mittspelsdumpen kan aldrig svara på
+        // "finns spelnamn, startval och instruktioner?" - två dumpar över tid
+        // ger AI-granskaren hela förloppet i stället för en stillbild.
+        if (titleScreenshotPath is not null && File.Exists(titleScreenshotPath) && _visionReview is not null)
+        {
+            try
+            {
+                var (ok, text) = await _visionReview(titleScreenshotPath,
+                    "Detta är spelets ALLRA FÖRSTA skärm (titel-/startskärmen). Bedöm kort på svenska: " +
+                    "1) Finns spelnamn, startval och läsbara instruktioner? " +
+                    "2) Är ytan tom, helt svart eller trasig? " +
+                    "3) Ge den EN viktigaste förbättringen av startupplevelsen.", ct);
+                if (ok && !string.IsNullOrWhiteSpace(text))
+                {
+                    summary.AppendLine();
+                    summary.AppendLine("### Titelskärmen (AI)");
+                    summary.AppendLine(text.Trim());
+                    var lower = text.ToLowerInvariant();
+                    if (lower.Contains("helt svart") || lower.Contains("tom yta") || lower.Contains("tom canvas")
+                        || lower.Contains("ingen titelskärm") || lower.Contains("saknar titel")
+                        || lower.Contains("ingenting renderas"))
+                        issues.Add("Titelskärmen: dumpen ser tom/trasig ut eller saknar titel - spelaren möts inte av en riktig startskärm.");
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Vision är ett extra öga, aldrig ett krav.
+            }
+        }
+
+        return result with
+        {
+            Summary = summary.ToString(),
+            Issues = issues,
+            ScreenshotPath = screenshotPath,
+            TitleScreenshotPath = titleScreenshotPath
+        };
     }
 
     // ---- Statisk HTML5-analys -------------------------------------------------

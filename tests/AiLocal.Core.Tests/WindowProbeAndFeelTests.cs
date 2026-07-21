@@ -104,6 +104,11 @@ public class WindowProbeAndFeelTests
             Assert.True(result.Ran, result.Notes);
             Assert.True(File.Exists(screenshot), "sonden lämnade ingen dump: " + result.Notes);
             Assert.True(new FileInfo(screenshot).Length > 1000, "dumpen misstänkt liten");
+            // v1.47.0: titeldumpen sparas separat - visionens underlag för
+            // "finns spelnamn/startval?" (mittspelsdumpen kan inte svara).
+            Assert.NotNull(result.TitleScreenshotPath);
+            Assert.True(File.Exists(result.TitleScreenshotPath), "titeldumpen saknas");
+            Assert.True(new FileInfo(result.TitleScreenshotPath!).Length > 1000, "titeldumpen misstänkt liten");
             // Responded/ContinuouslyAnimating asserteras inte - titelskärmen
             // är statisk och knappstyrd, så ett ärligt "reagerar inte på
             // piltangenter" är ett giltigt utfall här. Kedjan (fönster, input

@@ -7,7 +7,8 @@ public sealed record WindowProbeResult(
     bool Responded,
     bool ContinuouslyAnimating,
     string Notes,
-    string? ScreenshotPath);
+    string? ScreenshotPath,
+    string? TitleScreenshotPath = null);
 
 /// <summary>
 /// Interactive QA for ENGINE games - the window-level counterpart of the
@@ -47,6 +48,11 @@ public static class GodotWindowProbe
             if (before is null)
                 return new(false, false, false, "Kunde inte läsa fönstrets pixlar.", null);
 
+            // Titeldumpen sparas direkt: startskärmen är visionens underlag
+            // för "finns spelnamn/startval?", mittspelsdumpen kan inte svara.
+            var titlePath = InteractiveProbe.TitlePathFor(screenshotPath);
+            SavePng(titlePath, before, width, height);
+
             // Stabilisering: två dumpar UTAN input avgör om spelet animerar
             // kontinuerligt (då kan inputrespons inte isoleras via pixlar).
             await Task.Delay(1200, ct);
@@ -54,7 +60,7 @@ public static class GodotWindowProbe
             if (idle is null)
             {
                 SavePng(screenshotPath, before, width, height);
-                return new(true, false, false, "Andra dumpen misslyckades - ingen inputbedömning gjordes.", screenshotPath);
+                return new(true, false, false, "Andra dumpen misslyckades - ingen inputbedömning gjordes.", screenshotPath, titlePath);
             }
 
             var idleDiff = PixelDiffRatio(before, idle);
@@ -67,7 +73,7 @@ public static class GodotWindowProbe
                 return new(true, true, true,
                     $"Spelet animerar kontinuerligt ({idleDiff:P1} av pixlarna ändras utan input) - " +
                     "inputrespons kan inte isoleras via pixeljämförelse; ärligt benefit of the doubt.",
-                    screenshotPath);
+                    screenshotPath, titlePath);
             }
 
             await SendGameplayKeysAsync(hwnd, ct);
@@ -76,7 +82,7 @@ public static class GodotWindowProbe
             if (after is null)
             {
                 SavePng(screenshotPath, idle, width, height);
-                return new(true, false, false, "Dumpen efter tangenttrycken misslyckades.", screenshotPath);
+                return new(true, false, false, "Dumpen efter tangenttrycken misslyckades.", screenshotPath, titlePath);
             }
             SavePng(screenshotPath, after, width, height);
 
@@ -87,7 +93,7 @@ public static class GodotWindowProbe
                     ? $"Spelet reagerar på tangenttryck ({inputDiff:P1} av pixlarna ändrades)."
                     : "Fönstret är oförändrat efter tangenttryck (piltangenter/WASD/Enter/Space) - " +
                       "spelet verkar inte reagera på spelarens input.",
-                screenshotPath);
+                screenshotPath, titlePath);
         }
         catch (OperationCanceledException)
         {

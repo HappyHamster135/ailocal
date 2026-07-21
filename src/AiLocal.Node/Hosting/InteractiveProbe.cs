@@ -6,7 +6,9 @@ using System.Text.Json;
 
 namespace AiLocal.Node.Hosting;
 
-public sealed record ProbeResult(bool Ran, bool Responded, string Notes, string? FinalScreenshotPath);
+public sealed record ProbeResult(
+    bool Ran, bool Responded, string Notes, string? FinalScreenshotPath,
+    string? TitleScreenshotPath = null);
 
 /// <summary>
 /// Interactive QA: PLAYS the game instead of just looking at it. Drives real
@@ -106,6 +108,11 @@ public class InteractiveProbe
                     animShot);
             }
 
+            // Titeldump FÖRE input: stabiliserad startskärm = visionens bästa
+            // underlag för "finns spelnamn/startval/instruktioner?" - en dump
+            // mitt i spel kan aldrig svara på det.
+            var titlePath = await CaptureAsync(cdp, TitlePathFor(screenshotOut), ct);
+
             // Spela: starta (Enter/Space/klick i mitten) + styr åt båda håll.
             await ClickAsync(cdp, 640, 400, ct);
             foreach (var key in new[] { "Enter", " ", "ArrowRight", "ArrowRight", "ArrowLeft", " ", "ArrowUp" })
@@ -120,7 +127,7 @@ public class InteractiveProbe
                 responded
                     ? "Interaktiv QA: spelet reagerar på tangenttryck (canvasen förändrades under spelsessionen)."
                     : "Interaktiv QA: canvasen är IDENTISK före och efter tangenttryck - spelet verkar inte reagera på spelarens input.",
-                shotPath);
+                shotPath, titlePath);
         }
         catch (OperationCanceledException) when (outerCt.IsCancellationRequested)
         {
@@ -158,6 +165,10 @@ public class InteractiveProbe
             ? v.ValueKind == JsonValueKind.String ? v.GetString() : null
             : null;
     }
+
+    /// <summary>Titeldumpens syskonväg: samma katalog, fast namn.</summary>
+    internal static string TitlePathFor(string screenshotOut) =>
+        Path.Combine(Path.GetDirectoryName(Path.GetFullPath(screenshotOut)) ?? ".", "playtest-title.png");
 
     private static async Task<string?> CaptureAsync(CdpSession cdp, string screenshotOut, CancellationToken ct)
     {
