@@ -563,7 +563,11 @@ public static class WorkerRole
             var modelHint = req.ModelHint;
             if (modelHint is null && buildIntent)
             {
-                var (complexity, reason) = TaskComplexity.Estimate(req.Assignment, req.TeamSize);
+                // Motorn väger in i modellvalet: ett Godot/Unity-spel måste starta
+                // på en kapabel modell (TaskComplexity bumpar motorspel), inte den
+                // billiga tiern som promptens ord ensamma skulle landa på.
+                var gameEngine = wantsGame ? GameScaffoldService.PickEngine(req.Assignment) : null;
+                var (complexity, reason) = TaskComplexity.Estimate(req.Assignment, req.TeamSize, gameEngine);
                 var (routeProvider, routedModel) = settings.Worker.ModelTiers.ForTask("coding", complexity);
                 if (!string.IsNullOrWhiteSpace(routedModel))
                 {

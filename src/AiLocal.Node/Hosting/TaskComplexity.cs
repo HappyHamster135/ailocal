@@ -21,7 +21,7 @@ public static class TaskComplexity
          "manager", "management", "simulator", "tycoon", "rpg", "roguelike", "multiplayer",
          "3d", "procedur", "produktionsnivå", "production", "ekonomi", "kampanj", "campaign"];
 
-    public static (int Complexity, string Reason) Estimate(string prompt, int? teamSize = null)
+    public static (int Complexity, string Reason) Estimate(string prompt, int? teamSize = null, string? engine = null)
     {
         var p = (prompt ?? "").ToLowerInvariant();
         var score = 3;
@@ -51,6 +51,16 @@ public static class TaskComplexity
         {
             score += 1;
             reasons.Add("team-läge");
+        }
+        // Ett riktigt motorspel (Godot/Unity) är i sig svårare än en HTML5-leksak
+        // - scener, GDScript/C#, headless import+export - så det måste starta på
+        // en kapabel modell, inte den billiga tiern som promptens ord ensamma
+        // skulle landa på ("bygg ett plattformsspel i godot" har inga tunga ord).
+        // HTML5 lämnas orört (webbleksaker klarar den billiga tiern).
+        if (engine is "godot" or "unity")
+        {
+            score += 2;
+            reasons.Add("motorspel (" + engine + ")");
         }
 
         return (Math.Clamp(score, 1, 5), string.Join(", ", reasons));

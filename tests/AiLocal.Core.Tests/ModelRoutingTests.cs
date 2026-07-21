@@ -61,4 +61,24 @@ public class ModelRoutingTests
         Assert.Contains("deepseek", easyModel);
         Assert.Contains("kimi", hardModel);
     }
+
+    [Fact]
+    public void Estimate_GodotUnityGame_ClimbsToStrongTier_Html5StaysCheap()
+    {
+        // Samma plattformsspel: en webbleksak klarar den billiga tiern, men ett
+        // riktigt Godot/Unity-spel måste starta på den kapabla modellen - annars
+        // failar den svaga modellen bygget (rapporterat).
+        var (html, _) = TaskComplexity.Estimate("bygg ett 2d plattformsspel", engine: "html5");
+        var (godot, godotReason) = TaskComplexity.Estimate("bygg ett 2d plattformsspel", engine: "godot");
+        var (unity, _) = TaskComplexity.Estimate("bygg ett 2d plattformsspel", engine: "unity");
+
+        Assert.Equal(3, html);                 // html5 orört => billig tier
+        Assert.True(godot >= 5, $"godot fick {godot} ({godotReason})");
+        Assert.True(unity >= 5);
+        Assert.Contains("motorspel", godotReason);
+
+        var tiers = new ModelTiers();
+        Assert.Contains("kimi", tiers.ForTask("coding", godot).Model);  // stark modell
+        Assert.NotEqual(tiers.ForTask("coding", godot).Model, tiers.ForTask("coding", html).Model);
+    }
 }
