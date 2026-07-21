@@ -362,6 +362,38 @@ public static class NodeWebHost
                 : Results.Problem(detail: result.Error ?? "Uppdateringen misslyckades.", statusCode: StatusCodes.Status502BadGateway);
         });
 
+        // ---- Nod-till-nod-leverans + flottuppdatering ----------------------
+        // Token-gated automatiskt via /execute-prefixet (ClusterSecurity.
+        // IsNodeOnly). Preview/artefakt serverar DEN HÄR nodens arbetsyta åt
+        // Hostens proxy så Spela/Ladda ner fungerar från varje dashboard i
+        // klustret; self-update låter Hosten uppdatera hela flottan med ett
+        // klick i stället för att operatören går runt till varje maskin.
+        app.MapGet("/execute/preview/{**path}", (string path, NodeSettings s) =>
+            WorkerRole.ServePreviewFile(s, path));
+        app.MapGet("/execute/artifact", (string? path, NodeSettings s) =>
+            WorkerRole.ServeArtifactFile(s, path));
+        app.MapPost("/execute/self-update", async (
+            HttpContext ctx, AssignmentLog assignmentLog,
+            IHttpClientFactory hf, IHostApplicationLifetime lifetime, CancellationToken ct) =>
+        {
+            var force = string.Equals(ctx.Request.Query["force"], "true", StringComparison.OrdinalIgnoreCase);
+            // En uppdatering byter binären och startar om processen - mitt i
+            // ett bygge vore det att döda operatörens jobb utan förvarning.
+            if (!force && assignmentLog.RunningCount > 0)
+                return Results.Problem(
+                    detail: "Ett uppdrag kör på den här noden - uppdateringen skulle avbryta bygget. Vänta tills det är klart (eller skicka force=true).",
+                    statusCode: StatusCodes.Status409Conflict);
+
+            var check = await SelfUpdater.CheckAsync(hf, ct);
+            if (!check.UpdateAvailable)
+                return Results.Ok(new { upToDate = true, version = SelfUpdater.CurrentVersion });
+
+            var result = await SelfUpdater.ApplyAsync(hf, lifetime, app.Logger, ct);
+            return result.Started
+                ? Results.Ok(new { restarting = true, from = SelfUpdater.CurrentVersion, to = check.LatestVersion })
+                : Results.Problem(detail: result.Error ?? "Uppdateringen misslyckades.", statusCode: StatusCodes.Status502BadGateway);
+        });
+
         // Sessions are local-only (see SessionStore) on every role EXCEPT
         // Overseer: there the whole /api/sessions surface is proxied to the
         // primary Host instead (OverseerRole.MapEndpoints), so the operator

@@ -104,9 +104,11 @@ public static class WorkerRole
         // Worker's OWN AgentAccess setting, which only this Worker's operator
         // can raise (see PersistentSettingsStore.Update) - a Host has no path
         // to turn this on remotely, it can only ever be told no.
-        // includePreview:false - klustervagen visar ingen forhandsvisnings-
-        // lank, eftersom filerna ligger pa DEN HAR maskinen medan dashboarden
-        // som startade uppdraget kor pa en annan (lanken vore dod dar).
+        // includePreview:false betyder numera bara "pausa aldrig för
+        // milstolpsgodkännande" (ingen sitter och tittar på klusterkörningar).
+        // Förhandsvisnings-/artefaktlänkar beräknas ALLTID - Hosten skriver om
+        // dem till sin egen proxy (/api/nodes/{id}/...) i final-framen så
+        // Spela/Ladda ner fungerar från vilken dashboard som helst.
         app.MapPost("/execute/assignment", (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
@@ -829,11 +831,39 @@ public static class WorkerRole
                     await EmitStep("tool_result", $"Projektsnapshot: {snapshot.Output}");
             }
 
-            // Förhandsvisningslänk bara för lokala körningar (Launcher eller
-            // fristående Worker) - då kör dashboarden på samma nod som
-            // filerna och /api/preview kan servera projektet direkt.
+            // Godot-leverans: efter godkänt bygge exporteras en körbar exe
+            // automatiskt (samma väg som build_game) när godot-binären finns -
+            // ett "riktigt spel" ska sluta som en fil man kan dubbelklicka,
+            // inte ett projekt man måste öppna i editorn (användarrapport:
+            // "fick ingen spelbar fil i godot"). Saknas godot: ärlig notis.
+            string? artifactPath = null;
+            if (result.Success && buildIntent
+                && (findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot)) is { } deliveryRoot
+                && new ProjectVerifier().Detect(deliveryRoot) == ProjectVerifier.ProjectKind.Godot)
+            {
+                if (ToolLocator.Find("godot") is not null)
+                {
+                    await EmitStep("tool_call", "build_game (automatisk export till körbar exe)");
+                    var build = await gameBuilder.BuildAsync("godot", deliveryRoot, runCmd, ct);
+                    await EmitStep(build.Success ? "tool_result" : "tool_error", build.Output);
+                    if (build.Success && build.ExePath is { } exe && File.Exists(exe))
+                        artifactPath = "/api/artifact?path=" + Uri.EscapeDataString(
+                            Path.GetRelativePath(workspaceRoot, exe).Replace('\\', '/'));
+                }
+                else
+                {
+                    await EmitStep("thinking",
+                        "godot är inte provisionerad på den här noden - ingen exe exporterades. " +
+                        "Kör provision \"godot\" + \"godot-templates\" så levereras spelbara exe-filer automatiskt.");
+                }
+            }
+
+            // Förhandsvisningslänken beräknas ALLTID vid lyckat bygge - för
+            // klusterkörningar skriver Hosten om vägen till sin proxy
+            // (/api/nodes/{id}/preview/...) så Spela-knappen fungerar från
+            // vilken dashboard som helst, inte bara på noden som byggde.
             string? previewPath = null;
-            if (includePreview && result.Success)
+            if (result.Success)
             {
                 var projectRoot = findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot);
                 var entry = projectRoot is null ? null : Path.Combine(projectRoot, "index.html");
@@ -841,11 +871,11 @@ public static class WorkerRole
                     previewPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, entry).Replace('\\', '/');
             }
 
-            assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath);
+            assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath);
             logCompleted = true;
 
             await ctx.Response.WriteAsync(
-                $"data: {JsonSerializer.Serialize(new { final = result, previewPath })}\n\n", ct);
+                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
             }
@@ -1051,6 +1081,10 @@ public static class WorkerRole
         // disk och dubbelklicka index.html.
         app.MapGet("/api/preview", (NodeSettings settings) => PreviewEntry(settings));
         app.MapGet("/api/preview/{**path}", (string path, NodeSettings settings) => ServePreviewFile(settings, path));
+
+        // Nedladdning av byggd artefakt (Godot-exe / paket-zip) från den här
+        // nodens arbetsyta - ClusterDelivery vaktar traversal + filtyp.
+        app.MapGet("/api/artifact", (string? path, NodeSettings settings) => ServeArtifactFile(settings, path));
     }
 
     /// <summary>Resolves a project's rel path against the workspace with a
@@ -1115,7 +1149,16 @@ public static class WorkerRole
         [".md"] = "text/plain; charset=utf-8"
     };
 
-    static IResult ServePreviewFile(NodeSettings settings, string? path)
+    internal static IResult ServeArtifactFile(NodeSettings settings, string? rel)
+    {
+        var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+        var full = ClusterDelivery.ResolveArtifactFile(root, rel);
+        return full is null
+            ? Results.NotFound()
+            : Results.File(full, "application/octet-stream", Path.GetFileName(full));
+    }
+
+    internal static IResult ServePreviewFile(NodeSettings settings, string? path)
     {
         var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
         string full;

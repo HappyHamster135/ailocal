@@ -1420,7 +1420,8 @@ internal static class Dashboard
         .mini-btn { font-size: 12px; padding: 4px 10px; margin-top: 6px; align-self: flex-start; }
         a.mini-btn { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); transition: background .15s ease, border-color .15s ease; }
         a.mini-btn:hover { background: var(--surface-2); border-color: var(--accent); }
-        .msg-preview { margin-top: 8px; }
+        .msg-preview { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .node-version-stale { color: var(--bad); font-weight: 600; }
         #benchmarkStatus { white-space: pre-line; color: var(--muted); }
         .bench-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px; }
         .bench-table td, .bench-table th { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--kv-line); }
@@ -1583,6 +1584,8 @@ internal static class Dashboard
                 <div class="panel-title">Cluster</div>
                 <div class="small" id="nodeCount">0 nodes</div>
               </div>
+              <button class="icon" id="updateAllNodesBtn" data-icon="arrow-up" style="display:none"
+                title="Uppdatera alla noder - varje worker laddar ner senaste releasen från GitHub och startar om. Noder som bygger just nu hoppas över."></button>
               <button class="icon" id="refreshBtn" data-icon="refresh" title="Refresh"></button>
             </div>
             <div class="content">
@@ -2797,6 +2800,13 @@ internal static class Dashboard
           $('busyCount').textContent = busy.length;
           $('offlineCount').textContent = offline.length;
 
+          // Flottuppdateringsknappen visas bara när någon nod släpar efter
+          // Hostens version - annars finns inget att göra.
+          const hostV = state.updateInfo?.currentVersion || null;
+          const anyStale = hostV && physical.some(n => n.version && n.version !== hostV);
+          const updateAllBtn = $('updateAllNodesBtn');
+          if (updateAllBtn) updateAllBtn.style.display = anyStale ? '' : 'none';
+
           if (state.selectedNodeId && !state.nodes.some(n => n.id === state.selectedNodeId))
             state.selectedNodeId = null;
 
@@ -2812,9 +2822,14 @@ internal static class Dashboard
             const hardware = n.hardware ? (n.hardware.gpu || n.hardware.cpu) : 'Okänd hårdvara';
             const providers = n.providerPriority?.map(id => providerLabels[id] ?? id).join(' -> ') || 'Ingen provider';
             const skills = (n.skills || ['general']).join(', ');
+            const hostVersion = state.updateInfo?.currentVersion || null;
+            const stale = !cloud && n.version && hostVersion && n.version !== hostVersion;
+            const versionTag = !cloud && n.version
+              ? ` | <span class="${stale ? 'node-version-stale' : ''}" title="${stale ? 'Äldre än Hostens v' + esc(hostVersion) + ' - uppdatera via pilknappen ovanför listan' : 'Samma version som Hosten'}">v${esc(n.version)}${stale ? ' (äldre)' : ''}</span>`
+              : '';
             const meta = cloud
               ? 'Redo | uppdrag routas via Hostens API-nyckel'
-              : `${esc(status)} | ${n.activeTasks ?? 0} aktiva | ${esc(ago(n.lastSeen))}`;
+              : `${esc(status)} | ${n.activeTasks ?? 0} aktiva | ${esc(ago(n.lastSeen))}${versionTag}`;
             return `<div class="node ${state.selectedNodeId === n.id ? 'selected' : ''}" data-node-id="${esc(n.id)}">
               <div class="node-main">
                 <div class="node-status"><span class="dot ${statusClass(n.status)}"></span><strong>${esc(n.name)}</strong></div>
@@ -4645,6 +4660,33 @@ internal static class Dashboard
           }
         }
 
+        // Flottuppdatering: EN knapp uppdaterar alla workers (varje nod
+        // laddar ner senaste releasen från GitHub själv och startar om).
+        // Noderna försvinner ur listan under omstarten och registrerar sig
+        // igen på nya versionen - Hosten uppdateras separat via sin egen
+        // uppdateringsknapp, sist, så den här dashboarden lever under tiden.
+        async function updateAllNodes() {
+          if (!confirm('Uppdatera alla workers till senaste releasen? Varje nod laddar ner nya versionen och startar om (noder som bygger just nu hoppas över).')) return;
+          const btn = $('updateAllNodesBtn');
+          btn.disabled = true;
+          try {
+            const res = await fetchJson('/api/nodes/update-all', { method: 'POST' });
+            const started = (res.triggered || []).filter(t => t.ok).map(t => t.node);
+            const failed = (res.triggered || []).filter(t => !t.ok).map(t => `${t.node} (${t.detail || 'fel'})`);
+            const parts = [];
+            if (started.length) parts.push(`Uppdatering startad: ${started.join(', ')}`);
+            if (res.skippedBusy?.length) parts.push(`Hoppade över (bygger just nu): ${res.skippedBusy.join(', ')}`);
+            if (res.skippedOffline?.length) parts.push(`Offline: ${res.skippedOffline.join(', ')}`);
+            if (failed.length) parts.push(`Misslyckades: ${failed.join(', ')}`);
+            alert(parts.join('\n') || 'Inga noder att uppdatera.');
+          } catch (err) {
+            alert('Flottuppdateringen misslyckades: ' + (err?.message || err));
+          } finally {
+            btn.disabled = false;
+            refresh();
+          }
+        }
+
         async function refresh() {
           if (state.refreshing || $('settingsDialog')?.open) return;
           state.refreshing = true;
@@ -5365,6 +5407,7 @@ internal static class Dashboard
               steps: e.Steps || [],
               content: e.FinalAnswer || '',
               previewPath: e.PreviewPath || null,
+              artifactPath: e.ArtifactPath || null,
               startedAt: e.State === 'Running' && e.StartedAt ? new Date(e.StartedAt).getTime() : null
             });
           });
@@ -5688,8 +5731,12 @@ internal static class Dashboard
             ? `<div class="msg-text">${esc(m.content)}</div>`
             : '';
 
-          const preview = (!running && m.previewPath)
-            ? `<div class="msg-preview"><a class="mini-btn" href="${esc(m.previewPath)}" target="_blank" rel="noopener">Öppna resultatet i webbläsaren</a></div>`
+          const playLink = m.previewPath
+            ? `<a class="mini-btn" href="${esc(m.previewPath)}" target="_blank" rel="noopener">Öppna resultatet i webbläsaren</a>` : '';
+          const artifactLink = m.artifactPath
+            ? `<a class="mini-btn" href="${esc(m.artifactPath)}">Ladda ner spelet (exe)</a>` : '';
+          const preview = (!running && (playLink || artifactLink))
+            ? `<div class="msg-preview">${playLink}${artifactLink}</div>`
             : '';
 
           const milestone = (running && m.milestone && m.milestone.id)
@@ -5897,9 +5944,11 @@ internal static class Dashboard
                 } else if (payload.final) {
                   success = !!payload.final.Success;
                   summary = payload.final.FinalAnswer || '';
-                  // Lokala körningar skickar med en förhandsvisningsväg när
-                  // projektet har en index.html - blir "Öppna resultatet".
+                  // Förhandsvisnings-/artefaktvägar följer med final-framen -
+                  // för klusterkörningar redan omskrivna av Hosten till dess
+                  // proxy (/api/nodes/{id}/...), så länkarna fungerar överallt.
                   stepMsg.previewPath = payload.previewPath || null;
+                  stepMsg.artifactPath = payload.artifactPath || null;
                   stepMsg.state = success ? 'Completed' : 'Failed';
                   // The final answer lives in content; the running step-log
                   // stays in steps[]. If the run produced no steps at all
@@ -5973,6 +6022,7 @@ internal static class Dashboard
         $('quickstartBtn').onclick = quickstart;
         $('saveProviders').onclick = saveProviders;
         $('refreshBtn').onclick = refresh;
+        $('updateAllNodesBtn').onclick = updateAllNodes;
         $('topologyRefresh').onclick = refresh;
         $('settingsBtn').onclick = () => openSettings(null);
         $('configureNode').onclick = () => openSettings(state.selectedNodeId);

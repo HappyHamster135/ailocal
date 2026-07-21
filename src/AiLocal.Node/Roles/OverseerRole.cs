@@ -79,6 +79,23 @@ public static class OverseerRole
         app.MapPost("/api/nodes/{id}/runtime/setup", (string id, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyWorker(id, locator, hosts, hf, HttpMethod.Post, $"/api/nodes/{Esc(id)}/runtime/setup", null, ct));
+        // Klusterbred leverans genom Overseern: binär passthrough (preview-
+        // filer och artefakt-exe kan inte gå genom den JSON-buffrande
+        // ProxyWorker-hjälparen).
+        app.MapGet("/api/nodes/{id}/preview/{**path}", (
+            string id, string path, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorkerFile(id, $"/api/nodes/{Esc(id)}/preview/{EscSegments(path)}", locator, hosts, hf, ct));
+        app.MapGet("/api/nodes/{id}/artifact", (
+            string id, string? path, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyWorkerFile(id, $"/api/nodes/{Esc(id)}/artifact?path={Uri.EscapeDataString(path ?? "")}", locator, hosts, hf, ct));
+        app.MapPost("/api/nodes/update-all", (
+            HttpContext ctx, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post,
+                "/api/nodes/update-all" + ctx.Request.QueryString, null, ct,
+                TimeSpan.FromSeconds(330)));
         app.MapGet("/api/nodes/{id}/tasks", (string id, HostLocator locator, HostRegistry hosts,
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyWorker(id, locator, hosts, hf, HttpMethod.Get, $"/api/nodes/{Esc(id)}/tasks", null, ct));
@@ -465,6 +482,67 @@ public static class OverseerRole
         }
 
         return Results.Json(result);
+    }
+
+    /// <summary>Per-segment URL-escape för en {**path}-fångst (snedstrecken
+    /// ska bestå som vägavskiljare).</summary>
+    private static string EscSegments(string path) =>
+        string.Join('/', (path ?? "").Split('/').Select(Uri.EscapeDataString));
+
+    /// <summary>Binär passthrough till Hosten som äger workern - preview-
+    /// filer (html/js/bilder/ljud) och artefakter (Godot-exe, 50-100 MB)
+    /// streamas rakt igenom med content-type/filnamn bevarade i stället för
+    /// att JSON-buffras som ProxyWorker gör.</summary>
+    private static async Task<IResult> ProxyWorkerFile(
+        string workerId,
+        string path,
+        HostLocator locator,
+        HostRegistry hosts,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+    {
+        var endpoint = hosts.HostForWorker(workerId);
+        if (endpoint is null)
+        {
+            await RefreshWorkerIndex(locator, hosts, httpFactory, ct);
+            endpoint = hosts.HostForWorker(workerId);
+        }
+        if (endpoint is null)
+            return Results.NotFound(new { error = "worker is not mapped to a known host" });
+
+        HttpResponseMessage upstream;
+        try
+        {
+            var client = httpFactory.CreateClient("cluster");
+            client.Timeout = TimeSpan.FromSeconds(120);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint.TrimEnd('/')}{path}");
+            var token = hosts.ClusterTokenFor(endpoint) ?? hosts.LiveOverseerToken;
+            if (!string.IsNullOrWhiteSpace(token))
+                request.Headers.TryAddWithoutValidation(ClusterSecurity.HeaderName, token);
+            upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(detail: $"Kunde inte nå Hosten: {ex.Message}",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        if (!upstream.IsSuccessStatusCode)
+        {
+            var status = (int)upstream.StatusCode;
+            upstream.Dispose();
+            return Results.StatusCode(status);
+        }
+
+        var contentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+        var fileName = upstream.Content.Headers.ContentDisposition?.FileNameStar
+            ?? upstream.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+        var stream = await upstream.Content.ReadAsStreamAsync(ct);
+        return Results.Stream(async output =>
+        {
+            try { await stream.CopyToAsync(output, ct); }
+            finally { upstream.Dispose(); }
+        }, contentType, fileName);
     }
 
     private static async Task<IResult> ProxyWorker(

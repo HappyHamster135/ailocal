@@ -816,6 +816,55 @@ public static class HostRole
         app.MapPost("/api/nodes/{id}/runtime/setup", SetupWorkerRuntime);
         app.MapGet("/api/nodes/{id}/tasks", (string id, TaskBoard board) => Results.Ok(board.TasksForWorker(id)));
 
+        // Klusterbred leverans: Spela/Ladda ner går via Hosten till noden som
+        // byggde (dess /execute/preview- resp /execute/artifact-endpoints,
+        // klustertoken-gated) - dashboarden behöver aldrig nå workern direkt.
+        app.MapGet("/api/nodes/{id}/preview/{**path}", (
+            string id, string path, WorkerRegistry reg, IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyNodeFile(id, "/execute/preview/" + EscapePathSegments(path), reg, hf, ct));
+        app.MapGet("/api/nodes/{id}/artifact", (
+            string id, string? path, WorkerRegistry reg, IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyNodeFile(id, "/execute/artifact?path=" + Uri.EscapeDataString(path ?? ""), reg, hf, ct, attachment: true));
+
+        // Flottuppdatering: trigga självuppdateraren på alla registrerade
+        // workers med ETT klick i stället för att operatören går runt till
+        // varje maskin per release. Upptagna noder hoppas över (uppdateringen
+        // dödar annars ett pågående bygge); Hosten uppdaterar sig själv via
+        // sin egen befintliga uppdateringsknapp, sist, så dashboarden lever
+        // medan flottan rullas.
+        app.MapPost("/api/nodes/update-all", async (
+            HttpContext ctx, WorkerRegistry reg, IHttpClientFactory hf, CancellationToken ct) =>
+        {
+            var force = string.Equals(ctx.Request.Query["force"], "true", StringComparison.OrdinalIgnoreCase);
+            var (targets, skippedBusy, skippedOffline) = ClusterDelivery.UpdateTargets(reg.All, force);
+
+            var results = await Task.WhenAll(targets.Select(async node =>
+            {
+                try
+                {
+                    var client = hf.CreateClient("cluster");
+                    client.Timeout = TimeSpan.FromSeconds(300); // nedladdningen på noden kan ta minuter
+                    using var resp = await client.PostAsync(
+                        $"{node.PreferredEndpoint}/execute/self-update" + (force ? "?force=true" : ""), null, ct);
+                    var body = await resp.Content.ReadAsStringAsync(ct);
+                    if (body.Length > 240) body = body[..240];
+                    return (object)new { node = node.Name, ok = resp.IsSuccessStatusCode, detail = body };
+                }
+                catch (Exception ex)
+                {
+                    return (object)new { node = node.Name, ok = false, detail = ex.Message };
+                }
+            }));
+
+            return Results.Ok(new
+            {
+                hostVersion = SelfUpdater.CurrentVersion,
+                triggered = results,
+                skippedBusy = skippedBusy.Select(n => n.Name).ToList(),
+                skippedOffline = skippedOffline.Select(n => n.Name).ToList()
+            });
+        });
+
         // Click-to-pair, no typing: this Host sees Workers on the LAN via
         // their discovery beacon (ClusterHostedService) even before they're
         // registered. Clicking "connect" sends them a request with a random
@@ -1011,6 +1060,8 @@ public static class HostRole
             var logEntry = assignmentLog.Begin(req.Assignment, candidate.Name);
 
             var finalized = false;
+            string? proxiedPreviewPath = null;
+            string? proxiedArtifactPath = null;
             try
             {
                 await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(ct);
@@ -1019,36 +1070,57 @@ public static class HostRole
                 {
                     var line = await reader.ReadLineAsync(ct);
                     if (line is null) break;
-                    await ctx.Response.WriteAsync(line + "\n", ct);
-                    if (line.Length == 0)
-                        await ctx.Response.Body.FlushAsync(ct);
+                    var outLine = line;
 
-                    if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
-                    var json = line[5..].Trim();
-                    if (json.Length == 0) continue;
-                    try
+                    if (line.StartsWith("data:", StringComparison.Ordinal))
                     {
-                        using var doc = JsonDocument.Parse(json);
-                        if (doc.RootElement.TryGetProperty("step", out var step))
+                        var json = line[5..].Trim();
+                        if (json.Length > 0)
                         {
-                            assignmentLog.AddStep(logEntry,
-                                step.TryGetProperty("Kind", out var k) ? k.GetString() ?? "" : "",
-                                step.TryGetProperty("Detail", out var d) ? d.GetString() ?? "" : "");
-                        }
-                        else if (doc.RootElement.TryGetProperty("final", out var final))
-                        {
-                            var ok = final.TryGetProperty("Success", out var s) && s.GetBoolean();
-                            task.Result = final.TryGetProperty("FinalAnswer", out var fa) ? fa.GetString() : null;
-                            task.State = ok ? TaskState.Completed : TaskState.Failed;
-                            if (!ok) task.Error = "Agenten slutförde inte uppdraget - se resultatet.";
-                            if (final.TryGetProperty("TotalUsage", out var usage))
-                                task.Usage = new TokenUsage(
-                                    usage.TryGetProperty("InputTokens", out var it) ? it.GetInt32() : 0,
-                                    usage.TryGetProperty("OutputTokens", out var ot) ? ot.GetInt32() : 0);
-                            finalized = true;
+                            try
+                            {
+                                using var doc = JsonDocument.Parse(json);
+                                if (doc.RootElement.TryGetProperty("step", out var step))
+                                {
+                                    assignmentLog.AddStep(logEntry,
+                                        step.TryGetProperty("Kind", out var k) ? k.GetString() ?? "" : "",
+                                        step.TryGetProperty("Detail", out var d) ? d.GetString() ?? "" : "");
+                                }
+                                else if (doc.RootElement.TryGetProperty("final", out var final))
+                                {
+                                    var ok = final.TryGetProperty("Success", out var s) && s.GetBoolean();
+                                    task.Result = final.TryGetProperty("FinalAnswer", out var fa) ? fa.GetString() : null;
+                                    task.State = ok ? TaskState.Completed : TaskState.Failed;
+                                    if (!ok) task.Error = "Agenten slutförde inte uppdraget - se resultatet.";
+                                    if (final.TryGetProperty("TotalUsage", out var usage))
+                                        task.Usage = new TokenUsage(
+                                            usage.TryGetProperty("InputTokens", out var it) ? it.GetInt32() : 0,
+                                            usage.TryGetProperty("OutputTokens", out var ot) ? ot.GetInt32() : 0);
+                                    finalized = true;
+
+                                    // Klusterbred leverans: workerns lokala
+                                    // /api/preview- och /api/artifact-vägar
+                                    // pekar på FEL maskin sett från den här
+                                    // dashboarden - skriv om dem till Hostens
+                                    // proxy innan framen forwardas, så Spela/
+                                    // Ladda ner fungerar överallt.
+                                    var (rewritten, previewProxy, artifactProxy) =
+                                        ClusterDelivery.RewriteFinalFrame(json, candidate.Id);
+                                    if (rewritten is not null)
+                                    {
+                                        outLine = "data: " + rewritten;
+                                        proxiedPreviewPath = previewProxy;
+                                        proxiedArtifactPath = artifactProxy;
+                                    }
+                                }
+                            }
+                            catch { /* skip malformed frame - forward the raw line below */ }
                         }
                     }
-                    catch { /* skip malformed frame - forwarding already happened */ }
+
+                    await ctx.Response.WriteAsync(outLine + "\n", ct);
+                    if (outLine.Length == 0)
+                        await ctx.Response.Body.FlushAsync(ct);
                 }
             }
             finally
@@ -1062,7 +1134,8 @@ public static class HostRole
                 }
                 task.CompletedAt = DateTimeOffset.UtcNow;
                 board.Save();
-                assignmentLog.Complete(logEntry, task.State == TaskState.Completed, task.Result, previewPath: null);
+                assignmentLog.Complete(logEntry, task.State == TaskState.Completed, task.Result,
+                    proxiedPreviewPath, proxiedArtifactPath);
                 if (candidate.ActiveTasks > 0) candidate.ActiveTasks--;
                 candidate.Status = candidate.ActiveTasks > 0 || candidate.SelfReportedActive > 0
                     ? NodeStatus.Busy : NodeStatus.Idle;
@@ -1381,6 +1454,54 @@ public static class HostRole
     }
 
     /// <summary>Pulls a human-readable reason out of a failed response body -
+    /// <summary>Per-segment URL-escape för en {**path}-fångst: segmenten
+    /// escapas var för sig så snedstrecken består som vägavskiljare.</summary>
+    private static string EscapePathSegments(string path) =>
+        string.Join('/', (path ?? "").Split('/').Select(Uri.EscapeDataString));
+
+    /// <summary>Streamar en fil (preview-html/js/bilder eller artefakt-exe)
+    /// från noden som byggde, med klustertoken via "cluster"-klienten.
+    /// Strömmande passthrough - en Godot-exe är 50-100 MB och ska aldrig
+    /// buffras i Hostens minne.</summary>
+    private static async Task<IResult> ProxyNodeFile(
+        string id, string upstreamPath, WorkerRegistry reg, IHttpClientFactory httpFactory,
+        CancellationToken ct, bool attachment = false)
+    {
+        if (reg.Get(id) is not { } node)
+            return Results.NotFound(new { error = "okänd nod" });
+        HttpResponseMessage upstream;
+        try
+        {
+            var client = httpFactory.CreateClient("cluster");
+            client.Timeout = TimeSpan.FromSeconds(120);
+            upstream = await client.GetAsync(
+                $"{node.PreferredEndpoint}{upstreamPath}", HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(detail: $"Kunde inte nå {node.Name}: {ex.Message}",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        if (!upstream.IsSuccessStatusCode)
+        {
+            var status = (int)upstream.StatusCode;
+            upstream.Dispose();
+            return Results.StatusCode(status);
+        }
+
+        var contentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+        var fileName = upstream.Content.Headers.ContentDisposition?.FileNameStar
+            ?? upstream.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+        var stream = await upstream.Content.ReadAsStreamAsync(ct);
+        return Results.Stream(async output =>
+        {
+            try { await stream.CopyToAsync(output, ct); }
+            finally { upstream.Dispose(); }
+        }, contentType, attachment ? (fileName ?? "leverans.bin") : null);
+    }
+
+    /// <summary>Extracts a human-readable error reason from a response body:
     /// either a ProblemDetails "detail" field or a plain {"error": "..."}
     /// shape (both are used across this app's endpoints) - mirrors
     /// WorkerRole's own copy of the same small helper.</summary>

@@ -19,6 +19,7 @@ public sealed class AssignmentLogEntry
     public List<AgentStep> Steps { get; set; } = [];
     public string? FinalAnswer { get; set; }
     public string? PreviewPath { get; set; }
+    public string? ArtifactPath { get; set; }
 }
 
 /// <summary>
@@ -94,7 +95,7 @@ public sealed class AssignmentLog
         }
     }
 
-    public void Complete(AssignmentLogEntry entry, bool success, string? finalAnswer, string? previewPath)
+    public void Complete(AssignmentLogEntry entry, bool success, string? finalAnswer, string? previewPath, string? artifactPath = null)
     {
         lock (_lock)
         {
@@ -102,6 +103,7 @@ public sealed class AssignmentLog
             entry.FinishedAt = DateTimeOffset.UtcNow;
             entry.FinalAnswer = finalAnswer;
             entry.PreviewPath = previewPath;
+            entry.ArtifactPath = artifactPath;
             Save();
         }
     }
@@ -125,7 +127,8 @@ public sealed class AssignmentLog
                     FinishedAt = e.FinishedAt,
                     Steps = [.. e.Steps],
                     FinalAnswer = e.FinalAnswer,
-                    PreviewPath = e.PreviewPath
+                    PreviewPath = e.PreviewPath,
+                    ArtifactPath = e.ArtifactPath
                 })
                 .ToList();
         }
