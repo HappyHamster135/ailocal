@@ -56,9 +56,10 @@ public static class DirectorPass
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
         CancellationToken ct,
         string? engine = null,
-        IReadOnlyList<string>? inspirationSeeds = null)
+        IReadOnlyList<string>? inspirationSeeds = null,
+        IReadOnlyList<string>? pastLessons = null)
     {
-        var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct, inspirationSeeds)
+        var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct, inspirationSeeds, pastLessons)
             ?? FallbackContract(userPrompt, inspirationSeeds);
         // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra
         // på INNEHÅLL (5 banor, 3 fiendetyper) men glömmer KÄNSLAN - och
@@ -179,14 +180,18 @@ public static class DirectorPass
     private static async Task<Contract?> AskModelAsync(
         string userPrompt, string? strongModelHint,
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, CancellationToken ct,
-        IReadOnlyList<string>? inspirationSeeds = null)
+        IReadOnlyList<string>? inspirationSeeds = null,
+        IReadOnlyList<string>? pastLessons = null)
     {
         try
         {
-            var message = inspirationSeeds is { Count: > 0 }
-                ? userPrompt + "\n\nINSPIRATION SEEDS (build the twist around these, one criterion each):\n" +
-                  string.Join("\n", inspirationSeeds.Select(s => "- " + s))
-                : userPrompt;
+            var message = userPrompt;
+            if (inspirationSeeds is { Count: > 0 })
+                message += "\n\nINSPIRATION SEEDS (build the twist around these, one criterion each):\n" +
+                    string.Join("\n", inspirationSeeds.Select(s => "- " + s));
+            if (pastLessons is { Count: > 0 })
+                message += "\n\nLARDOMAR FRAN TIDIGARE SPEL I SAMMA GENRE (studiominne - se till att INTE upprepa dessa brister den har gangen):\n" +
+                    string.Join("\n", pastLessons.Select(s => "- " + s));
             var response = await complete(new ChatRequest
             {
                 System = DirectorSystem,

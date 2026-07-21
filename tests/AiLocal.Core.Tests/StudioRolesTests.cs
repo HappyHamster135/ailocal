@@ -35,4 +35,36 @@ public class StudioRolesTests : IDisposable
         File.WriteAllBytes(Path.Combine(_dir, "music.wav"), new byte[200_000]);  // lang loop = musik
         Assert.Empty(StudioAudioReview.Review(_dir));
     }
+
+    // ---- #6: studiominne (langtidsminne over projekt) ----------------------
+
+    [Fact]
+    public void Memory_RecordAndRecall_PerGenre()
+    {
+        var m = new StudioMemory(Path.Combine(_dir, "mem.json"));
+        m.Record("management", "kom ihag tydliga instruktioner");
+        m.Record("management", "balansera ekonomin");
+        m.Record("racing", "banan var for smal");
+        Assert.Equal(2, m.LessonsFor("management").Count);
+        Assert.Contains("balansera ekonomin", m.LessonsFor("management"));
+        Assert.Single(m.LessonsFor("racing"));
+        Assert.Empty(m.LessonsFor("okand-genre"));
+    }
+
+    [Fact]
+    public void Memory_Dedup_IngenDubblett()
+    {
+        var m = new StudioMemory(Path.Combine(_dir, "mem2.json"));
+        m.Record("puzzle", "for latt");
+        m.Record("puzzle", "for latt");
+        Assert.Single(m.LessonsFor("puzzle"));
+    }
+
+    [Fact]
+    public void Memory_Persists_AcrossInstances()
+    {
+        var path = Path.Combine(_dir, "mem3.json");
+        new StudioMemory(path).Record("shooter", "fienderna sag likadana ut");
+        Assert.Contains("fienderna sag likadana ut", new StudioMemory(path).LessonsFor("shooter"));
+    }
 }

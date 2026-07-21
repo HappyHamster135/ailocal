@@ -657,15 +657,22 @@ public static class WorkerRole
                     // att samma prompt ALDRIG ger samma spel två gånger -
                     // kitet är det deterministiska golvet, fröna är variationen
                     // (och svaga modeller bygger bra kring ett GIVET frö).
-                    var ideaSeeds = GenreIdeaBank.PickSeeds(
-                        GameScaffoldService.DetectGenre(req.Assignment), count: 3);
+                    var directorGenre = GameScaffoldService.DetectGenre(req.Assignment);
+                    var ideaSeeds = GenreIdeaBank.PickSeeds(directorGenre, count: 3);
                     await EmitStep("thinking",
                         "Inspirationsfrön till regissören: " + string.Join(" · ", ideaSeeds));
+                    // Studiominne: regissören läser tidigare granskningsfynd för
+                    // denna genre så kvaliteten stiger release för release i
+                    // stället för att upprepa samma misstag.
+                    var pastLessons = new StudioMemory().LessonsFor(directorGenre);
+                    if (pastLessons.Count > 0)
+                        await EmitStep("thinking",
+                            "Studiominne (" + directorGenre + "): " + string.Join(" · ", pastLessons));
                     await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
                     var contract = await DirectorPass.RunAsync(
                         req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct,
                         engine: GameBuilder.DetectEngine(directorRoot),
-                        inspirationSeeds: ideaSeeds);
+                        inspirationSeeds: ideaSeeds, pastLessons: pastLessons);
                     contractCriteria = contract.Criteria;
                     await EmitStep("tool_result", contract.ToMarkdown());
                     assignmentText += "\n\n" + contract.ToMarkdown() +
@@ -958,6 +965,21 @@ public static class WorkerRole
                         FinalAnswer = result.FinalAnswer + "\n\n---\nKvarvarande anmärkningar från kvalitetskontrollen:\n" + findings.Report
                     }
                 };
+            }
+
+            // Studiominne: spara denna genres granskningsfynd (design/ljud/kontrakt)
+            // så regissören varnar för dem nästa gång samma genre byggs - studion
+            // lär sig release för release i stället för att upprepa misstagen.
+            if (buildIntent && findings is { Clean: false })
+            {
+                var mem = new StudioMemory();
+                var lessonGenre = GameScaffoldService.DetectGenre(req.Assignment);
+                foreach (var line in findings.Report.Split('\n'))
+                {
+                    var l = line.Trim();
+                    if (l.Contains("SPELDESIGN") || l.Contains("STUDIOROLL") || l.StartsWith("- "))
+                        mem.Record(lessonGenre, l.TrimStart('-', ' '));
+                }
             }
 
             // Versionshistorik: varje godkänt uppdrag fryser projektet som en
