@@ -135,6 +135,15 @@ public static class AssignmentQualityGate
             }
         }
 
+        // Ljuddesigner-rollen: godot/unity-spel anvander .wav-tillgangar. Saknad
+        // musik/sfx rapporteras som en ADVISORY (inte ett hart fynd - ett tekniskt
+        // gront spel forblir gront) sa agaren/agenten ser ljudavdelningens omdome
+        // och kan lyfta ljudet i en uppfoljning. Html5 anvander WebAudio (JS), inte
+        // .wav-filer, sa dess ljud gar inte att bedoma pa filer - hoppas over.
+        if (engine is "godot" or "unity")
+            foreach (var note in StudioAudioReview.Review(projectRoot))
+                okSummary.AppendLine(note);
+
         return issues.Count == 0
             ? new(true, false, okSummary.ToString().Trim(), projectRoot, engine)
             : new(false, hard, string.Join("\n", issues.Take(20)), projectRoot, engine);
