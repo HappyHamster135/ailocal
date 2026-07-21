@@ -37,11 +37,17 @@ public static class ToolLocator
         "dotnet" => FirstExisting(
             [Path.Combine(ToolsRoot, "dotnet", "dotnet.exe")],
             [@"C:\Program Files\dotnet\dotnet.exe"]),
+        // GlobFilesDeep, inte GlobFiles: provisioneraren extraherar zipen
+        // till en UNDERMAPP (tools\Godot_v4.3-.../Godot_v...exe) - toppnivå-
+        // sökningen hittade aldrig den provisionerade binären, så hela
+        // godot-kedjan (headless-parse, exe-export, spelkörning i grinden)
+        // trodde godot saknades TROTS lyckad provisionering. Mönstret
+        // "Godot_v*" undviker GodotSharp\Tools\GodotTools.*-exen.
         "godot" => FirstExisting(
-            GlobFiles(ToolsRoot, "Godot*.exe"),
+            GlobFilesDeep(ToolsRoot, "Godot_v*.exe"),
             [@"C:\Program Files\Godot\godot.exe", @"C:\Program Files (x86)\Godot\godot.exe"]),
         "blender" => FirstExisting(
-            GlobFiles(ToolsRoot, "blender*.exe"),
+            GlobFilesDeep(ToolsRoot, "blender*.exe"),
             [@"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"]),
         _ => null
     };
@@ -83,6 +89,22 @@ public static class ToolLocator
         {
             if (!Directory.Exists(parent)) return [];
             return Directory.GetFiles(parent, filePattern)
+                .OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Som GlobFiles men rekursivt - för verktyg vars zip extraherar
+    /// till en undermapp under tools-katalogen (godot, blender).</summary>
+    private static IEnumerable<string> GlobFilesDeep(string parent, string filePattern)
+    {
+        try
+        {
+            if (!Directory.Exists(parent)) return [];
+            return Directory.GetFiles(parent, filePattern, SearchOption.AllDirectories)
                 .OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase);
         }
         catch

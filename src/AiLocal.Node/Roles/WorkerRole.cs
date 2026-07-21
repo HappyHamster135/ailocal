@@ -833,6 +833,35 @@ public static class WorkerRole
                     return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
                 }, ct);
 
+            // Auto-provisionera godot + exportmallar när projektet är Godot -
+            // annars degraderar grinden tyst till statisk kontroll (inga
+            // skriptfel fångas), fönsterdump-visionen kan inte köra spelet
+            // och exe-exporten hoppar över sig själv. Samma självläkning som
+            // git fick för team-läget: noden ordnar sina verktyg själv.
+            if (result.Success && buildIntent
+                && (findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot)) is { } godotCheckRoot
+                && new ProjectVerifier().Detect(godotCheckRoot) == ProjectVerifier.ProjectKind.Godot
+                && ToolLocator.Find("godot") is null)
+            {
+                await EmitStep("tool_call", "provision godot + godot-templates (full verifiering och exe-export av Godot-projekt)");
+                try
+                {
+                    var provisioner = new ToolProvisioner();
+                    var godotProv = await provisioner.ProvisionAsync("godot", "", ct);
+                    await EmitStep(godotProv.Success ? "tool_result" : "tool_error", godotProv.Output);
+                    if (godotProv.Success)
+                    {
+                        var templatesProv = await provisioner.ProvisionAsync("godot-templates", "", ct);
+                        await EmitStep(templatesProv.Success ? "tool_result" : "tool_error", templatesProv.Output);
+                    }
+                }
+                catch (Exception provEx)
+                {
+                    await EmitStep("tool_error",
+                        $"godot kunde inte provisioneras ({provEx.Message}) - verifieringen körs statiskt och ingen exe exporteras.");
+                }
+            }
+
             const int maxFixRounds = 2;
             for (var round = 0; result.Success; round++)
             {

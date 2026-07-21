@@ -133,6 +133,18 @@ public sealed partial class GameScaffoldService
 
     static string[] ScaffoldGodot(string root, string prompt)
     {
+        // Genrekit även för Godot - tidigare fanns BARA plattformaren oavsett
+        // prompt, så en fotbollsmanager startade som "Pixel Rush" och agenten
+        // fick bygga 95% från noll (rotorsaken bakom spretiga motorspel).
+        // Management/sim/idle får tycoon-grunden; rpg/roguelike/shooter får
+        // top-down-grunden; övriga genrer behåller plattformaren tills fler
+        // kit finns.
+        var genre = DetectGenre(prompt);
+        if (genre is "management" or "simulator" or "idle")
+            return ScaffoldGodotManagement(root, prompt);
+        if (genre is "rpg" or "roguelike" or "shooter")
+            return ScaffoldGodotTopDown(root, prompt);
+
         // A complete, playable 2D platformer out of the box - open it in Godot
         // 4 (or run `godot --headless --build` / export) and it just plays.
         // The agent then extends it via the file API; it is NOT a stub.
