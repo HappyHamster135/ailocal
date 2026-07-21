@@ -254,6 +254,15 @@ public static class OverseerRole
         IHttpClientFactory httpFactory, string subPath, CancellationToken ct)
     {
         var candidates = PrimaryCandidates(locator, hosts);
+        // Overseer-växeln: operatören kan välja vilken Host sessionerna körs
+        // på (cookie från värdväljaren i sessionsvyn). Vald Host provas
+        // först; övriga står kvar som fallback om den valda är nere.
+        var preferredHost = ctx.Request.Cookies["ailocalSessionHost"];
+        if (!string.IsNullOrWhiteSpace(preferredHost))
+            candidates = candidates
+                .OrderByDescending(c => string.Equals(
+                    c.TrimEnd('/'), preferredHost.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+                .ToList();
         if (candidates.Count == 0)
             return Results.Problem("host not yet discovered");
 

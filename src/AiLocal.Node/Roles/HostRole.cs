@@ -622,7 +622,7 @@ public static class HostRole
         BudgetService.Bind(app.Services.GetRequiredService<BudgetService>());
         app.MapGet("/", () => Results.Content(Dashboard.Html, "text/html"));
 
-        app.MapGet("/cluster/nodes", (WorkerRegistry reg) => Results.Ok(reg.All));
+        app.MapGet("/cluster/nodes", (WorkerRegistry reg) => Results.Ok(reg.All.Select(n => n.Redacted())));
 
         app.MapPost("/cluster/register", (NodeInfo node, WorkerRegistry reg) =>
         {
@@ -798,13 +798,14 @@ public static class HostRole
         app.MapGet("/api/host", (NodeSettings settings) =>
             Results.Ok(new { host = $"http://127.0.0.1:{settings.Port}" }));
         // Moln-API:er som pseudo-workers: enbart visningsrader (aldrig i
-        // registret, aldrig i dispatch) - /cluster/nodes lämnas orörd så
-        // nod-till-nod-logik aldrig ser dem.
+        // registret, aldrig i dispatch) - /cluster/nodes ser aldrig dem.
+        // Redacted(): klustertoken (admin-nivå) får aldrig serialiseras ut
+        // till operatörsnivå-läsare.
         app.MapGet("/api/nodes", (WorkerRegistry reg, PersistentSettingsStore store) =>
-            Results.Ok(reg.All.Concat(CloudPseudoWorkers.For(store.GetApiKey))));
+            Results.Ok(reg.All.Select(n => n.Redacted()).Concat(CloudPseudoWorkers.For(store.GetApiKey))));
         app.MapGet("/api/topology", BuildTopology);
         app.MapGet("/api/nodes/{id}", (string id, WorkerRegistry reg) =>
-            reg.Get(id) is { } node ? Results.Ok(node) : Results.NotFound());
+            reg.Get(id) is { } node ? Results.Ok(node.Redacted()) : Results.NotFound());
         app.MapDelete("/api/nodes/{id}", (string id, WorkerRegistry reg) =>
             reg.Remove(id) ? Results.NoContent() : Results.NotFound());
         app.MapPost("/api/nodes/{id}/restore", (string id, WorkerRegistry reg) =>

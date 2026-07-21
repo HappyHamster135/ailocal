@@ -1422,6 +1422,17 @@ internal static class Dashboard
         a.mini-btn:hover { background: var(--surface-2); border-color: var(--accent); }
         .msg-preview { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
         .node-version-stale { color: var(--bad); font-weight: 600; }
+        .contract-card {
+          border: 1px solid var(--line); border-radius: 10px;
+          padding: 10px 12px; margin: 6px 0; display: grid; gap: 5px;
+          background: var(--surface);
+        }
+        .contract-title { font-size: 11.5px; color: var(--muted); }
+        .contract-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+        .contract-row .icon-svg { flex: 0 0 auto; color: var(--muted); }
+        .contract-row.met .icon-svg { color: var(--accent); }
+        .contract-row.met span { opacity: .75; }
+        .contract-row.unmet .icon-svg { color: var(--bad); }
         #benchmarkStatus { white-space: pre-line; color: var(--muted); }
         .bench-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px; }
         .bench-table td, .bench-table th { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--kv-line); }
@@ -1560,6 +1571,7 @@ internal static class Dashboard
               </div>
               <div class="new-session-form hidden" id="newSessionForm">
                 <div class="notice" id="newSessionNotice"></div>
+                <select id="sessionHostSelect" class="hidden" title="Vilken Host sessionerna skapas och körs på - mappsökvägen nedan gäller DEN datorn"></select>
                 <div class="token-row">
                   <input id="newSessionFolderPath" placeholder="Mappsökväg, t.ex. C:\projekt\mitt-projekt">
                   <button id="browseNewSessionFolder" type="button" data-icon="folder" title="Bläddra..."></button>
@@ -4699,7 +4711,9 @@ internal static class Dashboard
             try {
               const h = await fetchJson('/api/host');
               state.host = h?.host ?? null;
+              state.overseerHosts = h?.hosts || [];
               renderHost();
+              renderSessionHostSelect();
             } catch {
               renderHost();
             }
@@ -5592,19 +5606,45 @@ internal static class Dashboard
           return chatLive || localLive;
         }
 
+        // Overseer-växeln: när flera Hosts är announcade väljer operatören
+        // här vilken Host nya sessioner skapas och körs på. Valet sparas som
+        // cookie och läses av sessionsproxyn på servern - alla befintliga
+        // sessionsanrop följer med automatiskt, utan fler JS-ändringar.
+        function renderSessionHostSelect() {
+          const sel = $('sessionHostSelect');
+          if (!sel) return;
+          const hosts = state.overseerHosts || [];
+          if (hosts.length < 2) { sel.classList.add('hidden'); return; }
+          const current = decodeURIComponent((document.cookie.match(/(?:^|; )ailocalSessionHost=([^;]*)/) || [])[1] || '');
+          const html = hosts.map(h => {
+            const ep = h.endpoint || h.Endpoint || '';
+            const name = h.name || h.Name || ep;
+            return `<option value="${esc(ep)}" ${current === ep ? 'selected' : ''}>Sessioner körs på: ${esc(name)}</option>`;
+          }).join('');
+          if (sel._html !== html) { sel.innerHTML = html; sel._html = html; }
+          sel.classList.remove('hidden');
+          sel.onchange = () => {
+            document.cookie = 'ailocalSessionHost=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000';
+            refresh();
+          };
+        }
+
         function syncComposerLock() {
           const btn = $('sendBtn');
           if (!btn) return;
-          const busy = delegateBusy();
+          // Agentläges-uppdrag KÖAS på noden sedan uppdragskön kom - då är
+          // det fritt att skicka fler ("ställ tre spel på kö"). Chatt- och
+          // plankörningar saknar kö och behåller spärren.
+          const busy = delegateBusy() && !$('assignmentMode')?.checked;
           btn.disabled = busy;
-          btn.title = busy ? 'En körning pågår - avbryt den (✕) för att skicka nytt' : 'Skicka';
+          btn.title = busy ? 'En körning pågår - avbryt den (✕), vänta, eller slå på Agentläge (köas)' : 'Skicka';
         }
 
         async function sendMessage() {
           const prompt = $('prompt').value.trim();
           if (!prompt) return;
-          if (delegateBusy()) {
-            showComposerNotice('En körning pågår redan - avbryt den (✕) eller vänta tills den är klar.', true);
+          if (delegateBusy() && !$('assignmentMode').checked) {
+            showComposerNotice('En körning pågår redan - avbryt den (✕), vänta, eller slå på Agentläge så köas uppdraget på noden.', true);
             return;
           }
           if ($('assignmentMode').checked) {
@@ -5696,6 +5736,23 @@ internal static class Dashboard
               return `<div class="step-row step-error"><span class="k">!</span><span class="step-tool-args">${esc(trunc(firstLine(d), 160))}</span></div>`;
             if (kind === 'error' || kind === 'cancelled')
               return `<div class="step-row step-error"><span class="k">✗</span><span>${esc(trunc(d, 220))}</span></div>`;
+            if (kind === 'contract' || kind === 'contract_status') {
+              // Regissörens leveranskontrakt som checklista: före bygget som
+              // "att leverera", efter uppföljningen med avbockade punkter.
+              try {
+                const c = JSON.parse(d);
+                const unmet = new Set(c.unmet || []);
+                const judged = kind === 'contract_status';
+                const items = (c.criteria || []).map(item => {
+                  const met = judged && !unmet.has(item);
+                  const cls = judged ? (met ? 'met' : 'unmet') : '';
+                  const mark = judged ? icon(met ? 'check' : 'x', 12) : icon('square', 12);
+                  return `<div class="contract-row ${cls}">${mark}<span>${esc(item)}</span></div>`;
+                }).join('');
+                const title = judged ? 'Leveranskontraktet - regissörens avbockning' : 'Leveranskontraktet (att leverera)';
+                return `<div class="contract-card"><div class="contract-title">${esc(title)}</div>${items}</div>`;
+              } catch { return ''; }
+            }
             return `<div class="step-result">${esc(trunc(firstLine(d), 150))}</div>`;
           }).join('');
           const tail = running

@@ -21,6 +21,7 @@ public static class NodeComposition
         services.AddSingleton<SessionStore>();
         services.AddSingleton<SessionRunRegistry>();
         services.AddSingleton<AssignmentLog>();
+        services.AddSingleton<AssignmentQueue>();
         services.AddSingleton<BenchmarkService>();
         services.AddSingleton<GitService>();
         services.AddSingleton<GitIsolationService>();

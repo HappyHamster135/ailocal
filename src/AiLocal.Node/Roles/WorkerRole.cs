@@ -112,8 +112,8 @@ public static class WorkerRole
         app.MapPost("/execute/assignment", (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, CancellationToken ct)
-            => RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, ct, includePreview: false));
+            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, AssignmentQueue queue, CancellationToken ct)
+            => RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, queue, ct, includePreview: false));
 
         // --- Task isolation (git worktree per task) ---------------------------------
         // Each "employee" (agent run) gets its own worktree+branch so two
@@ -282,7 +282,7 @@ public static class WorkerRole
         AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
         NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
         PersistentSettingsStore settingsStore, AssignmentLog assignmentLog,
-        CancellationToken ct, bool includePreview = true)
+        AssignmentQueue queue, CancellationToken ct, bool includePreview = true)
     {
             var accessLevel = settings.Worker.AgentAccess;
             if (accessLevel == AgentAccessLevel.Off)
@@ -487,6 +487,23 @@ public static class WorkerRole
             try
             {
 
+            // ---- Uppdragskön: ETT bygge i taget per nod ---------------------
+            // Två agentkörningar i samma arbetsyta kolliderar (delade filer,
+            // kapplöpande skrivningar) och tidigare fanns inget skydd alls.
+            // Nu köas överlappande uppdrag: positionen visas öppet, SSE-
+            // strömmen och loggen hålls levande under väntan, och bygget
+            // startar automatiskt när noden blir ledig.
+            var wasQueued = false;
+            using var queueSlot = await queue.EnterAsync(async position =>
+            {
+                wasQueued = true;
+                await EmitStep("thinking",
+                    $"Köad - ett annat uppdrag kör redan på den här noden (plats {position} i kön). " +
+                    "Bygget startar automatiskt när noden blir ledig.");
+            }, ct);
+            if (wasQueued)
+                await EmitStep("thinking", "Noden är ledig - bygget startar nu.");
+
             // Kvalitetsgrindens "skrevs något alls?"-kontroll jämför mot den
             // här tidpunkten - tagen FÖRE förskaffolden så även den räknas
             // som producerat arbete.
@@ -606,6 +623,12 @@ public static class WorkerRole
                 {
                     contractCriteria = DirectorPass.ReadCriteria(directorRoot);
                 }
+
+                // Live-checklistan: kontraktspunkterna som ett eget steg så
+                // dashboarden kan visa VAD som ska levereras medan det byggs -
+                // regissörens uppföljning bockar sedan av dem (contract_status).
+                if (contractCriteria.Count > 0)
+                    await EmitStep("contract", JsonSerializer.Serialize(new { criteria = contractCriteria }));
             }
 
             // ---- Milstolpsgodkännande (valbart, bara lokala körningar) ------
@@ -773,6 +796,8 @@ public static class WorkerRole
                     await EmitStep("tool_call", "regissörens uppföljning (leveranskontraktet)");
                     var unmet = await DirectorPass.ReviewAsync(
                         contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct);
+                    await EmitStep("contract_status",
+                        JsonSerializer.Serialize(new { criteria = contractCriteria, unmet }));
                     if (unmet.Count > 0)
                     {
                         findings = findings with
@@ -938,7 +963,7 @@ public static class WorkerRole
         app.MapPost("/api/assignment", async (
             AssignmentRequest req, HttpContext ctx, FallbackChatProvider provider,
             NodeSettings settings, IHttpClientFactory httpFactory, HostLocator hostLocator,
-            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, CancellationToken ct) =>
+            PersistentSettingsStore settingsStore, AssignmentLog assignmentLog, AssignmentQueue queue, CancellationToken ct) =>
         {
             // Mirror the engine's own early checks BEFORE the response starts,
             // so they still surface as proper HTTP errors instead of dying
@@ -957,7 +982,7 @@ public static class WorkerRole
             await ctx.Response.WriteAsync(
                 $"data: {JsonSerializer.Serialize(new { worker = new { id = "local", name = settings.NodeName } })}\n\n", ct);
             await ctx.Response.Body.FlushAsync(ct);
-            return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, ct);
+            return await RunAssignmentAsync(req, ctx, provider, settings, httpFactory, hostLocator, settingsStore, assignmentLog, queue, ct);
         });
 
         // Persistent uppdragshistorik för DEN HÄR nodens körningar - samma

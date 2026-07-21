@@ -72,4 +72,17 @@ public sealed class NodeInfo
     public int SuccessCount { get; set; }
     public int FailureCount { get; set; }
     public double AvgLatencyMs { get; set; }
+
+    /// <summary>Display-safe copy for node-list responses: ClusterToken is an
+    /// ADMIN-tier credential, but /api/nodes is readable at operator tier -
+    /// serializing it raw let a low-privilege reader lift the Host's admin
+    /// token straight out of the response. The announce/register paths (which
+    /// legitimately carry the token) serialize the original object, never
+    /// this copy.</summary>
+    public NodeInfo Redacted()
+    {
+        var copy = (NodeInfo)MemberwiseClone();
+        copy.ClusterToken = null;
+        return copy;
+    }
 }
