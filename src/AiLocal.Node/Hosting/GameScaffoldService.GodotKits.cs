@@ -66,6 +66,17 @@ public partial class GameScaffoldService
             Write(root, name, SfxrGenerator.Render(category, seed: 7));
             files.Add(name);
         }
+        // Animerade karaktarer: flerbilds-sprites (gangcykel + idle) -> Godot
+        // SpriteFrames, sa spelaren och fienderna GAR pa riktigt i stallet for
+        // statiska fyrkanter (PixelAnimator + GodotSpriteFrames, deterministiskt).
+        var playerSheet = PixelAnimator.Build(prompt);
+        Write(root, "player.png", playerSheet.Png);
+        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", playerSheet));
+        files.Add("player.png"); files.Add("player_frames.tres");
+        var enemySheet = PixelAnimator.Build(prompt + " fiende monster");
+        Write(root, "enemy.png", enemySheet.Png);
+        Write(root, "enemy_frames.tres", GodotSpriteFrames.Build("enemy.png", enemySheet));
+        files.Add("enemy.png"); files.Add("enemy_frames.tres");
         Write(root, "icon.ico", MakeIco());
         files.Add("icon.ico");
         Write(root, "DESIGN.md", GodotTopDownDesignDoc(prompt));
@@ -462,12 +473,14 @@ func make_texture(size: int, base: Color, accent: Color) -> ImageTexture:
 	img.set_pixel(size / 2 - 1, size / 3, accent)
 	return ImageTexture.create_from_image(img)
 
-func make_sprite_body(color: Color, accent: Color, size: int) -> CharacterBody2D:
+func make_sprite_body(frames_path: String, size: int) -> CharacterBody2D:
 	var body := CharacterBody2D.new()
-	var sprite := Sprite2D.new()
-	sprite.texture = make_texture(size, color, accent)
-	sprite.scale = Vector2(2, 2)
-	body.add_child(sprite)
+	var spr := AnimatedSprite2D.new()
+	spr.name = "Anim"
+	spr.sprite_frames = load(frames_path)
+	spr.scale = Vector2(2, 2)
+	spr.play("idle")
+	body.add_child(spr)
 	var shape := CollisionShape2D.new()
 	var rect := RectangleShape2D.new()
 	rect.size = Vector2(size * 2, size * 2)
@@ -484,7 +497,7 @@ func new_game(diff: int) -> void:
 	clear_entities()
 	if player:
 		player.queue_free()
-	player = make_sprite_body(Color(0.3, 0.7, 1.0), Color(0.9, 0.95, 1.0), 12)
+	player = make_sprite_body("res://player_frames.tres", 12)
 	player.position = ARENA.get_center()
 	add_child(player)
 	state = "playing"
@@ -506,7 +519,8 @@ func next_wave() -> void:
 		return
 	clear_entities()
 	for i in range(2 + wave + difficulty):
-		var e := make_sprite_body(Color(0.85, 0.3, 0.3), Color(0.3, 0.05, 0.05), 11)
+		var e := make_sprite_body("res://enemy_frames.tres", 11)
+		e.get_node("Anim").play("walk")
 		e.position = random_edge_point()
 		add_child(e)
 		enemies.append(e)
@@ -561,6 +575,13 @@ func _physics_process(delta: float) -> void:
 	if dir.length() > 0:
 		dir = dir.normalized()
 	player.velocity = dir * 260.0
+	var anim := player.get_node("Anim") as AnimatedSprite2D
+	if anim:
+		if dir.length() > 0.0:
+			anim.play("walk")
+			anim.flip_h = dir.x < 0.0
+		else:
+			anim.play("idle")
 	player.move_and_slide()
 	player.position = player.position.clamp(ARENA.position, ARENA.end)
 	if invulnerable > 0.0:

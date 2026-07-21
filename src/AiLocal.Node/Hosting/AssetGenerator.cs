@@ -822,11 +822,21 @@ public sealed class AssetGenerator
         {
             deflate.Write(data, 0, data.Length);
         }
-        // Write a dummy Adler-32 checksum (simplified — real Adler-32 is complex for a placeholder).
-        output.WriteByte(0);
-        output.WriteByte(0);
-        output.WriteByte(0);
-        output.WriteByte(0);
+        // zlib trailer: the REAL Adler-32 of the uncompressed data, big-endian.
+        // A dummy 0-checksum here decodes fine in lenient readers (browsers) but
+        // strict libpng (Godot) rejects the whole PNG as ERR_FILE_CORRUPT - so
+        // every generated sprite was technically corrupt until now.
+        uint a = 1, b = 0;
+        foreach (var by in data)
+        {
+            a = (a + by) % 65521;
+            b = (b + a) % 65521;
+        }
+        var adler = (b << 16) | a;
+        output.WriteByte((byte)(adler >> 24));
+        output.WriteByte((byte)(adler >> 16));
+        output.WriteByte((byte)(adler >> 8));
+        output.WriteByte((byte)adler);
         return output.ToArray();
     }
 
