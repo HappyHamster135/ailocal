@@ -144,6 +144,8 @@ public sealed partial class GameScaffoldService
             return ScaffoldGodotManagement(root, prompt);
         if (genre is "rpg" or "roguelike" or "shooter")
             return ScaffoldGodotTopDown(root, prompt);
+        if (genre == "racing")
+            return ScaffoldGodotRacing(root, prompt);
 
         // A complete, playable 2D platformer out of the box - open it in Godot
         // 4 (or run `godot --headless --build` / export) and it just plays.

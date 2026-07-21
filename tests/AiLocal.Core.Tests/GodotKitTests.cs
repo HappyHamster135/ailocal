@@ -102,6 +102,23 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void RacingIGodot_FarVarvetKitet()
+    {
+        const string prompt = "bygg ett racingspel i godot med bilar och tre varv";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("racing", GameScaffoldService.DetectGenre(prompt));
+            Assert.Contains("Varvet", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("_physics_process", script);
+            Assert.Contains("checkpoint", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public async Task GodotHeadless_ParsarBadaKiten_UtanSkriptfel()
     {
         // Miljöberoende men SKARPT där godot finns i verktygskatalogen (dev-

@@ -93,6 +93,242 @@ public partial class GameScaffoldService
         return [.. files];
     }
 
+    /// <summary>Racing: top-down varvracer med bilfysik, oval bana, checkpoints
+    /// i ordning, varv, varvtimer och basta tid. Fyller genreluckan dar racing-
+    /// prompts tidigare fick plattformaren.</summary>
+    internal static string[] ScaffoldGodotRacing(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Varvet"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node2D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotRacingMain);
+        files.Add("Main.gd");
+        foreach (var (name, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotRacingDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Varvet - Top-down racing (Godot 4, GDScript)\n\n" +
+            "Komplett spelbar varvracer: bilfysik (gas/broms/styr), oval bana med\n" +
+            "gras som bromsar, checkpoints i ordning, 3 varv, varvtimer och basta tid.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Banan och bilen ritas i kod (_draw) - byt tema via farger/former i Main.gd.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotRacingDesignDoc(string prompt) =>
+        "# Top-down racing (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKor bilen runt banan och klara 3 varv pa basta tid. Passera checkpoints i\n" +
+        "ordning (den glodande markoren visar nasta), hall dig pa asfalten - graset bromsar.\n\n" +
+        "## Mekaniker (klara)\n- Bilfysik: gas/broms/styr med friktion, tre svarighetsgrader (toppfart)\n" +
+        "- Oval bana med on-track-test (mellan yttre och inre ellips)\n- Checkpoints i ordning + varvrakning + varvtimer\n" +
+        "- Basta tid sparas (user://), titel/vinst-overlay, ljud\n\n## Bygg vidare\n- AI-motstandare, fler banor, power-ups, drift/boost, minimap\n";
+
+    // Ren GDScript, 4-space indentering (Godot 4.3 tar tabs ELLER spaces om
+    // konsekvent). Toppniva pa kolumn 0, stangande """ pa kolumn 0 => raw-strangen
+    // stripar inget och GDScript-indenteringen bevaras exakt.
+    const string GodotRacingMain = """
+extends Node2D
+# Varvet - top-down varvracer. Kor bilen runt banan, klara varven pa basta tid.
+# UI byggs i kod (_show_title/_finish), banan + bilen ritas i _draw. BYT TEMA:
+# farger/former i _draw och texterna i _show_title.
+
+const SAVE_PATH := "user://varvet_best.txt"
+const LAPS := 3
+
+var C := Vector2(576, 324)
+var OUT := Vector2(470, 260)
+var INN := Vector2(240, 120)
+
+var state := "title"
+var difficulty := 1
+var car := Vector2.ZERO
+var heading := 0.0
+var vel := 0.0
+var lap := 0
+var checkpoint := 0
+var t := 0.0
+var best := 0.0
+var checkpoints: Array[Vector2] = []
+var snd := {}
+var ui: CanvasLayer
+
+func _ready() -> void:
+    randomize()
+    _build_checkpoints()
+    _setup_audio()
+    best = _load_best()
+    ui = CanvasLayer.new()
+    add_child(ui)
+    _show_title()
+
+func _build_checkpoints() -> void:
+    var m := (OUT + INN) * 0.5
+    checkpoints = [
+        C + Vector2(0, m.y),
+        C + Vector2(m.x, 0),
+        C + Vector2(0, -m.y),
+        C + Vector2(-m.x, 0),
+    ]
+
+func _setup_audio() -> void:
+    for key in ["click", "coin", "hurt", "win"]:
+        var p := AudioStreamPlayer.new()
+        var s = load("res://%s.wav" % key)
+        if s:
+            p.stream = s
+        add_child(p)
+        snd[key] = p
+
+func _play(key: String) -> void:
+    if snd.has(key) and snd[key].stream:
+        snd[key].play()
+
+func _clear_ui() -> void:
+    for c in ui.get_children():
+        c.queue_free()
+
+func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(320, 46)
+    b.position = Vector2(416, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+
+func _show_title() -> void:
+    state = "title"
+    _clear_ui()
+    _label("VARVET", 80, 72, Color(1, 0.85, 0.2))
+    _label("Kor %d varv sa fort du kan - piltangenter: gas/broms/styr." % LAPS, 180, 22)
+    _label("Basta tid: %s" % ("-" if best <= 0.0 else "%.2f s" % best), 216, 22, Color(0.7, 0.9, 1))
+    var names := ["Latt", "Medel", "Svar"]
+    for i in range(3):
+        var d := i
+        _button(names[i], 290 + i * 58, func(): _start(d))
+    queue_redraw()
+
+func _start(d: int) -> void:
+    difficulty = d
+    _play("click")
+    lap = 0
+    checkpoint = 0
+    t = 0.0
+    vel = 0.0
+    car = checkpoints[0]
+    heading = (checkpoints[1] - checkpoints[0]).angle()
+    _clear_ui()
+    var hud := _label("", 12, 24)
+    hud.name = "Hud"
+    state = "playing"
+    queue_redraw()
+
+func _on_track(p: Vector2) -> bool:
+    var o := Vector2((p.x - C.x) / OUT.x, (p.y - C.y) / OUT.y)
+    var i := Vector2((p.x - C.x) / INN.x, (p.y - C.y) / INN.y)
+    return o.length_squared() <= 1.0 and i.length_squared() >= 1.0
+
+func _physics_process(delta: float) -> void:
+    if state != "playing":
+        return
+    t += delta
+    var accel := Input.get_action_strength("ui_up") - Input.get_action_strength("ui_down")
+    var steer := Input.get_action_strength("ui_right") - Input.get_action_strength("ui_left")
+    var top: float = [260.0, 320.0, 380.0][difficulty]
+    vel = clamp(vel + accel * 300.0 * delta, -120.0, top)
+    vel = move_toward(vel, 0.0, 90.0 * delta)
+    if abs(vel) > 5.0:
+        heading += steer * 2.4 * delta * signf(vel)
+    var dir := Vector2(cos(heading), sin(heading))
+    var nxt := car + dir * vel * delta
+    if not _on_track(nxt):
+        vel = move_toward(vel, 0.0, 700.0 * delta)
+        nxt = car + dir * vel * delta
+    car = nxt
+    _progress()
+    var hud := ui.get_node_or_null("Hud")
+    if hud:
+        hud.text = "Varv %d/%d   Tid %.2f s" % [min(lap + 1, LAPS), LAPS, t]
+    queue_redraw()
+
+func _progress() -> void:
+    var target := checkpoints[(checkpoint + 1) % 4]
+    if car.distance_to(target) < 95.0:
+        checkpoint = (checkpoint + 1) % 4
+        _play("coin")
+        if checkpoint == 0:
+            lap += 1
+            if lap >= LAPS:
+                _finish()
+
+func _finish() -> void:
+    state = "over"
+    _play("win")
+    var rec := best <= 0.0 or t < best
+    if rec:
+        best = t
+        _save_best(t)
+    _clear_ui()
+    _label("MALGANG!", 200, 60, Color(1, 0.9, 0.3))
+    _label("Tid: %.2f s%s" % [t, "   NYTT REKORD!" if rec else "   Rekord: %.2f s" % best], 280, 26)
+    _button("Spela igen", 340, func(): _show_title())
+
+func _draw() -> void:
+    draw_rect(Rect2(Vector2.ZERO, Vector2(1152, 648)), Color(0.12, 0.4, 0.16))
+    _ellipse(C, OUT, Color(0.22, 0.22, 0.26))
+    _ellipse(C, INN, Color(0.12, 0.4, 0.16))
+    var s := checkpoints[0]
+    draw_line(s + Vector2(-42, 0), s + Vector2(42, 0), Color.WHITE, 4)
+    if state == "playing":
+        var target := checkpoints[(checkpoint + 1) % 4]
+        draw_circle(target, 15, Color(1, 0.9, 0.2, 0.5))
+        var fwd := Vector2(cos(heading), sin(heading))
+        var side := fwd.rotated(PI * 0.5)
+        var pts := PackedVector2Array([car + fwd * 16, car + side * 9 - fwd * 12, car - side * 9 - fwd * 12])
+        draw_colored_polygon(pts, Color(0.9, 0.2, 0.2))
+        draw_circle(car, 4, Color(1, 1, 0.85))
+
+func _ellipse(c: Vector2, r: Vector2, col: Color) -> void:
+    var pts := PackedVector2Array()
+    for i in range(48):
+        var a := TAU * i / 48.0
+        pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y))
+    draw_colored_polygon(pts, col)
+
+func _load_best() -> float:
+    if not FileAccess.file_exists(SAVE_PATH):
+        return 0.0
+    var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    return float(f.get_as_text()) if f else 0.0
+
+func _save_best(v: float) -> void:
+    var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if f:
+        f.store_string(str(v))
+""";
+
     static string GodotKitProject(string name) =>
         "[application]\n" +
         $"config/name=\"{name}\"\n" +
