@@ -152,4 +152,48 @@ public class GameBuilderTests
         Assert.False(result.Success);
         Assert.Contains("inte installerat", result.Output);
     }
+
+    // ---- #7: Godot web-export (spela i webblasaren / dela en lank) ----------
+
+    [Fact]
+    public async Task BuildWeb_CallsCorrectWebExportCommand()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gbweb_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
+
+        var capturedCmd = (string?)null;
+        Func<string, string, CancellationToken, Task<(int, string)>> runCommand =
+            (cmd, workDir, ct) =>
+            {
+                capturedCmd = cmd;
+                var outHtml = Path.Combine(root, "build", "web", "index.html");
+                Directory.CreateDirectory(Path.GetDirectoryName(outHtml)!);
+                File.WriteAllText(outHtml, "<html></html>");
+                return Task.FromResult((0, ""));
+            };
+
+        var result = await new GameBuilder().BuildWebAsync(
+            root, runCommand, CancellationToken.None, godotFinder: () => @"C:\godot.exe");
+
+        Assert.True(result.Success, result.Output);
+        Assert.Contains("--export-release", capturedCmd);
+        Assert.Contains("\"Web\"", capturedCmd);
+        Assert.Contains(Path.Combine("web", "index.html"), capturedCmd);
+        Assert.DoesNotContain("--quit", capturedCmd); // Godot 4 skulle avsluta fore exporten
+    }
+
+    [Fact]
+    public async Task BuildWeb_NoGodot_ReportsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gbweb_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "config_version=5\n");
+
+        var result = await new GameBuilder().BuildWebAsync(
+            root, (c, d, ct) => Task.FromResult((0, "")), CancellationToken.None, godotFinder: () => null);
+
+        Assert.False(result.Success);
+        Assert.Contains("inte installerat", result.Output);
+    }
 }

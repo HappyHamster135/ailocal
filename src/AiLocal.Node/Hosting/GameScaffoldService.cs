@@ -1117,7 +1117,40 @@ MonoBehaviour:
         "application/product_name=\"Pixel Rush\"\n" +
         "application/file_description=\"\"\n" +
         "application/copyright=\"\"\n" +
-        "application/trademarks=\"\"\n";
+        "application/trademarks=\"\"\n" +
+        // Web-preset (HTML5/WASM): sa `godot --export-release "Web"` ger ett
+        // webbspelbart bygge nar web-exportmallen finns provisionerad.
+        "\n[preset.1]\n" +
+        "name=\"Web\"\n" +
+        "platform=\"Web\"\n" +
+        "runnable=true\n" +
+        "advanced_options=false\n" +
+        "dedicated_server=false\n" +
+        "custom_features=\"\"\n" +
+        "export_filter=\"all_resources\"\n" +
+        "include_filter=\"\"\n" +
+        "exclude_filter=\"\"\n" +
+        "export_path=\"build/web/index.html\"\n" +
+        "patches=\"\"\n" +
+        "encryption_include_filters=\"\"\n" +
+        "encryption_exclude_filters=\"\"\n" +
+        "seed=0\n" +
+        "encrypt_pck=false\n" +
+        "encrypt_directory=false\n" +
+        "\n[preset.1.options]\n" +
+        "custom_template/debug=\"\"\n" +
+        "custom_template/release=\"\"\n" +
+        "variant/extensions_support=false\n" +
+        "variant/thread_support=true\n" +
+        "vram_texture_compression/for_desktop=true\n" +
+        "vram_texture_compression/for_mobile=false\n" +
+        "html/export_icon=true\n" +
+        "html/custom_html_shell=\"\"\n" +
+        "html/head_include=\"\"\n" +
+        "html/canvas_resize_policy=2\n" +
+        "html/focus_canvas_on_start=true\n" +
+        "html/experimental_virtual_keyboard=false\n" +
+        "progressive_web_app/enabled=false\n";
 
     static string GodotGame() =>
 @"using Godot;

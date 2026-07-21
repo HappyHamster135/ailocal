@@ -97,6 +97,32 @@ public sealed class GameBuilder
         return (true, $"Byggde {outExe} ({new FileInfo(outExe).Length} bytes).", outExe);
     }
 
+    /// <summary>Web (HTML5/WASM) export of a Godot project - the "spela i webblasaren
+    /// / dela en lank"-vagen bredvid Windows-exen. Uses the kit's "Web" preset and
+    /// outputs build/web/index.html. Needs the web export template provisioned
+    /// (same godot-templates .tpz som desktop) - annars rapporteras det arligt.</summary>
+    public async Task<(bool Success, string Output, string? WebPath)> BuildWebAsync(
+        string root,
+        Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
+        CancellationToken ct, Func<string?>? godotFinder = null)
+    {
+        var godot = (godotFinder ?? FindGodot)();
+        if (godot is null)
+            return (false, "Godot ar inte installerat pa denna maskin - webbexport kraver Godot 4.3.", null);
+        if (!File.Exists(Path.Combine(root, "project.godot")))
+            return (false, "Ingen Godot-projektfil (project.godot) - webbexport galler bara Godot-spel.", null);
+
+        var outHtml = Path.Combine(root, "build", "web", "index.html");
+        Directory.CreateDirectory(Path.GetDirectoryName(outHtml)!);
+        var cmd = MakeGodotCommand(godot, "Web", outHtml);
+        var (exit, output) = await runCommand(cmd, root, ct);
+        if (exit != 0)
+            return (false, $"godot webbexport misslyckades (exit {exit}) - saknas web-exportmallen (provisionera godot-templates)?\n{output}", null);
+        if (!File.Exists(outHtml))
+            return (false, $"godot avslutade utan fel men index.html saknas: {outHtml}\n{output}", null);
+        return (true, $"Webbexport klar: {outHtml} - oppna i en webblasare eller hosta build/web/.", outHtml);
+    }
+
     internal static string MakeGodotCommand(string godotPath, string preset, string outExe)
         => $"\"{godotPath}\" --headless --export-release \"{preset}\" \"{outExe}\"";
 

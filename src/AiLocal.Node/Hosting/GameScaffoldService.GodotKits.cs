@@ -40,7 +40,8 @@ public partial class GameScaffoldService
             "Komplett spelbar managementgrund: budget, trupp (8 medlemmar), marknad,\n" +
             "simulerade omgangar mot en liga pa 6 lag, tre svarighetsgrader och\n" +
             "spara/ladda. Oppna i Godot 4 och tryck Play, eller exportera:\n" +
-            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
             "Allt UI byggs i kod i Main.gd - byt TEMA (lag/studio/butik) genom att\n" +
             "andra texter, namnlistor och siffror dar.\n");
         files.Add("README.md");
@@ -86,7 +87,8 @@ public partial class GameScaffoldService
             "Komplett spelbar top-down-grund: 8-vagars rorelse, jagande fiender,\n" +
             "mynt, 5 vagor, HP, tre svarighetsgrader, paus och highscore.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
-            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
             "Sprites genereras i kod (inga externa bilder) - byt tema via\n" +
             "farger/former i Main.gd.\n");
         files.Add("README.md");
@@ -121,7 +123,8 @@ public partial class GameScaffoldService
             "Komplett spelbar varvracer: bilfysik (gas/broms/styr), oval bana med\n" +
             "gras som bromsar, checkpoints i ordning, 3 varv, varvtimer och basta tid.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
-            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
             "Banan och bilen ritas i kod (_draw) - byt tema via farger/former i Main.gd.\n");
         files.Add("README.md");
         return [.. files];
@@ -357,7 +360,8 @@ func _save_best(v: float) -> void:
             "Komplett spelbart slajd-pussel (2048): slajda med piltangenterna, sla\n" +
             "ihop lika brickor, na 2048. Poang, basta resultat, vinst/forlust.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
-            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
             "Rutnatet ritas i kod (_draw) - byt tema via farger i _tile_color och mal i TARGET.\n");
         files.Add("README.md");
         return [.. files];
