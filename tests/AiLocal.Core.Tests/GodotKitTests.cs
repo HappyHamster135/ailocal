@@ -119,6 +119,23 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void PusselIGodot_FarTvatusenKitet()
+    {
+        const string prompt = "bygg ett pusselspel i godot dar man slajdar ihop lika";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("puzzle", GameScaffoldService.DetectGenre(prompt));
+            Assert.Contains("Tvatusen", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("_slide", script);
+            Assert.Contains("TARGET", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public async Task GodotHeadless_ParsarBadaKiten_UtanSkriptfel()
     {
         // Miljöberoende men SKARPT där godot finns i verktygskatalogen (dev-

@@ -329,6 +329,273 @@ func _save_best(v: float) -> void:
         f.store_string(str(v))
 """;
 
+    /// <summary>Pussel: slajd-pussel (2048) - slajda med piltangenter, sla ihop
+    /// lika brickor, na malet. Fyller genreluckan dar pussel-prompts tidigare
+    /// fick plattformaren.</summary>
+    internal static string[] ScaffoldGodotPuzzle(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Tvatusen"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node2D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotPuzzleMain);
+        files.Add("Main.gd");
+        foreach (var (name, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "lose"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotPuzzleDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Tvatusen - Slajd-pussel (Godot 4, GDScript)\n\n" +
+            "Komplett spelbart slajd-pussel (2048): slajda med piltangenterna, sla\n" +
+            "ihop lika brickor, na 2048. Poang, basta resultat, vinst/forlust.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Rutnatet ritas i kod (_draw) - byt tema via farger i _tile_color och mal i TARGET.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotPuzzleDesignDoc(string prompt) =>
+        "# Slajd-pussel (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nSlajda rutnatet med piltangenterna. Nar tva lika brickor krockar slas de ihop\n" +
+        "till dubbla vardet. Na 2048 for att vinna; ta slut pa drag = forlust.\n\n" +
+        "## Mekaniker (klara)\n- 4x4 rutnat, slajda i fyra riktningar (compress + merge)\n" +
+        "- Ny bricka (2/4) spawnar efter varje drag\n- Poang, basta resultat sparas (user://)\n" +
+        "- Vinst vid 2048, forlust nar inga drag finns kvar, titel/overlay, ljud\n\n" +
+        "## Bygg vidare\n- Storre rutnat/andra mal, undo, animation pa forflyttning, dagliga utmaningar\n";
+
+    const string GodotPuzzleMain = """
+extends Node2D
+# Tvatusen - slajd-pussel (2048): slajda med piltangenter, sla ihop lika brickor,
+# na 2048. Rutnat + UI ritas i kod. BYT TEMA: farger i _tile_color, mal i TARGET.
+
+const N := 4
+const SAVE_PATH := "user://tvatusen_best.txt"
+const TARGET := 2048
+
+var grid: Array[int] = []
+var state := "title"
+var score := 0
+var best := 0
+var snd := {}
+var ui: CanvasLayer
+
+func _ready() -> void:
+    randomize()
+    _setup_audio()
+    best = _load_best()
+    ui = CanvasLayer.new()
+    add_child(ui)
+    _show_title()
+
+func _setup_audio() -> void:
+    for key in ["click", "coin", "hurt", "win"]:
+        var p := AudioStreamPlayer.new()
+        var s = load("res://%s.wav" % key)
+        if s:
+            p.stream = s
+        add_child(p)
+        snd[key] = p
+
+func _play(key: String) -> void:
+    if snd.has(key) and snd[key].stream:
+        snd[key].play()
+
+func _clear_ui() -> void:
+    for c in ui.get_children():
+        c.queue_free()
+
+func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(300, 46)
+    b.position = Vector2(426, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+
+func _show_title() -> void:
+    state = "title"
+    _clear_ui()
+    _label("TVATUSEN", 90, 70, Color(0.95, 0.8, 0.3))
+    _label("Slajda med piltangenterna. Sla ihop lika brickor och na %d." % TARGET, 200, 22)
+    _label("Basta: %d" % best, 240, 22, Color(0.7, 0.9, 1))
+    _button("Spela", 310, func(): _start())
+    queue_redraw()
+
+func _start() -> void:
+    _play("click")
+    score = 0
+    grid = []
+    for i in range(N * N):
+        grid.append(0)
+    _spawn()
+    _spawn()
+    _clear_ui()
+    var hud := _label("Poang: 0", 20, 26)
+    hud.name = "Hud"
+    state = "playing"
+    queue_redraw()
+
+func _spawn() -> void:
+    var empty: Array[int] = []
+    for i in range(N * N):
+        if grid[i] == 0:
+            empty.append(i)
+    if empty.is_empty():
+        return
+    grid[empty[randi() % empty.size()]] = 2 if randf() < 0.9 else 4
+
+func _input(event: InputEvent) -> void:
+    if state != "playing":
+        return
+    var dir := -1
+    if event.is_action_pressed("ui_left"):
+        dir = 0
+    elif event.is_action_pressed("ui_right"):
+        dir = 1
+    elif event.is_action_pressed("ui_up"):
+        dir = 2
+    elif event.is_action_pressed("ui_down"):
+        dir = 3
+    if dir < 0:
+        return
+    if _move(dir):
+        _play("click")
+        _spawn()
+        var hud := ui.get_node_or_null("Hud")
+        if hud:
+            hud.text = "Poang: %d" % score
+        queue_redraw()
+        _check_end()
+
+func _slide(line: Array[int]) -> Array[int]:
+    var vals: Array[int] = []
+    for v in line:
+        if v != 0:
+            vals.append(v)
+    var out: Array[int] = []
+    var i := 0
+    while i < vals.size():
+        if i + 1 < vals.size() and vals[i] == vals[i + 1]:
+            var m := vals[i] * 2
+            out.append(m)
+            score += m
+            i += 2
+        else:
+            out.append(vals[i])
+            i += 1
+    while out.size() < N:
+        out.append(0)
+    return out
+
+func _idx(dir: int, k: int, j: int) -> int:
+    match dir:
+        0: return k * N + j
+        1: return k * N + (N - 1 - j)
+        2: return j * N + k
+        3: return (N - 1 - j) * N + k
+    return 0
+
+func _move(dir: int) -> bool:
+    var moved := false
+    for k in range(N):
+        var line: Array[int] = []
+        for j in range(N):
+            line.append(grid[_idx(dir, k, j)])
+        var slid := _slide(line)
+        for j in range(N):
+            var at := _idx(dir, k, j)
+            if grid[at] != slid[j]:
+                moved = true
+            grid[at] = slid[j]
+    return moved
+
+func _check_end() -> void:
+    for v in grid:
+        if v >= TARGET:
+            _finish(true)
+            return
+    for i in range(N * N):
+        if grid[i] == 0:
+            return
+    for r in range(N):
+        for c in range(N):
+            var v := grid[r * N + c]
+            if c + 1 < N and grid[r * N + c + 1] == v:
+                return
+            if r + 1 < N and grid[(r + 1) * N + c] == v:
+                return
+    _finish(false)
+
+func _finish(won: bool) -> void:
+    state = "over"
+    _play("win" if won else "hurt")
+    if score > best:
+        best = score
+        _save_best(score)
+    _clear_ui()
+    _label("DU VANN!" if won else "SLUT - inga drag kvar", 200, 54, Color(0.95, 0.85, 0.3))
+    _label("Poang: %d   Basta: %d" % [score, best], 280, 26)
+    _button("Spela igen", 340, func(): _show_title())
+
+func _draw() -> void:
+    draw_rect(Rect2(0, 0, 1152, 648), Color(0.16, 0.15, 0.13))
+    if state == "title":
+        return
+    var sz := 118.0
+    var gap := 12.0
+    var total := N * sz + (N - 1) * gap
+    var ox := 576.0 - total * 0.5
+    var oy := 340.0 - total * 0.5
+    var font := ThemeDB.fallback_font
+    for r in range(N):
+        for c in range(N):
+            var v := grid[r * N + c]
+            var x := ox + c * (sz + gap)
+            var y := oy + r * (sz + gap)
+            draw_rect(Rect2(x, y, sz, sz), _tile_color(v))
+            if v > 0:
+                var fs := 46 if v < 1000 else 34
+                var tc := Color(0.15, 0.12, 0.1) if v <= 4 else Color.WHITE
+                draw_string(font, Vector2(x, y + sz * 0.5 + fs * 0.35), str(v), HORIZONTAL_ALIGNMENT_CENTER, sz, fs, tc)
+
+func _tile_color(v: int) -> Color:
+    if v == 0:
+        return Color(0.26, 0.24, 0.21)
+    var t := clampf(log(float(v)) / log(2048.0), 0.0, 1.0)
+    return Color(0.95, 0.78 - t * 0.5, 0.32 - t * 0.28)
+
+func _load_best() -> int:
+    if not FileAccess.file_exists(SAVE_PATH):
+        return 0
+    var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    return int(f.get_as_text()) if f else 0
+
+func _save_best(v: int) -> void:
+    var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if f:
+        f.store_string(str(v))
+""";
+
     static string GodotKitProject(string name) =>
         "[application]\n" +
         $"config/name=\"{name}\"\n" +
