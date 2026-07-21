@@ -477,13 +477,48 @@ public static class WorkerRole
             // upp exakt samma stegvisning igen (se AssignmentLog).
             var logEntry = assignmentLog.Begin(req.Assignment, settings.NodeName);
             var logCompleted = false;
+            // Ett skrivlås serialiserar ALLA skrivningar till svaret - steg,
+            // keepalive-pingar och final-framen får aldrig flätas ihop.
+            var writeLock = new SemaphoreSlim(1, 1);
+            var lastWriteUtc = DateTime.UtcNow;
+            async Task WriteFrameAsync(string payload, CancellationToken wct)
+            {
+                await writeLock.WaitAsync(wct);
+                try
+                {
+                    await ctx.Response.WriteAsync(payload, wct);
+                    await ctx.Response.Body.FlushAsync(wct);
+                    lastWriteUtc = DateTime.UtcNow;
+                }
+                finally { writeLock.Release(); }
+            }
             Func<AgentStep, Task> emitAgentStep = async step =>
             {
                 assignmentLog.AddStep(logEntry, step.Kind, step.Detail);
-                await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
-                await ctx.Response.Body.FlushAsync(ct);
+                await WriteFrameAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
             };
             Task EmitStep(string kind, string detail) => emitAgentStep(new AgentStep(kind, detail));
+
+            // SSE-keepalive: långa tysta faser (kövantan, godot-import på
+            // 10+ minuter, kvalitetsgrind) fick mellanliggande proxies och
+            // webbläsaren att stänga strömmen - "network error" i vyn trots
+            // att bygget körde vidare. En kommentarsrad var 15:e sekund
+            // håller hela kedjan nod -> Host -> dashboard vid liv; SSE-
+            // parsers ignorerar rader utan "data:".
+            using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var pingTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!pingCts.Token.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(15), pingCts.Token);
+                        if (DateTime.UtcNow - lastWriteUtc < TimeSpan.FromSeconds(12)) continue;
+                        await WriteFrameAsync(": ping\n\n", pingCts.Token);
+                    }
+                }
+                catch { /* strömmen stängd/avbruten - pingen är bara smörjmedel */ }
+            });
             try
             {
 
@@ -914,13 +949,15 @@ public static class WorkerRole
             assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath);
             logCompleted = true;
 
-            await ctx.Response.WriteAsync(
+            await WriteFrameAsync(
                 $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath })}\n\n", ct);
-            await ctx.Response.Body.FlushAsync(ct);
             return Results.Empty;
             }
             finally
             {
+                // Stäng keepalive-pingen innan svaret avslutas.
+                pingCts.Cancel();
+                try { await pingTask; } catch { /* redan avslutad */ }
                 // Avbrott/undantag mitt i körningen får aldrig lämna ett evigt
                 // "Running"-inlägg som dashboarden pollar på i all oändlighet.
                 if (!logCompleted)

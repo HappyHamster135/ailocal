@@ -1447,6 +1447,19 @@ internal static class Dashboard
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
         .token-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+        /* Mellanläget: ett halvt skärmfönster (981-1280px) är desktop-grid
+           men trångt - smalare sidkolumner och tätare luft i stället för att
+           innehållskolumnen kläms ihop. Fullscreen ska aldrig vara ett krav. */
+        @media (min-width: 981px) and (max-width: 1280px) {
+          .shell { grid-template-columns: 210px 1fr; }
+          .workspace { grid-template-columns: 250px 1fr; gap: 10px; padding: 10px; }
+          .topology-workspace, .schedules-workspace { gap: 10px; padding: 10px; }
+          .messages { padding: 10px 12px 6px; }
+          .composer { padding: 10px 10px 8px; }
+          .composer-tools select { max-width: 190px; }
+          .composer-hint { display: none; }
+          .topbar { gap: 10px; }
+        }
         @media (max-width: 980px) {
           .topbar { height: auto; padding: 10px; align-items: stretch; flex-wrap: wrap; }
           .brand { width: auto; }
@@ -3173,7 +3186,15 @@ internal static class Dashboard
         function wireMessageActions(containerId) {
           $(containerId)?.querySelectorAll('.msg-action[data-copy]').forEach(btn => {
             btn.onclick = async () => {
-              const text = btn.closest('.message')?.querySelector('.msg-text')?.textContent ?? '';
+              // Hela transkriptet, inte bara slutraden: ett uppdrag bär sitt
+              // verkliga innehåll i stegvisningen (rapport: kopiera gav bara
+              // "✗ network error" när slutsvaret var kort/fel).
+              const article = btn.closest('.message');
+              const stepLines = [...(article?.querySelectorAll('.step-flow > *, .contract-card') ?? [])]
+                .map(el => el.textContent.replace(/\s+/g, ' ').trim())
+                .filter(Boolean);
+              const finalText = article?.querySelector('.msg-text')?.textContent ?? '';
+              const text = [...stepLines, finalText].filter(Boolean).join('\n');
               try {
                 await navigator.clipboard.writeText(text);
                 btn.classList.add('copied');
@@ -3505,8 +3526,11 @@ internal static class Dashboard
                 const frame = buffer.slice(0, sepIndex);
                 buffer = buffer.slice(sepIndex + 2);
                 const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
-                if (!dataLine) continue;
-                const payload = JSON.parse(dataLine.slice(5).trim());
+                if (!dataLine) continue; // keepalive-pingar (": ping") saknar data-rad
+                let payload;
+                try { payload = JSON.parse(dataLine.slice(5).trim()); }
+                catch { continue; } // trasig frame får inte fälla hela strömmen
+                if (!payload) continue;
                 if (payload.step) {
                   if (payload.step.Kind === 'awaiting_approval') handleApprovalStep(payload.step.Detail);
                   if (payload.step.Kind === 'awaiting_info') await handleInfoStep(payload.step.Detail, id);
@@ -4371,6 +4395,7 @@ internal static class Dashboard
           const allMessages = [...state.messages, ...state.assignmentMessages];
           syncComposerLock();
           if (!allMessages.length) {
+            box._html = null; // hero-läget får aldrig fastna bakom diff-guarden
             box.innerHTML = `<div class="empty empty-hero">
               <div class="hero-mark">AI</div>
               <div class="hero-title">Vad vill du få gjort?</div>
@@ -4391,7 +4416,7 @@ internal static class Dashboard
           // scroll position instead of an expanded <details>' open attribute).
           const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
           const previousScrollTop = box.scrollTop;
-          box.innerHTML = allMessages.map(m => {
+          const messagesHtml = allMessages.map(m => {
             if (m.isPlan) return renderPlanBubble(m);
             if (m.isAssignment) return assignmentBubbleHtml(m);
             const inFlight = m.role === 'assistant' && m.taskId && cancellableStates.includes(m.state);
@@ -4418,6 +4443,12 @@ internal static class Dashboard
               ${m.role !== 'user' && !inFlight && content ? msgActionsHtml : ''}
             </article>`;
           }).join('');
+          // Diff-guard: 3s-pollen renderade om identiskt innehåll och rörde
+          // då scrollpositionen ("vyn hoppar högst upp hela tiden") - vid
+          // oförändrad HTML lämnas DOM och scroll helt orörda.
+          if (box._html === messagesHtml) return;
+          box._html = messagesHtml;
+          box.innerHTML = messagesHtml;
           box.scrollTop = wasNearBottom ? box.scrollHeight : previousScrollTop;
 
           document.querySelectorAll('#messages [data-cancel-task]').forEach(button => {
@@ -5432,8 +5463,11 @@ internal static class Dashboard
         // lokalt skapade bubblor (planer, nyss körda uppdrag) - loggen får
         // aldrig skriva över dem; den tar bara över i en "tom" flik.
         function assignmentViewOwnedLocally() {
+          // adoptFromLog = strömmen tappades men körningen lever på noden;
+          // en sådan bubbla ÄGER inte vyn - loggen får ta över och visa
+          // sanningen (inklusive slutresultatet).
           return state.assignmentStreamLive
-            || state.assignmentMessages.some(m => m.role !== 'user' && !m.fromLog);
+            || state.assignmentMessages.some(m => m.role !== 'user' && !m.fromLog && !m.adoptFromLog);
         }
 
         // ---- Projekt-vyn: portfölj + rollback ----
@@ -5982,8 +6016,11 @@ internal static class Dashboard
                 const frame = buffer.slice(0, sepIndex);
                 buffer = buffer.slice(sepIndex + 2);
                 const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
-                if (!dataLine) continue;
-                const payload = JSON.parse(dataLine.slice(5).trim());
+                if (!dataLine) continue; // keepalive-pingar (": ping") saknar data-rad
+                let payload;
+                try { payload = JSON.parse(dataLine.slice(5).trim()); }
+                catch { continue; } // trasig frame får inte fälla hela strömmen
+                if (!payload) continue;
                 if (payload.worker) {
                   workerIdUsed = payload.worker.id;
                   stepMsg.workerName = payload.worker.name;
@@ -6016,12 +6053,23 @@ internal static class Dashboard
               }
             }
           } catch (error) {
-            stepMsg.state = 'Failed';
-            stepMsg.content = `✗ ${error.message}`;
-            summary = error.message;
+            if (error?.name === 'AbortError') {
+              stepMsg.state = 'Failed';
+              stepMsg.content = `✗ ${error.message}`;
+              summary = error.message;
+            } else {
+              // Ett nätverksglapp dödar bara STRÖMMEN - bygget kör vidare på
+              // noden (rapport: "network error" trots att uppdraget levde).
+              // Släpp ägarskapet till uppdragsloggen: pollen tar över vyn och
+              // slutresultatet kommer därifrån i stället för ett falskt fel.
+              stepMsg.adoptFromLog = true;
+              stepMsg.steps.push({ Kind: 'thinking', Detail: 'Anslutningen tappades - körningen fortsätter på noden och följs via uppdragsloggen i stället.' });
+              summary = 'anslutningen tappades - körningen följs via uppdragsloggen';
+            }
             renderMessages();
           } finally {
             state.assignmentStreamLive = false;
+            if (stepMsg.adoptFromLog) loadAssignmentLog();
           }
 
           return { success, summary, workerId: workerIdUsed };
