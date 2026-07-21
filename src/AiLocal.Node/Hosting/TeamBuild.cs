@@ -42,7 +42,8 @@ public static class TeamBuild
         Func<AgentStep, Task> emit,
         GitService git,
         GitIsolationService isolation,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? architectHint = null)
     {
         teamSize = Math.Clamp(teamSize, 2, MaxTeamSize);
 
@@ -58,7 +59,10 @@ public static class TeamBuild
 
         // ---- 2. Arkitekten ----------------------------------------------
         await emit(new AgentStep("tool_call", "teamarkitekt (delar upp arbetet i oberoende spår)"));
-        var tracks = await PlanTracksAsync(assignment, workspaceRoot, teamSize, modelHint, complete, ct)
+        // Arkitekten är ETT anrop som styr hela teamets riktning - den körs
+        // på den starka tiern (architectHint) även när utvecklarna kör
+        // billigare modeller.
+        var tracks = await PlanTracksAsync(assignment, workspaceRoot, teamSize, architectHint ?? modelHint, complete, ct)
             ?? FallbackTracks(assignment, workspaceRoot);
         tracks = tracks.Take(teamSize).ToList();
         if (tracks.Count < 2)
@@ -97,6 +101,21 @@ public static class TeamBuild
                 TrackPrompt(assignment, run.Track, tracks.Count), accessLevel, modelHint,
                 onStep: trackEmit, ct, system: system);
             AddUsage(result);
+
+            // Plan-i-stället-för-utförande per spår (samma vakt som huvud-
+            // flödets, v1.39.0): "Here is my plan... Let me know" räknas
+            // aldrig som genomfört spår - noden svarar åt teamledaren: utför.
+            if (result.Success && PlanOnlyDetector.LooksUnexecuted(result.FinalAnswer))
+            {
+                await trackEmit(new AgentStep("tool_error",
+                    "spåret avslutade med en plan/fråga i stället för att utföra - noden svarar automatiskt: utför planen."));
+                result = await loop.RunAsync(
+                    "Planen är godkänd. UTFÖR den nu i sin helhet - fråga aldrig om lov; ingen människa läser " +
+                    "under bygget. Skapa/ändra filerna med write_file/edit_file, kör verify, och avsluta först " +
+                    "när ändringarna ligger på disk.",
+                    accessLevel, modelHint, onStep: trackEmit, ct, history: result.Messages, system: system);
+                AddUsage(result);
+            }
 
             // Svaga modeller "svarar" gärna med prosa och noll verktygsanrop
             // (observerat live: båda spåren skrev ingenting). Samma filosofi
@@ -175,6 +194,18 @@ public static class TeamBuild
                 onStep: step => emit(new AgentStep(step.Kind, $"[{track.Title}] {step.Detail}")),
                 ct, system: system);
             AddUsage(result);
+            // Samma plan-vakt som i worktree-spåren - omtag som slutar i en
+            // plan konvergerar aldrig.
+            if (result.Success && PlanOnlyDetector.LooksUnexecuted(result.FinalAnswer))
+            {
+                result = await loop.RunAsync(
+                    "Planen är godkänd. UTFÖR den nu i sin helhet - skapa/ändra filerna, kör verify, " +
+                    "och avsluta först när ändringarna ligger på disk.",
+                    accessLevel, modelHint,
+                    onStep: step => emit(new AgentStep(step.Kind, $"[{track.Title}] {step.Detail}")),
+                    ct, history: result.Messages, system: system);
+                AddUsage(result);
+            }
             // Samma ärlighetsregel som för worktree-spåren: bara ett omtag som
             // faktiskt committade ändringar får kallas klart.
             var redoCommit = result.Success
@@ -225,6 +256,13 @@ public static class TeamBuild
           different files). Never give two tracks the same responsibility.
         - Each description tells ONE developer concretely what to build, in
           the same language the user wrote in.
+        - CONCRETE FILES: every description must NAME the 2-5 files the
+          developer creates or edits (e.g. "skapa enemies.gd + koppla in i
+          Game.tscn") - a developer given vague scope writes prose instead
+          of code. Small scope beats grand scope: each track must be
+          finishable by one developer in one sitting.
+        - NEVER create a planning/design/documentation-only track. Every
+          track produces working code on disk.
         - Respond with ONLY this JSON, nothing else:
           {"tracks":[{"title":"...","description":"..."}]}
         """;

@@ -770,7 +770,7 @@ public sealed class AssetGenerator
     /// Encodes raw RGBA pixel data into a valid PNG file using the minimal
     /// required chunks (IHDR, IDAT, IEND) with Deflate compression.
     /// </summary>
-    private static byte[] EncodePng(int width, int height, byte[] rawRgba)
+    internal static byte[] EncodePng(int width, int height, byte[] rawRgba)
     {
         using var ms = new MemoryStream();
 

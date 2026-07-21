@@ -106,9 +106,14 @@ public sealed class GamePlaytester
     }
 
     /// <summary>
-    /// Testar ett .exe-spel: startar processen, övervakar prestanda, tar screenshot.
+    /// Testar ett .exe-spel: startar processen, övervakar prestanda och tar
+    /// en fönsterdump (screenshotDir) som vision-granskningen kan bedöma -
+    /// motorspel får därmed samma visuella kvalitetsöga som HTML5-spelen.
+    /// arguments låter godot-binären köra ett projekt direkt (--path ...).
     /// </summary>
-    public async Task<PlaytestResult> TestExeAsync(string exePath, TimeSpan duration, CancellationToken ct)
+    public async Task<PlaytestResult> TestExeAsync(
+        string exePath, TimeSpan duration, CancellationToken ct,
+        string? arguments = null, string? screenshotDir = null)
     {
         if (!File.Exists(exePath))
             return new PlaytestResult(false, $".exe hittades inte: {exePath}",
@@ -122,6 +127,7 @@ public sealed class GamePlaytester
         {
             var psi = new ProcessStartInfo(exePath)
             {
+                Arguments = arguments ?? "",
                 WorkingDirectory = dir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -145,6 +151,14 @@ public sealed class GamePlaytester
             using var timeoutCts = new CancellationTokenSource(duration);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
+            // Fönsterdumpen tas parallellt med övervakningen, medan spelet
+            // lever: vänta in fönstret, låt titelskärmen ritas, fånga.
+            var captureTask = screenshotDir is null
+                ? null
+                : WindowCapturer.CaptureProcessWindowAsync(
+                    proc, Path.Combine(screenshotDir, "playtest-window.png"),
+                    TimeSpan.FromSeconds(3), linked.Token);
+
             try
             {
                 while (!linked.Token.IsCancellationRequested && !proc.HasExited)
@@ -163,9 +177,23 @@ public sealed class GamePlaytester
 
             var elapsed = DateTimeOffset.UtcNow - startTime;
 
+            string? screenshotPath = null;
+            string? captureNote = null;
+            if (captureTask is not null)
+            {
+                var capture = await captureTask;
+                captureNote = capture.Output;
+                if (capture.Success) screenshotPath = capture.ImagePath;
+            }
+
+            // Läses FÖRE Kill: efter Kill är ExitCode alltid -1, vilket gav
+            // ett falskt "avslutade med felkod"-issue för varje spel som
+            // överlevde hela testet (dvs. de som fungerar).
+            var exitedOnItsOwn = proc.HasExited;
+
             // Samla eventuell stdout/stderr
-            var stdout = proc.HasExited ? await proc.StandardOutput.ReadToEndAsync() : "";
-            var stderr = proc.HasExited ? await proc.StandardError.ReadToEndAsync() : "";
+            var stdout = exitedOnItsOwn ? await proc.StandardOutput.ReadToEndAsync() : "";
+            var stderr = exitedOnItsOwn ? await proc.StandardError.ReadToEndAsync() : "";
 
             if (!proc.HasExited)
             {
@@ -179,13 +207,15 @@ public sealed class GamePlaytester
             summary.AppendLine($"## Speltest: {Path.GetFileName(exePath)}");
             summary.AppendLine();
             summary.AppendLine($"- **Körtid:** {elapsed.TotalSeconds:F1}s");
-            summary.AppendLine($"- **Exit code:** {proc.ExitCode}");
+            summary.AppendLine($"- **Exit:** {(exitedOnItsOwn ? $"felkod {proc.ExitCode}" : "körde hela testet (avslutades av testet)")}");
             summary.AppendLine($"- **Genomsnittlig FPS:** {avgFps:F0}");
             summary.AppendLine($"- **Genomsnittligt minne:** {avgMem:F1} MB");
             summary.AppendLine($"- **Högsta minne:** {peakMem:F1} MB");
+            if (captureNote is not null)
+                summary.AppendLine($"- **Fönsterdump:** {captureNote}");
             summary.AppendLine();
 
-            if (proc.ExitCode != 0)
+            if (exitedOnItsOwn && proc.ExitCode != 0)
                 issues.Add($"Spelet avslutade med felkod {proc.ExitCode}");
 
             if (!string.IsNullOrWhiteSpace(stderr))
@@ -209,7 +239,7 @@ public sealed class GamePlaytester
             if (elapsed.TotalSeconds < 2)
                 issues.Add("Spelet avslutades mycket snabbt — kan vara en krasch direkt vid start");
 
-            return new PlaytestResult(true, summary.ToString(), issues, avgFps, peakMem, elapsed, null);
+            return new PlaytestResult(true, summary.ToString(), issues, avgFps, peakMem, elapsed, screenshotPath);
         }
         catch (Exception ex)
         {
@@ -236,23 +266,41 @@ public sealed class GamePlaytester
             _ => null
         };
 
+        string? exeArguments = null;
         if (gamePath is null || !File.Exists(gamePath))
         {
-            // Försök hitta spelet rekursivt
-            var candidates = Directory.GetFiles(projectRoot, "*.*", SearchOption.AllDirectories)
-                .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".html" or ".exe")
-                .Take(5)
-                .ToList();
-            if (candidates.Count > 0)
-                gamePath = candidates[0];
+            // Godot utan exporterad exe: kvalitetsgrinden kör FÖRE auto-
+            // exporten, så första bygget saknar build/. Kör projektet direkt
+            // via `godot --path` i stället - då får även förstagångsbyggen
+            // fönsterdump + vision, och grindens fixrundor kan reagera på
+            // det visuella precis som för HTML5-spel.
+            if (engine.Equals("godot", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(Path.Combine(projectRoot, "project.godot"))
+                && AiLocal.Core.Agent.ToolLocator.Find("godot") is { } godotExe
+                && File.Exists(godotExe))
+            {
+                gamePath = godotExe;
+                exeArguments = $"--path \"{projectRoot}\"";
+            }
             else
-                return new PlaytestResult(false, "Hittade inget spelbart i projektet",
-                    ["Ingen .html eller .exe hittades."], 0, 0, TimeSpan.Zero, null);
+            {
+                // Försök hitta spelet rekursivt
+                var candidates = Directory.GetFiles(projectRoot, "*.*", SearchOption.AllDirectories)
+                    .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".html" or ".exe")
+                    .Take(5)
+                    .ToList();
+                if (candidates.Count > 0)
+                    gamePath = candidates[0];
+                else
+                    return new PlaytestResult(false, "Hittade inget spelbart i projektet",
+                        ["Ingen .html eller .exe hittades."], 0, 0, TimeSpan.Zero, null);
+            }
         }
 
         var result = gamePath.EndsWith(".html")
             ? await TestHtml5Async(gamePath, duration, ct)
-            : await TestExeAsync(gamePath, duration, ct);
+            : await TestExeAsync(gamePath, duration, ct, exeArguments,
+                screenshotDir: Path.Combine(projectRoot, "screenshots"));
 
         // ---- Visuell nivå: riktig Chromium-rendering + AI-ögon ----------
         // Jint-smoken bevisar att koden KÖR; skärmdumpen bevisar att spelet

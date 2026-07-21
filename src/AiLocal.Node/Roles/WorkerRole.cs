@@ -707,10 +707,25 @@ public static class WorkerRole
                 await teamEmit(new AgentStep("thinking",
                     $"Team-läge: upp till {Math.Clamp(req.TeamSize.Value, 2, 4)} parallella utvecklare i varsin git-worktree."));
                 var gitService = new GitService();
+                // Modelltier-golv för team: fyra parallella utvecklare på den
+                // billigaste tiern producerar prosa i fyra worktrees
+                // (observerat live) - utan uttrycklig hint från anroparen kör
+                // teamets utvecklare aldrig under Medium-tiern, och arkitekten
+                // (ETT anrop som styr allt) kör alltid på den starka tiern.
+                var teamHint = modelHint;
+                if (string.IsNullOrWhiteSpace(req.ModelHint)
+                    && string.Equals(modelHint, settings.Worker.ModelTiers.Simple, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(settings.Worker.ModelTiers.Medium))
+                {
+                    teamHint = settings.Worker.ModelTiers.Medium;
+                    await teamEmit(new AgentStep("thinking",
+                        $"Team-läge kräver mer modellmuskler - utvecklarna lyfts till {teamHint} (Medium-tiern)."));
+                }
                 var teamResult = await TeamBuild.RunAsync(
-                    assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, modelHint,
+                    assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, teamHint,
                     system, provider.CompleteAsync, BuildExecutor, teamEmit,
-                    gitService, new GitIsolationService(gitService), ct);
+                    gitService, new GitIsolationService(gitService), ct,
+                    architectHint: settings.Worker.ModelTiers.Complex);
                 // null = git saknas/repo gick inte att skapa ELLER inget spår
                 // producerade ändringar (TeamBuild har redan förklarat vilket
                 // i strömmen) - den ensamma agenten med kvalitetsgrindens
