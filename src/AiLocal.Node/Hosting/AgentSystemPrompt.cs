@@ -54,6 +54,7 @@ public static class AgentSystemPrompt
         - Accessibility: a readable, colorblind-safe palette (never signal something by red-vs-green alone - add shape/text/brightness cues), controls shown clearly, and common alternates supported (WASD AND arrow keys).
         - Performance: 60 FPS target - create nodes/textures/resources up front, not every frame; the game must not stutter even with many objects on screen.
         - Robustness: handle falling off the map, 0 HP, and rapid key mashing without breaking; frame-rate-independent movement via delta time.
+        - Mobile: the DESKTOP experience is the baseline and must never be degraded. But when the user asks for mobile/Android OR the game may be exported there, add touch controls gated at runtime (Godot: TouchScreenButton + DisplayServer.is_touchscreen_available() so desktop stays untouched) and viewport stretch (canvas_items/keep) so the layout scales to any screen.
 
         PRODUCTION BAR - APPS:
         - Validate input and fail with helpful messages, never stack traces.

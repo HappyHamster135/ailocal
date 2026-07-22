@@ -230,7 +230,41 @@ func _ready() -> void:
     dot_tex = ImageTexture.create_from_image(img)
     ui = CanvasLayer.new()
     add_child(ui)
+    _setup_touch()
     _show_title()
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+    if not DisplayServer.is_touchscreen_available():
+        return
+    _touch_btn(Vector2(28, 536), "ui_left", "<")
+    _touch_btn(Vector2(132, 536), "ui_right", ">")
+    _touch_btn(Vector2(1036, 444), "ui_up", "GAS")
+    _touch_btn(Vector2(1036, 536), "ui_down", "BROMS")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+    var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+    img2.fill(Color(1, 1, 1, 0.20))
+    for x in range(88):
+        for y in range(88):
+            if x < 3 or y < 3 or x > 84 or y > 84:
+                img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+    var b := TouchScreenButton.new()
+    b.texture_normal = ImageTexture.create_from_image(img2)
+    b.position = pos
+    if action != "":
+        b.action = action
+    ui.add_child(b)
+    var t := Label.new()
+    t.text = text
+    t.add_theme_font_size_override("font_size", 24)
+    t.position = pos
+    t.size = Vector2(88, 88)
+    t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(t)
+    return b
 
 # C1 juice: en engangs-partikelskur. UI ligger pa CanvasLayer och paverkas inte
 # av att varldens Node2D (self) skakas.
@@ -495,7 +529,41 @@ func _ready() -> void:
     best = _load_best()
     ui = CanvasLayer.new()
     add_child(ui)
+    _setup_touch()
     _show_title()
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+    if not DisplayServer.is_touchscreen_available():
+        return
+    _touch_btn(Vector2(28, 536), "ui_left", "<")
+    _touch_btn(Vector2(132, 536), "ui_right", ">")
+    _touch_btn(Vector2(1036, 444), "ui_up", "^")
+    _touch_btn(Vector2(1036, 536), "ui_down", "v")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+    var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+    img2.fill(Color(1, 1, 1, 0.20))
+    for x in range(88):
+        for y in range(88):
+            if x < 3 or y < 3 or x > 84 or y > 84:
+                img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+    var b := TouchScreenButton.new()
+    b.texture_normal = ImageTexture.create_from_image(img2)
+    b.position = pos
+    if action != "":
+        b.action = action
+    ui.add_child(b)
+    var t := Label.new()
+    t.text = text
+    t.add_theme_font_size_override("font_size", 24)
+    t.position = pos
+    t.size = Vector2(88, 88)
+    t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(t)
+    return b
 
 func _setup_audio() -> void:
     for key in ["click", "coin", "hurt", "win"]:
@@ -769,7 +837,41 @@ func _ready() -> void:
     _build_world()
     ui = CanvasLayer.new()
     add_child(ui)
+    _setup_touch()
     _show_title()
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+    if not DisplayServer.is_touchscreen_available():
+        return
+    _touch_btn(Vector2(28, 536), "ui_left", "<")
+    _touch_btn(Vector2(132, 536), "ui_right", ">")
+    _touch_btn(Vector2(1036, 444), "ui_up", "^")
+    _touch_btn(Vector2(1036, 536), "ui_down", "v")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+    var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+    img2.fill(Color(1, 1, 1, 0.20))
+    for x in range(88):
+        for y in range(88):
+            if x < 3 or y < 3 or x > 84 or y > 84:
+                img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+    var b := TouchScreenButton.new()
+    b.texture_normal = ImageTexture.create_from_image(img2)
+    b.position = pos
+    if action != "":
+        b.action = action
+    ui.add_child(b)
+    var t := Label.new()
+    t.text = text
+    t.add_theme_font_size_override("font_size", 24)
+    t.position = pos
+    t.size = Vector2(88, 88)
+    t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(t)
+    return b
 
 # C1 juice: en engangs 3D-partikelskur vid myntplock. Meshens StandardMaterial3D
 # barr fargen. VIKTIGT: scale_amount ar en MULTIPLIER pa mesh-storleken (default
@@ -997,6 +1099,11 @@ func _save_best(v: int) -> void:
         "[display]\n" +
         "window/size/viewport_width=1152\n" +
         "window/size/viewport_height=648\n" +
+        // Stretch: 1:1 vid standardfonstret (datorspel EXAKT som forr - sond-
+        // erna bevisar det) men layouten skalar ratt pa telefon-/surfplatte-
+        // skarmar i stallet for att beskaras (v1.93, emulatorfyndet).
+        "window/stretch/mode=\"canvas_items\"\n" +
+        "window/stretch/aspect=\"keep\"\n" +
         // Android-export KRAVER etc2/astc-import - utan den faller Godots
         // projektvalidering med ett HELT TOMT felmeddelande (v1.90, verifierat
         // mot 4.3-kallkoden: should_import_etc2_astc -> valid=false utan text).
@@ -1358,7 +1465,41 @@ func _ready() -> void:
 	hud_label.position = Vector2(70, 20)
 	hud_label.add_theme_font_size_override("font_size", 18)
 	hud.add_child(hud_label)
+	_setup_touch()
 	show_title()
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+	if not DisplayServer.is_touchscreen_available():
+		return
+	_touch_btn(Vector2(28, 536), "ui_left", "<")
+	_touch_btn(Vector2(132, 536), "ui_right", ">")
+	_touch_btn(Vector2(1036, 444), "ui_up", "^")
+	_touch_btn(Vector2(1036, 536), "ui_down", "v")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+	var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+	img2.fill(Color(1, 1, 1, 0.20))
+	for x in range(88):
+		for y in range(88):
+			if x < 3 or y < 3 or x > 84 or y > 84:
+				img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+	var b := TouchScreenButton.new()
+	b.texture_normal = ImageTexture.create_from_image(img2)
+	b.position = pos
+	if action != "":
+		b.action = action
+	hud.add_child(b)
+	var t := Label.new()
+	t.text = text
+	t.add_theme_font_size_override("font_size", 24)
+	t.position = pos
+	t.size = Vector2(88, 88)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(t)
+	return b
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
@@ -1656,6 +1797,7 @@ var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
 var coyote := 0.0
 var jump_buffer := 0.0
 var jump_was_down := false
+var touch_jump := false   # HOPP-knappen pa touchskarmar (datorspel: alltid false)
 var was_on_floor := false
 var spawn_point := Vector2(60, 540)
 var sky := Color(0.35, 0.55, 0.85)
@@ -1680,7 +1822,42 @@ func _ready() -> void:
 	hud_label.position = Vector2(20, 14)
 	hud_label.add_theme_font_size_override("font_size", 18)
 	hud.add_child(hud_label)
+	_setup_touch()
 	show_title()
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+	if not DisplayServer.is_touchscreen_available():
+		return
+	_touch_btn(Vector2(28, 536), "ui_left", "<")
+	_touch_btn(Vector2(132, 536), "ui_right", ">")
+	var jump := _touch_btn(Vector2(1036, 536), "", "HOPP")
+	jump.pressed.connect(func(): touch_jump = true)
+	jump.released.connect(func(): touch_jump = false)
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+	var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+	img2.fill(Color(1, 1, 1, 0.20))
+	for x in range(88):
+		for y in range(88):
+			if x < 3 or y < 3 or x > 84 or y > 84:
+				img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+	var b := TouchScreenButton.new()
+	b.texture_normal = ImageTexture.create_from_image(img2)
+	b.position = pos
+	if action != "":
+		b.action = action
+	hud.add_child(b)
+	var t := Label.new()
+	t.text = text
+	t.add_theme_font_size_override("font_size", 24)
+	t.position = pos
+	t.size = Vector2(88, 88)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(t)
+	return b
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
@@ -1751,6 +1928,10 @@ func make_platform(r: Rect2) -> StaticBody2D:
 	var rect := RectangleShape2D.new()
 	rect.size = r.size
 	shape.shape = rect
+	# Genomhoppbar underifran (klassisk plattformare) - upptackt i skarpt
+	# Android-speltest v1.93: solida plattformar gav huvuddunk vid hopp
+	# under dem. Marken ligger langst ner sa one-way ar ofarlig aven dar.
+	shape.one_way_collision = true
 	body.add_child(shape)
 	var spr := Sprite2D.new()
 	spr.texture = make_texture(8, Color(0.35, 0.25, 0.2), Color(0.5, 0.8, 0.3))
@@ -1898,7 +2079,8 @@ func _physics_process(delta: float) -> void:
 	player.velocity.x = ax * MOVE_SPEED
 	player.velocity.y = minf(player.velocity.y + GRAVITY * delta, 980.0)
 	var jump_down := Input.is_physical_key_pressed(KEY_SPACE) \
-		or Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)
+		or Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP) \
+		or touch_jump
 	if jump_down and not jump_was_down:
 		jump_buffer = 0.12
 	if not jump_down and jump_was_down and player.velocity.y < -220.0:

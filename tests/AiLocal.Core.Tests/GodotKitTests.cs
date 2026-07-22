@@ -40,7 +40,10 @@ public class GodotKitTests
         Assert.Equal(ProjectVerifier.ProjectKind.Godot, new ProjectVerifier().Detect(root));
 
         // project.godot pekar på Main.tscn, och varje res:// i scenen finns.
-        Assert.Contains("run/main_scene=\"res://Main.tscn\"", File.ReadAllText(Path.Combine(root, "project.godot")));
+        var projectFile = File.ReadAllText(Path.Combine(root, "project.godot"));
+        Assert.Contains("run/main_scene=\"res://Main.tscn\"", projectFile);
+        // v1.93: stretch - 1:1 pa dator, skalar ratt pa telefonskarmar.
+        Assert.Contains("window/stretch/mode=\"canvas_items\"", projectFile);
         var scene = File.ReadAllText(Path.Combine(root, "Main.tscn"));
         foreach (System.Text.RegularExpressions.Match m in
                  System.Text.RegularExpressions.Regex.Matches(scene, "res://([A-Za-z0-9_./-]+)"))
@@ -89,6 +92,9 @@ public class GodotKitTests
             Assert.Contains("CPUParticles2D", script);
             Assert.Contains("spawn_burst", script);
             Assert.Contains("shake", script);
+            // v1.93: touchkontroller - runtime-gatade (datorspel oforandrade).
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -115,6 +121,9 @@ public class GodotKitTests
             Assert.Contains("CPUParticles2D", script);
             Assert.Contains("spawn_burst", script);
             Assert.Contains("shake", script);
+            // v1.93: touchkontroller - runtime-gatade (datorspel oforandrade).
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
             // Inga C#-filer kvar - mono-beroendet ar borta.
             Assert.Empty(Directory.GetFiles(root, "*.cs"));
             AssertKitComplete(root);
@@ -136,6 +145,9 @@ public class GodotKitTests
             Assert.Contains("checkpoint", script);
             Assert.Contains("CPUParticles2D", script);  // C1 juice
             Assert.Contains("shake", script);
+            // v1.93: touchkontroller (GAS/BROMS + styrning) - runtime-gatade.
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -155,6 +167,9 @@ public class GodotKitTests
             Assert.Contains("Camera3D", script);
             Assert.Contains("CPUParticles3D", script);  // C1 juice
             Assert.Contains("shake", script);
+            // v1.93: touchkontroller - runtime-gatade (datorspel oforandrade).
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -172,6 +187,9 @@ public class GodotKitTests
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("_slide", script);
             Assert.Contains("TARGET", script);
+            // v1.93: touchkontroller (dpad for slajd) - runtime-gatade.
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
