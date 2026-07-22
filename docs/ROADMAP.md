@@ -30,9 +30,16 @@ releasenotiser (v1.20.0–v1.48.0).
 >   randomiserad `string.GetHashCode` — nu kategori-index) + LpfSweep inkopplad
 >   (v1.63.0).
 >
-> **Del B:** B1 (fler godot-kit: racing/pussel/3D), B7 (webexport) och B8
-> (studiominne) är KLARA (v1.55–v1.62). Öppet: B2 iterationsknapp, B3 replay-GIF,
-> B4 delbar leverans, B5 uppdragsbudget/uppdrag, B6 klustergalleri.
+> **Del B (uppdaterad v1.68.0): HELA listan levererad.** B1 (fler godot-kit),
+> B7 (webexport), B8 (studiominne) klara sedan v1.55–v1.62. Nya denna omgång:
+> **B2** vidareutveckla-knapp (v1.64.0), **B3** speltest-repris som animerad
+> PNG (v1.65.0), **B4** delbar leverans med skärmdump + versionsnamn (v1.66.0),
+> **B5** öppen kostnadsredovisning (v1.67.0), **B6** klustergalleri (v1.68.0).
+> ENDA kvarvarande B-bit: B5:s HÅRDA per-uppdrags-gräns ("stoppa vid $2") -
+> medvetet uppskjuten (kräver mid-bygge-prissättning från den cachade
+> OpenRouter-katalogen + en stopp-semantik som inte dödar ett gott bygge;
+> redovisningen kom först som förutsättning). B3 gäller godot (fönstersonden);
+> HTML5-repris via CDP-sonden är en naturlig uppföljning.
 
 ### A1. README är 48 releaser gammal (störst synlighet, minst risk)
 README.md beskriver appen som "intentionally small" och nämner inget om
