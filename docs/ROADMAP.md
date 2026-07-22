@@ -35,11 +35,12 @@ releasenotiser (v1.20.0–v1.48.0).
 > **B2** vidareutveckla-knapp (v1.64.0), **B3** speltest-repris som animerad
 > PNG (v1.65.0), **B4** delbar leverans med skärmdump + versionsnamn (v1.66.0),
 > **B5** öppen kostnadsredovisning (v1.67.0), **B6** klustergalleri (v1.68.0).
-> ENDA kvarvarande B-bit: B5:s HÅRDA per-uppdrags-gräns ("stoppa vid $2") -
-> medvetet uppskjuten (kräver mid-bygge-prissättning från den cachade
-> OpenRouter-katalogen + en stopp-semantik som inte dödar ett gott bygge;
-> redovisningen kom först som förutsättning). B3 gäller godot (fönstersonden);
-> HTML5-repris via CDP-sonden är en naturlig uppföljning.
+> De två uppskjutna uppföljningarna är också KLARA: **B5:s hårda per-uppdrags-
+> gräns** ("Max $"-fält i composern → AgentLoop stoppar vid taket, HitCostCap,
+> v1.69.0) och **HTML5-reprisen** (CDP-sonden fångar canvas-RGBA via
+> getImageData → APNG, v1.70.0). HELA ROADMAP Del A + Del B är därmed
+> levererad; enda öppna posterna är A6:s låsta worktree-mapp (kräver omstart)
+> och A8 (Dashboard-storlek, parkerad tills det skaver).
 
 ### A1. README är 48 releaser gammal (störst synlighet, minst risk)
 README.md beskriver appen som "intentionally small" och nämner inget om
