@@ -22,7 +22,8 @@ public sealed record AgentRunResult(
     int Iterations,
     IReadOnlyList<ChatMessage> Messages,
     TokenUsage TotalUsage,
-    bool HitIterationCap = false);
+    bool HitIterationCap = false,
+    bool HitCostCap = false);
 
 /// <summary>
 /// Runs an assignment to completion: send the conversation (with tools) to
@@ -54,11 +55,22 @@ public sealed class AgentLoop
     /// configured provider for free, with zero special-casing here.</summary>
     private readonly Func<ChatRequest, CancellationToken, Task<ProviderResponse>> _complete;
     private readonly AgentToolExecutor _tools;
+    // B5-gräns (opt-in): en per-uppdrags-kostnadstak. _spentSoFar läser den
+    // löpande summan (uppskattad USD) som anroparen bokför utanför loopen -
+    // loopen prissätter inget själv (den vet inte om OpenRouter/Anthropic), den
+    // frågar bara "hur mycket har vi spenderat?" efter varje svar. Null = ingen
+    // gräns = exakt tidigare beteende.
+    private readonly decimal? _maxCostUsd;
+    private readonly Func<decimal>? _spentSoFar;
 
-    public AgentLoop(Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, AgentToolExecutor tools)
+    public AgentLoop(
+        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete, AgentToolExecutor tools,
+        decimal? maxCostUsd = null, Func<decimal>? spentSoFar = null)
     {
         _complete = complete;
         _tools = tools;
+        _maxCostUsd = maxCostUsd;
+        _spentSoFar = spentSoFar;
     }
 
     public async Task<AgentRunResult> RunAsync(
@@ -135,6 +147,20 @@ public sealed class AgentLoop
             AddUsage(chat.Usage);
             if (!string.IsNullOrWhiteSpace(chat.Content))
                 await Emit(new AgentStep("thinking", chat.Content));
+
+            // B5: stoppa så fort den ackumulerade kostnaden når taket. Kollas
+            // EFTER ett svar (aldrig mitt i ett modellanrop) och levererar det
+            // som hunnit byggas - HitCostCap låter anroparen rapportera ärligt
+            // och hoppa vidare rundor.
+            if (_maxCostUsd is { } cap && _spentSoFar is not null && _spentSoFar() >= cap)
+            {
+                var note = $"Kostnadsgränsen nåddes (uppskattat ${_spentSoFar():0.00} av max ${cap:0.00}) - " +
+                    "stoppar och levererar det som hunnit byggas.";
+                await Emit(new AgentStep("thinking", note));
+                if (!string.IsNullOrWhiteSpace(chat.Content))
+                    messages.Add(new ChatMessage("assistant", chat.Content));
+                return new AgentRunResult(true, note, steps, iteration, messages, Usage(), HitCostCap: true);
+            }
 
             if (chat.ToolCalls is not { Count: > 0 } calls)
             {

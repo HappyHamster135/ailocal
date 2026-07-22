@@ -1444,6 +1444,7 @@ internal static class Dashboard
         .replay-img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
         .msg-cost { margin-top: 6px; color: var(--muted); }
         .proj-head-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .cost-cap-input { width: 70px; }
         .node-version-stale { color: var(--bad); font-weight: 600; }
         .contract-card {
           border: 1px solid var(--line); border-radius: 10px;
@@ -1774,6 +1775,8 @@ internal static class Dashboard
                       <input id="parallelism" type="number" min="1" max="32" value="4">
                       <label class="small" for="workerSelect" title="Vilken Worker uppdraget körs på - filerna hamnar på DEN datorn. Auto låter Hosten välja.">Worker</label>
                       <select id="workerSelect"><option value="">Auto</option></select>
+                      <label class="small" for="maxCostUsd" title="Valfri kostnadsgräns i USD för DET HÄR bygget (Agentläge). Noden stoppar och levererar det som byggts när den uppskattade kostnaden når gränsen. Tomt = ingen gräns.">Max $</label>
+                      <input id="maxCostUsd" type="number" min="0" step="0.5" placeholder="ingen" class="cost-cap-input">
                     </div>
                     <div class="tool-group">
                       <label class="check-field small" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
@@ -6247,7 +6250,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null })
+              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null, maxCostUsd: Number($('maxCostUsd')?.value) || null })
             });
 
             if (!response.ok || !response.body) {

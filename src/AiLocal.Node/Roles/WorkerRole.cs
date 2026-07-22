@@ -16,7 +16,7 @@ namespace AiLocal.Node.Roles;
 /// from the same plan that need to land on the same machine to share a
 /// workspace. The Worker itself ignores it; a Worker only ever executes on
 /// itself.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null);
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null, decimal? MaxCostUsd = null);
 
 /// <summary>One project in a node's portfolio (B6: shared by the local
 /// /api/projects view and the cluster-reachable /execute/projects that the
@@ -476,6 +476,18 @@ public static class WorkerRole
             // (Ollama) hoppas över - gratis compute är ingen utgift.
             var usageByModel = new Dictionary<string, (long In, long Out)>(StringComparer.OrdinalIgnoreCase);
             var usageLock = new object();
+
+            // B5-gräns (opt-in): en per-uppdrags-kostnadstak. Bara när den är
+            // satt förhandshämtas OpenRouter-katalogen EN gång (annars påverkas
+            // inte bygglatensen), så varje svar kan prissättas live och loopen
+            // stoppas när den ackumulerade kostnaden når taket.
+            var maxCostUsd = req.MaxCostUsd.GetValueOrDefault();
+            IReadOnlyList<CatalogModel> capCatalog = [];
+            if (maxCostUsd > 0m)
+                try { capCatalog = await new OpenRouterCatalog(httpFactory).GetAsync(ct); }
+                catch { /* prissättning faller tillbaka på Anthropic-listan */ }
+            var spentUsd = 0m;
+
             var loop = new AgentLoop(async (r, c) =>
             {
                 var resp = await provider.CompleteAsync(r, c);
@@ -484,9 +496,15 @@ public static class WorkerRole
                     {
                         var cur = usageByModel.TryGetValue(chat.Model, out var v) ? v : (In: 0L, Out: 0L);
                         usageByModel[chat.Model] = (cur.In + chat.Usage.InputTokens, cur.Out + chat.Usage.OutputTokens);
+                        if (maxCostUsd > 0m)
+                            spentUsd += AssignmentCost.Price(
+                                new Dictionary<string, (long In, long Out)> { [chat.Model] = (chat.Usage.InputTokens, chat.Usage.OutputTokens) },
+                                capCatalog).Total;
                     }
                 return resp;
-            }, executor);
+            }, executor,
+                maxCostUsd > 0m ? maxCostUsd : null,
+                maxCostUsd > 0m ? () => { lock (usageLock) return spentUsd; } : null);
 
             // Deterministic floor: a BUILD assignment on an EMPTY workspace
             // gets its scaffold created by the node itself, up-front - weak
@@ -779,7 +797,7 @@ public static class WorkerRole
                 // know if this plan meets your expectations!") - körningen ser
                 // klar ut men inget byggdes. Ingen människa läser eller svarar
                 // under ett bygge, så noden svarar åt operatören: utför.
-                for (var push = 1; push <= 2 && buildIntent && runResult.Success
+                for (var push = 1; push <= 2 && buildIntent && runResult.Success && !runResult.HitCostCap
                      && PlanOnlyDetector.LooksUnexecuted(runResult.FinalAnswer); push++)
                 {
                     await EmitStep("thinking",
@@ -943,7 +961,10 @@ public static class WorkerRole
                     }
                 }
 
-                if (findings.Clean || round >= maxFixRounds) break;
+                // B5: kostnadsgränsen hoppar över fler betalda åtgärdsrundor -
+                // AgentLoop-taket stoppar redan mitt i, det här sparar en extra
+                // rundas modellanrop.
+                if (findings.Clean || round >= maxFixRounds || (maxCostUsd > 0m && spentUsd >= maxCostUsd)) break;
                 result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, modelHint,
                     onStep: emitAgentStep, ct, history: result.Messages, system: system);
             }
@@ -956,7 +977,8 @@ public static class WorkerRole
                 // Saknas providern för tiern faller kedjan ändå tillbaka till
                 // samma lokala modell, vilket bara kostar en extra runda.
                 var strong = settings.Worker.ModelTiers.Complex;
-                if (!string.IsNullOrWhiteSpace(strong) && !string.Equals(strong, modelHint, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(strong) && !string.Equals(strong, modelHint, StringComparison.OrdinalIgnoreCase)
+                    && !(maxCostUsd > 0m && spentUsd >= maxCostUsd))
                 {
                     await EmitStep("thinking", $"Hårda fel kvarstår efter åtgärdsrundorna - eskalerar till starkare modell ({strong}) för en sista runda.");
                     result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, strong,

@@ -200,6 +200,48 @@ public class AgentLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_KostnadstakNatt_StopparMedHitCostCap()
+    {
+        // B5: modellen ropar verktyg i all oändlighet (skulle annars gå till
+        // iterationstaket). Varje svar "kostar" $1 via spentSoFar - taket $3 ska
+        // stoppa den efter tredje svaret och leverera det partiella arbetet
+        // (Success + HitCostCap), inte rapportera bygget som dött.
+        decimal spent = 0m;
+        var provider = new FakeChatProvider("test", false, _ =>
+        {
+            spent += 1m;
+            return ProviderResponse.Ok(new ChatResponse
+            {
+                Content = "arbetar...",
+                Model = "m",
+                Provider = "test",
+                Usage = new TokenUsage(1000, 1000),
+                ToolCalls = [new ToolCall(Guid.NewGuid().ToString("n"), "list_files", "{}")]
+            });
+        });
+
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed(), maxCostUsd: 3m, spentSoFar: () => spent);
+        var result = await loop.RunAsync("bygg nagot dyrt", AgentAccessLevel.Sandboxed);
+
+        Assert.True(result.HitCostCap);
+        Assert.True(result.Success);          // partiellt arbete levereras
+        Assert.Equal(3, provider.CallCount);  // stoppade så fort spent (3) nådde taket (3)
+        Assert.Contains("Kostnadsgränsen", result.FinalAnswer);
+    }
+
+    [Fact]
+    public async Task RunAsync_UtanKostnadstak_PaverkasInte()
+    {
+        // Ingen gräns (default null) -> exakt samma väg som förr.
+        var provider = FakeChatProvider.Success("test", "klar");
+        var loop = new AgentLoop(provider.CompleteAsync, Sandboxed());
+        var result = await loop.RunAsync("nagot", AgentAccessLevel.Sandboxed);
+
+        Assert.True(result.Success);
+        Assert.False(result.HitCostCap);
+    }
+
+    [Fact]
     public async Task RunAsync_Cancellation_StopsPromptly()
     {
         // Cancel deterministically (from within the scripted response itself)
