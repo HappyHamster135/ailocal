@@ -252,7 +252,10 @@ public sealed class ModelTiers
             return (route.Provider, model);
         }
 
-        return ("anthropic", TierModel(c));
+        // v1.94: sista utvägen är OPENROUTER (billiga katalogen), inte
+        // anthropic - ingen kodväg ska auto-välja Claude när en route saknas.
+        // Tier-modellerna är OpenRouter-slugs, så provider och modell hänger ihop.
+        return ("openrouter", TierModel(c));
     }
 }
 

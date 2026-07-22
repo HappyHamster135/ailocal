@@ -1778,6 +1778,9 @@ internal static class Dashboard
                       <select id="workerSelect"><option value="">Auto</option></select>
                       <label class="small" for="maxCostUsd" title="Valfri kostnadsgräns i USD för DET HÄR bygget (Agentläge). Noden stoppar och levererar det som byggts när den uppskattade kostnaden når gränsen. Tomt = ingen gräns.">Max $</label>
                       <input id="maxCostUsd" type="number" min="0" step="0.5" placeholder="ingen" class="cost-cap-input">
+                      <label class="small" for="assignWorkspace" title="Valfri mapp där DET HÄR byggets filer hamnar (absolut sökväg på noden som kör). Tomt = nodens vanliga arbetsyta. OBS: sökvägen gäller på den valda Workerns dator.">Mapp</label>
+                      <input id="assignWorkspace" type="text" placeholder="nodens arbetsyta" class="cost-cap-input" style="width:180px">
+                      <button class="btn ghost sm" id="assignWorkspacePick" type="button" title="Välj mapp på den här datorn (för lokala körningar)">…</button>
                     </div>
                     <div class="tool-group">
                       <label class="check-field small" title="PÅ = uppgiften skickas till en Worker i klustret (annan dator) som bygger filer/kör kommandon tills den är klar. AV = vanligt chattsvar som körs lokalt på den här datorn. För att inget ska hända på den här (Overseer-)datorn: kör som Overseer och använd Agentläge.">
@@ -6311,7 +6314,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null, maxCostUsd: Number($('maxCostUsd')?.value) || null, producerMode: !!producerMode })
+              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null, maxCostUsd: Number($('maxCostUsd')?.value) || null, producerMode: !!producerMode, workspaceOverride: $('assignWorkspace')?.value?.trim() || null })
             });
 
             if (!response.ok || !response.body) {
@@ -6492,6 +6495,8 @@ internal static class Dashboard
         $('newSessionCreateBtn').onclick = createSession;
         $('browseNewSessionFolder').onclick = () => pickFolder('newSessionFolderPath', 'newSessionNotice');
         $('browseWorkspacePath').onclick = () => pickFolder('settingWorkspacePath', 'settingsNotice');
+        // v1.94: mappval för DET HÄR bygget i delegera-composern.
+        $('assignWorkspacePick').onclick = () => pickFolder('assignWorkspace', 'composerNotice');
         $('newSessionFolderPath').addEventListener('keydown', event => {
           if (event.key === 'Enter') createSession();
         });

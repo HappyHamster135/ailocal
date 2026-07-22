@@ -552,7 +552,12 @@ public static class WorkerRole
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
                     AccountVision(r);   // v1.91: prissätts när usage finns
                     return (r.Success, FormatVisionResult(r));
-                });
+                },
+                // v1.94: uppdragets originaltext = genreunderlag när modellen
+                // anropar scaffold utan prompt (fotbollsmanager -> Pixel Rush-
+                // buggen). Assignment-vägen förskaffoldar oftast själv, men
+                // agentens egna scaffold-anrop ska aldrig tappa genren.
+                taskHint: req.Assignment);
             var executor = BuildExecutor(workspaceRoot);
             // Kostnadsblocket (usageByModel/completeAccounted/AccountVision)
             // bor FÖRE vision-/executor-delegaterna högre upp - de fångar

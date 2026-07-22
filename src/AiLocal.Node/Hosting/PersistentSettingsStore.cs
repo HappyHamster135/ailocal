@@ -81,8 +81,12 @@ internal sealed class StoredNodeSettings
     public string? ProtectedClusterToken { get; set; }
     public string? ProtectedOperatorToken { get; set; }
     public bool StartWithWindows { get; set; }
-    public List<string> ProviderPriority { get; set; } = ["anthropic", "gemini", "openrouter", "ollama"];
-    public string AnthropicModel { get; set; } = "claude-opus-4-8";
+    // v1.94: billig-först även i LAGRADE defaulten. Den gamla ordningen
+    // (anthropic först + opus som modell) skrevs ner som "vald" av tidiga
+    // versioner utan att ägaren någonsin valde den - och auto-valde därmed
+    // Claude Opus för varje hint-löst anrop (sessioner!). Dyrt på riktigt.
+    public List<string> ProviderPriority { get; set; } = ["openrouter", "ollama", "anthropic", "openai", "gemini"];
+    public string AnthropicModel { get; set; } = "claude-haiku-4-5";
     public string GeminiModel { get; set; } = "gemini-2.5-flash";
     public string? OllamaModel { get; set; }
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
@@ -147,6 +151,24 @@ public sealed class PersistentSettingsStore
     private static string GenerateToken() =>
         Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 
+    /// <summary>v1.94: exakt den gamla default-ordningen = legacy (ägaren
+    /// valde den aldrig, tidiga versioner skrev ner den som "vald") -> ersätts
+    /// med billig-först. Allt annat = ägarens eget val och rörs aldrig.</summary>
+    internal static (List<string> Priority, bool WasLegacy) HealLegacyPriority(List<string> stored)
+    {
+        string[] legacy = ["anthropic", "gemini", "openrouter", "ollama"];
+        return stored.SequenceEqual(legacy, StringComparer.OrdinalIgnoreCase)
+            ? (["openrouter", "ollama", "anthropic", "openai", "gemini"], true)
+            : (stored, false);
+    }
+
+    /// <summary>v1.94: opus var gamla lagrade defaulten - läks till haiku BARA
+    /// när ordningen också var legacy (samma era = aldrig ett aktivt val).</summary>
+    internal static string HealLegacyAnthropicModel(string stored) =>
+        stored.Equals("claude-opus-4-8", StringComparison.OrdinalIgnoreCase)
+            ? "claude-haiku-4-5"
+            : stored;
+
     public static void LoadInto(NodeSettings settings)
     {
         var (stored, present) = ReadStoredWithPresence(settings.Role);
@@ -208,8 +230,20 @@ public sealed class PersistentSettingsStore
         if (Has("AllowDesktopControl"))
             settings.Worker.AllowDesktopControl = stored.AllowDesktopControl;
         if (Has("ProviderPriority"))
-            settings.Providers.Priority = ProviderOrderApi.Normalize(stored.ProviderPriority);
-        if (Has("AnthropicModel"))
+        {
+            // v1.94-läkning: den GAMLA default-ordningen (anthropic först)
+            // skrevs till disk av tidiga versioner utan att ägaren valde den,
+            // och auto-valde Claude för varje hint-löst anrop. EXAKT den
+            // ordningen behandlas som legacy-default och ersätts med dagens
+            // billig-först; en genuint egen ordning (allt annat) respekteras.
+            var healed = HealLegacyPriority(stored.ProviderPriority);
+            settings.Providers.Priority = ProviderOrderApi.Normalize(healed.Priority);
+            if (Has("AnthropicModel"))
+                settings.Providers.DefaultModel = healed.WasLegacy
+                    ? HealLegacyAnthropicModel(stored.AnthropicModel)
+                    : stored.AnthropicModel;
+        }
+        else if (Has("AnthropicModel"))
             settings.Providers.DefaultModel = stored.AnthropicModel;
         if (Has("GeminiModel"))
             settings.Providers.GeminiModel = stored.GeminiModel;

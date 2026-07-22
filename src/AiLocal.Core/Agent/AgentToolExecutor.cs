@@ -61,6 +61,11 @@ public sealed class AgentToolExecutor
     // (engine, prompt, root) -> (success, output). Core can't reference Node,
     // so the concrete scaffolder is injected here, same pattern as _provisioner.
     private readonly Func<string, string, string, CancellationToken, Task<(bool Success, string Output)>>? _gameScaffolder;
+    // v1.94: uppdragets/meddelandets ORIGINALTEXT - fallback när modellen
+    // anropar scaffold_game/scaffold_app utan prompt (sett live: fotbolls-
+    // manager-prompten gav PLATTFORMAR-kittet för att genreväljaren fick tom
+    // sträng när en svag modell utelämnade prompt-argumentet).
+    private readonly string? _taskHint;
     // Optional game-BUILDER delegate (Node layer wires this to GameBuilder,
     // same inject pattern as _gameScaffolder). Takes (engine, root) and
     // produces a standalone .exe via the engine's headless build; returns
@@ -126,10 +131,12 @@ public sealed class AgentToolExecutor
                 Func<string, string, string, string?, CancellationToken, Task<(bool Success, string Output, string? PackagePath, long SizeBytes)>>? packager = null,
                 Func<string, string, Task<(bool Found, string Fixes, string BestPractices)>>? knowledgeBase = null,
                 Func<string, string?, string?, Task<(bool Success, string Output)>>? gameModules = null,
-                Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? visionReviewer = null)
+                Func<string, string, CancellationToken, Task<(bool Success, string Output)>>? visionReviewer = null,
+                string? taskHint = null)
     {
         _level = level;
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _taskHint = taskHint;
         _approvalGate = approvalGate;
         _allowInternet = allowInternet;
         _commandGuard = commandGuard ?? new CommandGuard(CommandGuardLevel.Off);
@@ -473,6 +480,15 @@ public sealed class AgentToolExecutor
             if (JsSyntaxChecker.CheckScript(content) is { } err &&
                 JsSyntaxChecker.CheckScript(content, asModule: true) is not null)
                 return $"VARNING: filen parsas inte som JavaScript ({err.Message}, rad {err.Line}) - troligen trunkerad. " + Advice;
+        }
+        else if (ext is ".gd")
+        {
+            // v1.94: JS-ism-tripwire för GDScript. Svaga modeller skriver
+            // JavaScript-vanor ("// kommentar", function, tomma kroppar) som
+            // Godot vägrar parsa - sett live ("// Godot Script" + func utan
+            // kropp). Fånga vid SKRIVNINGEN med facit, inte först i verify.
+            if (GdScriptLint.Check(content) is { } gdErr)
+                return "VARNING: " + gdErr + " Rätta filen med edit_file innan du går vidare - Godot vägrar parsa den som den är.";
         }
         return null;
     }
@@ -901,6 +917,12 @@ public sealed class AgentToolExecutor
             ? e.GetString()! : "auto";
         var prompt = args.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String
             ? p.GetString()! : "";
+        // v1.94: GENREVALET lever på prompten - en svag modell som utelämnar
+        // den fick standardkittet (plattformare) oavsett vad användaren bad om
+        // (live: "fotbolls manager" -> Pixel Rush). Uppdragets originaltext är
+        // alltid ett bättre genreunderlag än tom sträng.
+        if (string.IsNullOrWhiteSpace(prompt) && !string.IsNullOrWhiteSpace(_taskHint))
+            prompt = _taskHint;
         var root = args.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(r.GetString())
             ? ResolvePath(r.GetString()!) : _workspaceRoot;
         var (success, output) = await _gameScaffolder(engine, prompt, root, ct);
@@ -1039,8 +1061,26 @@ public sealed class AgentToolExecutor
         catch { /* best effort */ }
     }
 
+    /// <summary>Vägar som uppenbart är exempel-platshållare ur verktygs-
+    /// beskrivningar ("/path/to/...", "your/project", vinkelparenteser).</summary>
+    internal static bool LooksLikePlaceholderPath(string p) =>
+        p.Contains("/path/to", StringComparison.OrdinalIgnoreCase)
+        || p.Contains("\\path\\to", StringComparison.OrdinalIgnoreCase)
+        || p.Contains("your/project", StringComparison.OrdinalIgnoreCase)
+        || p.Contains("your\\project", StringComparison.OrdinalIgnoreCase)
+        || p.Contains('<') || p.Contains('>');
+
     private string ResolvePath(string requestedPath)
     {
+        // v1.94: platshållar-vakt. Svaga modeller kopierar exempelvägen ur
+        // verktygsbeskrivningen rakt av (sett live: build_game med
+        // "/path/to/your/project/root") - fånga det FÖRE filsystemet och
+        // säg exakt vad som ska stå i stället.
+        if (LooksLikePlaceholderPath(requestedPath))
+            throw new InvalidOperationException(
+                $"'{requestedPath}' är en PLATSHÅLLARE från ett exempel, inte en riktig väg. " +
+                "Använd \".\" för projektroten eller en verklig relativ väg (t.ex. \"spel/Main.gd\").");
+
         // Full is deliberately unconfined - not a security boundary, that's
         // the whole point of Full ("exactly like Claude Code/Codex have on
         // the machine they run on") - an absolute path still passes straight

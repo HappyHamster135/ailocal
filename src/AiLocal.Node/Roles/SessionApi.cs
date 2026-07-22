@@ -221,6 +221,10 @@ public static class SessionApi
                     };
 
                 var executor = new AgentToolExecutor(accessLevel, session.FolderPath, Gate, settings.Worker.AllowInternet,
+                    // v1.94: meddelandets originaltext följer med som genre-
+                    // underlag - scaffold utan prompt-arg gav plattformar-
+                    // kittet oavsett vad användaren bad om (sett live).
+                    taskHint: req.Message,
                     gameScaffolder: (engine, prompt, root, scafCt) =>
                     {
                         var r = new GameScaffoldService().Scaffold(engine, prompt, root);
@@ -314,7 +318,16 @@ public static class SessionApi
 
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
-                var result = await loop.RunAsync(req.Message, accessLevel, req.ModelHint, onStep: async step =>
+                // v1.94: sessioner utan uttrycklig modell fick förr INGEN hint
+                // alls -> leverantörskedjans första svarade med SIN default
+                // (historiskt: Anthropic/Claude Opus via gamla lagrade
+                // prioriteringen) = dyrt utan att någon valt det. Nu får
+                // hint-lösa sessionsanrop Medium-tiern (billig-kapabel).
+                var sessionHint = !string.IsNullOrWhiteSpace(req.ModelHint)
+                    ? req.ModelHint
+                    : settings.Worker.ModelTiers.Medium;
+
+                var result = await loop.RunAsync(req.Message, accessLevel, sessionHint, onStep: async step =>
                 {
                     await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", linked.Token);
                     await ctx.Response.Body.FlushAsync(linked.Token);

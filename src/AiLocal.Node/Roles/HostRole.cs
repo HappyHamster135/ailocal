@@ -1000,7 +1000,10 @@ public static class HostRole
             // merged/discarded by the operator afterwards (the Worker's
             // /execute/isolation/* endpoints). A failure here falls back to a
             // normal (non-isolated) run rather than blocking the assignment.
-            string? workspaceOverride = null;
+            // v1.94: bevara anroparens mappval (composerns Mapp-fält) - det
+            // nollades förr här för varje icke-isolerad dispatch. Isolationen
+            // (worktree) vinner fortfarande när den används.
+            string? workspaceOverride = req.WorkspaceOverride;
             if (req.UseIsolation)
             {
                 try
