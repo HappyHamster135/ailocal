@@ -32,6 +32,45 @@ public class GameBuilderCommandTests
     }
 
     [Fact]
+    public void MakeGodotCommand_Android_HarRattPreset()
+    {
+        // C9: samma kommandoform som desktop/webb, fast Android-preset -> APK.
+        var cmd = GameBuilder.MakeGodotCommand("C:/Godot/godot.exe", "Android", "C:/g/build/android/spel.apk");
+        Assert.Contains("--export-release", cmd);
+        Assert.Contains("\"Android\"", cmd);
+        Assert.Contains("spel.apk", cmd);
+        Assert.DoesNotContain("--quit", cmd);
+    }
+
+    [Fact]
+    public async Task BuildAndroidAsync_UtanAndroidPreset_GuidarArligtUtanAttKoraGodot()
+    {
+        // C9 best-effort: utan en Android-preset ska den GUIDA agaren till
+        // setupen (SDK/keystore/preset) i stallet for att tyst misslyckas -
+        // och godot far aldrig koras (guarden slar till forst).
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-android-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "project.godot"), "; godot\nconfig_version=5\n");
+            await File.WriteAllTextAsync(Path.Combine(dir, "export_presets.cfg"), "[preset.0]\nname=\"Windows Desktop\"\n");
+            var runCalled = false;
+
+            var (success, output, apk) = await new GameBuilder().BuildAndroidAsync(
+                dir,
+                (_, _, _) => { runCalled = true; return Task.FromResult((0, "")); },
+                CancellationToken.None,
+                godotFinder: () => "C:/Godot/godot.exe");
+
+            Assert.False(success);
+            Assert.Null(apk);
+            Assert.Contains("Android-preset", output);
+            Assert.False(runCalled);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { /* städning */ } }
+    }
+
+    [Fact]
     public async Task BuildAsync_Godot_ExportsAndReportsExe()
     {
         var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));

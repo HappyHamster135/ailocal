@@ -123,6 +123,51 @@ public sealed class GameBuilder
         return (true, $"Webbexport klar: {outHtml} - oppna i en webblasare eller hosta build/web/.", outHtml);
     }
 
+    /// <summary>C9: Android APK-export av ett Godot-projekt (BEST-EFFORT, som
+    /// Unity). Kräver - utöver godot-templates - Android-SDK + JDK + ett
+    /// debug-keystore konfigurerat i Godot OCH en "Android"-preset i
+    /// export_presets.cfg. Den setupen äger ägaren; utan den GUIDAR den här
+    /// vägen (ärlig instruktion) i stället för att tyst misslyckas. När den
+    /// finns bygger den APK:n via samma kommandoform som webb/desktop.</summary>
+    public async Task<(bool Success, string Output, string? ApkPath)> BuildAndroidAsync(
+        string root,
+        Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
+        CancellationToken ct, Func<string?>? godotFinder = null)
+    {
+        var godot = (godotFinder ?? FindGodot)();
+        if (godot is null)
+            return (false, "Godot är inte installerat på denna maskin - Android-export kräver Godot 4.3.", null);
+        if (!File.Exists(Path.Combine(root, "project.godot")))
+            return (false, "Ingen Godot-projektfil (project.godot) - Android-export gäller bara Godot-spel.", null);
+        if (!ExportPresetExists(root, "Android"))
+            return (false,
+                "Android-APK-export är best-effort och kräver setup som ägaren gör en gång: konfigurera Android-SDK + " +
+                "JDK + ett debug-keystore i Godot (Editor > Editor Settings > Export > Android) och lägg till en " +
+                "Android-preset (Project > Export > Add > Android). När presetet \"Android\" finns i export_presets.cfg " +
+                "bygger den här vägen APK:n åt dig.", null);
+
+        var outApk = Path.Combine(root, "build", "android", Path.GetFileName(Path.GetFullPath(root)) + ".apk");
+        Directory.CreateDirectory(Path.GetDirectoryName(outApk)!);
+        var cmd = MakeGodotCommand(godot, "Android", outApk);
+        var (exit, output) = await runCommand(cmd, root, ct);
+        if (exit != 0)
+            return (false, $"godot Android-export misslyckades (exit {exit}) - Android-SDK/keystore konfigurerat i Godot?\n{output}", null);
+        if (!File.Exists(outApk))
+            return (false, $"godot avslutade utan fel men APK:n saknas: {outApk}\n{output}", null);
+        return (true, $"Android-APK klar: {outApk}", outApk);
+    }
+
+    /// <summary>True om export_presets.cfg innehåller en preset med det namnet.</summary>
+    internal static bool ExportPresetExists(string root, string presetName)
+    {
+        try
+        {
+            var cfg = Path.Combine(root, "export_presets.cfg");
+            return File.Exists(cfg) && File.ReadAllText(cfg).Contains($"name=\"{presetName}\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     internal static string MakeGodotCommand(string godotPath, string preset, string outExe)
         => $"\"{godotPath}\" --headless --export-release \"{preset}\" \"{outExe}\"";
 

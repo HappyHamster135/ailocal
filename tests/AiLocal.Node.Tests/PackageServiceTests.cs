@@ -87,4 +87,26 @@ public class PackageServiceTests : IDisposable
         Assert.Contains("Samla stjarnor", html);           // beskrivning ur DESIGN.md-konceptet
         Assert.Contains("Speltest-repris", html);          // reprisen som "trailer"
     }
+
+    [Fact]
+    public async Task PackageAsync_Webbspel_FarHostningsguide()
+    {
+        // C8: ett html5-spel (index.html) får en HOSTA.md med steg till en
+        // spelbar länk (itch.io/Netlify/GitHub Pages).
+        await File.WriteAllTextAsync(Path.Combine(_root, "index.html"),
+            "<!DOCTYPE html><html><body><canvas></canvas></body></html>");
+        await File.WriteAllTextAsync(Path.Combine(_root, "game.js"), "// spel");
+
+        var result = await new PackageService().PackageAsync(_root, "html5", "Webbspelet", Path.Combine(_root, "dist"), CancellationToken.None);
+        Assert.True(result.Success, result.Output);
+
+        using var zip = ZipFile.OpenRead(result.PackagePath!);
+        var hosta = zip.Entries.FirstOrDefault(e => e.FullName.EndsWith("HOSTA.md"));
+        Assert.NotNull(hosta);
+        using var reader = new StreamReader(hosta!.Open());
+        var md = await reader.ReadToEndAsync();
+        Assert.Contains("itch.io", md);
+        Assert.Contains("Webbspelet", md);
+        Assert.Contains("index.html", md);
+    }
 }

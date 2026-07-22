@@ -72,6 +72,20 @@ public sealed class PackageService
             await File.WriteAllTextAsync(storePath, GenerateStorePage(gameName, engine, projectRoot, files), Encoding.UTF8, ct);
             files.Add(storePath);
 
+            // C8: spelbar länk - om spelet går att spela i webbläsaren (html5
+            // eller godot-webexport), lägg en HOSTA.md med steg för att få en
+            // delbar länk. Jag bygger paketet; publiceringen (utåtriktad) gör
+            // ägaren själv.
+            var webIndex = File.Exists(Path.Combine(projectRoot, "index.html")) ? "index.html"
+                : File.Exists(Path.Combine(projectRoot, "build", "web", "index.html")) ? "build/web/index.html"
+                : null;
+            if (webIndex is not null)
+            {
+                var hostaPath = Path.Combine(outputDir, "HOSTA.md");
+                await File.WriteAllTextAsync(hostaPath, GenerateHostingGuide(gameName, webIndex), Encoding.UTF8, ct);
+                files.Add(hostaPath);
+            }
+
             // Skapa .zip
             if (File.Exists(zipPath))
                 File.Delete(zipPath);
@@ -439,6 +453,34 @@ Compress-Archive -Path ""$source\*"" -DestinationPath ""$dest"" -Force
 
     private static string HtmlEsc(string s) =>
         (s ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+
+    /// <summary>C8: steg för att förvandla ett webbygge till en delbar länk.
+    /// Paketering görs här - publiceringen (utåtriktad) gör ägaren själv.</summary>
+    private static string GenerateHostingGuide(string gameName, string webIndex)
+    {
+        var folder = webIndex.Contains('/') ? webIndex[..webIndex.LastIndexOf('/')] : "spelets rotmapp";
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Få en spelbar länk till {gameName}");
+        sb.AppendLine();
+        sb.AppendLine("Spelet går att spela direkt i webbläsaren. För att dela det som en LÄNK,");
+        sb.AppendLine("ladda upp webbfilerna till valfri gratis statisk host:");
+        sb.AppendLine();
+        sb.AppendLine("## Snabbast: itch.io (dra-och-släpp)");
+        sb.AppendLine($"1. Zippa mappen med `{webIndex}`.");
+        sb.AppendLine("2. Skapa ett projekt på itch.io, välj \"Kind of project: HTML\".");
+        sb.AppendLine("3. Ladda upp zip:en, kryssa i \"This file will be played in the browser\".");
+        sb.AppendLine("4. Publicera - du får en spelbar länk att skicka.");
+        sb.AppendLine();
+        sb.AppendLine("## Alternativ (alla gratis)");
+        sb.AppendLine($"- **Netlify Drop** (https://app.netlify.com/drop): dra mappen `{folder}` dit -> direkt länk.");
+        sb.AppendLine("- **GitHub Pages**: lägg filerna i ett repo, aktivera Pages -> länk.");
+        sb.AppendLine("- **Cloudflare Pages / Vercel**: importera mappen -> länk.");
+        sb.AppendLine();
+        sb.AppendLine($"Filen som ska öppnas/spelas är `{webIndex}`.");
+        sb.AppendLine();
+        sb.AppendLine("> Byggt med AiLocal. Publiceringen gör du själv - det är en utåtriktad åtgärd.");
+        return sb.ToString();
+    }
 
     private static string? FindButler()
     {
