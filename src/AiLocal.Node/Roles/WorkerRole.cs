@@ -689,6 +689,7 @@ public static class WorkerRole
             // kontrakt ("5 banor", "3 fiendetyper") som grinden följer upp.
             // Uppföljningar behåller projektets befintliga kontrakt.
             IReadOnlyList<string> contractCriteria = [];
+            var isIteration = false;  // C6: uppfoljning pa ett redan kontrakterat projekt
             if (buildIntent)
             {
                 var directorRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
@@ -721,7 +722,15 @@ public static class WorkerRole
                 }
                 else
                 {
+                    // C6 regressionsskydd: en uppföljning ("vidareutveckla") läser
+                    // OM det befintliga leveranskontraktet, och kvalitetsgrindens
+                    // oberoende granskning verifierar att ändringen inte tyst
+                    // brutit någon befintlig punkt.
                     contractCriteria = DirectorPass.ReadCriteria(directorRoot);
+                    isIteration = contractCriteria.Count > 0;
+                    if (isIteration)
+                        await EmitStep("thinking",
+                            $"Regressionskoll: {contractCriteria.Count} befintliga kontraktspunkter verifieras mot ändringen så inget tyst går sönder.");
                 }
 
                 // Live-checklistan: kontraktspunkterna som ett eget steg så
@@ -956,7 +965,8 @@ public static class WorkerRole
                     var reviewModel = settings.Worker.ModelTiers.Complex;
                     var reviewHint = string.IsNullOrWhiteSpace(reviewModel) ? null : reviewModel;
                     await EmitStep("tool_call",
-                        "oberoende granskning (kontrakt + uppenbara fel)" + (reviewHint is null ? "" : $" - modell {reviewHint}"));
+                        (isIteration ? "oberoende REGRESSIONSgranskning (håller befintliga kontraktspunkter)" : "oberoende granskning (kontrakt + uppenbara fel)")
+                        + (reviewHint is null ? "" : $" - modell {reviewHint}"));
                     var unmet = await DirectorPass.ReviewAsync(
                         contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct,
                         reviewModelHint: reviewHint);

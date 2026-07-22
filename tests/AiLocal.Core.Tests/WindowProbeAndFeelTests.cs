@@ -48,17 +48,18 @@ public class WindowProbeAndFeelTests
     // ---- Regissörens spelkänsla-kriterier ----------------------------------
 
     [Fact]
-    public void EnsureEngineFeelCriteria_GodotFarAllaFem_Html5RorsAldrig()
+    public void EnsureEngineFeelCriteria_GodotFarAllaSex_Html5RorsAldrig()
     {
         var basic = new[] { "5 banor", "3 fiendetyper" };
 
         var godot = DirectorPass.EnsureEngineFeelCriteria(basic, "godot");
-        Assert.Equal(7, godot.Count); // 2 basic + 5 spelkänsla-kriterier
+        Assert.Equal(8, godot.Count); // 2 basic + 6 spelkänsla-/kvalitetskriterier
         Assert.Contains(godot, c => c.Contains("Ljudeffekt"));
         Assert.Contains(godot, c => c.Contains("feedback", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(godot, c => c.Contains("övergångar"));
         Assert.Contains(godot, c => c.Contains("Svårighetsgraderna"));
-        Assert.Contains(godot, c => c.Contains("juice", StringComparison.OrdinalIgnoreCase)); // C1
+        Assert.Contains(godot, c => c.Contains("juice", StringComparison.OrdinalIgnoreCase));     // C1
+        Assert.Contains(godot, c => c.Contains("prestanda", StringComparison.OrdinalIgnoreCase));  // C3
 
         Assert.Equal(basic, DirectorPass.EnsureEngineFeelCriteria(basic, "html5"));
         Assert.Equal(basic, DirectorPass.EnsureEngineFeelCriteria(basic, null));
@@ -70,9 +71,9 @@ public class WindowProbeAndFeelTests
         var withSound = new[] { "ljudeffekter för hopp/mynt/träff", "5 banor" };
         var result = DirectorPass.EnsureEngineFeelCriteria(withSound, "godot");
 
-        // Ljud-punkten är redan täckt av regissören - bara de fyra övriga
-        // (feedback, övergångar, svårighet, juice) läggs till.
-        Assert.Equal(6, result.Count);
+        // Ljud-punkten är redan täckt av regissören - bara de fem övriga
+        // (feedback, övergångar, svårighet, juice, prestanda) läggs till.
+        Assert.Equal(7, result.Count);
         Assert.Single(result, c => c.Contains("ljud", StringComparison.OrdinalIgnoreCase));
     }
 

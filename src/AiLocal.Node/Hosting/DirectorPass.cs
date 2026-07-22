@@ -72,9 +72,9 @@ public static class DirectorPass
 
     /// <summary>Standing production criteria for engine games (godot/unity):
     /// sound on actions, visible feedback, screen transitions, difficulty levels
-    /// that actually differ, and game-feel/juice (screenshake, particles,
-    /// tweening) - C1. Only criteria whose topic the contract does not already
-    /// cover are added - the director's own wording wins.</summary>
+    /// that actually differ, game-feel/juice (C1), and smooth performance (C3).
+    /// Only criteria whose topic the contract does not already cover are added -
+    /// the director's own wording wins.</summary>
     internal static IReadOnlyList<string> EnsureEngineFeelCriteria(IReadOnlyList<string> criteria, string? engine)
     {
         if (engine is not ("godot" or "unity"))
@@ -94,6 +94,11 @@ public static class DirectorPass
             // från ett produktionsspel. Mer specifik än "synlig feedback" ovan.
             (["juice", "partik", "particle", "screenshake", "skärmskak", "skarmskak", "tween", "hit-stop", "hitstop", "easing"],
                 "Game-feel/juice: screenshake vid träffar/kollisioner, partiklar vid poäng/träffar/explosioner, och tweenad rörelse med easing i stället för hårda hopp - spelet ska KÄNNAS, inte bara fungera"),
+            // C3 (prestanda): grinden mäter redan FPS och underkänner hackiga
+            // byggen - kriteriet gör det till ett uttalat mål så modellen undviker
+            // tunga per-frame-mönster från början.
+            (["prestanda", "fps", "smidig", "performance", "ruckel", "hack", "allokering"],
+                "Smidig prestanda: 60 FPS-mål, inga tunga per-frame-allokeringar (skapa noder/texturer/resurser i _ready, inte varje bildruta) - spelet får inte hacka ens med många objekt på skärmen"),
         ];
 
         var result = new List<string>(criteria);
