@@ -34,6 +34,7 @@ public sealed record SettingsUpdate(
     string? WorkspacePath = null,
     bool? AiReviewWrites = null,
     bool? MilestoneApproval = null,
+    bool? AutoResume = null,
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
     bool? AutoMergeIsolatedTasks = null,
@@ -67,6 +68,7 @@ internal sealed class StoredNodeSettings
     public string? WorkspacePath { get; set; }
     public bool AiReviewWrites { get; set; }
     public bool MilestoneApproval { get; set; }
+    public bool AutoResume { get; set; }
     public bool AllowInternet { get; set; }
     public bool UseGitIsolation { get; set; }
     public bool AutoMergeIsolatedTasks { get; set; }
@@ -174,6 +176,8 @@ public sealed class PersistentSettingsStore
             settings.Worker.AiReviewWrites = stored.AiReviewWrites;
         if (Has("MilestoneApproval"))
             settings.Worker.MilestoneApproval = stored.MilestoneApproval;
+        if (Has("AutoResume"))
+            settings.Worker.AutoResume = stored.AutoResume;
         if (Has("AllowInternet"))
             settings.Worker.AllowInternet = stored.AllowInternet;
         if (Has("UseGitIsolation"))
@@ -247,6 +251,7 @@ public sealed class PersistentSettingsStore
                 workspacePath = _settings.Worker.WorkspacePath,
                 aiReviewWrites = _settings.Worker.AiReviewWrites,
                 milestoneApproval = _settings.Worker.MilestoneApproval,
+                autoResume = _settings.Worker.AutoResume,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
                 autoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks,
@@ -346,6 +351,9 @@ public sealed class PersistentSettingsStore
                 _settings.Worker.AiReviewWrites = update.AiReviewWrites.Value;
             if (update.MilestoneApproval.HasValue)
                 _settings.Worker.MilestoneApproval = update.MilestoneApproval.Value;
+
+            if (update.AutoResume.HasValue)
+                _settings.Worker.AutoResume = update.AutoResume.Value;
 
             if (update.AllowInternet.HasValue)
                 _settings.Worker.AllowInternet = update.AllowInternet.Value;
@@ -580,6 +588,7 @@ public sealed class PersistentSettingsStore
         _stored.WorkspacePath = _settings.Worker.WorkspacePath;
         _stored.AiReviewWrites = _settings.Worker.AiReviewWrites;
         _stored.MilestoneApproval = _settings.Worker.MilestoneApproval;
+        _stored.AutoResume = _settings.Worker.AutoResume;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;

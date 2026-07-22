@@ -73,6 +73,12 @@ public sealed class WorkerProfileSettings
     /// checkpoint. Off by default; cluster runs never pause regardless.</summary>
     public bool MilestoneApproval { get; set; }
 
+    /// <summary>v1.92 (opt-in, AV som default): vid nodstart återupptas det
+    /// SENASTE omstartsdödade bygget automatiskt (ett enda, max 48h gammalt) -
+    /// samma resume-väg som Återuppta-knappen. Default av är en ärlighets-
+    /// princip: en omstartad nod ska aldrig börja spendera tokens tyst.</summary>
+    public bool AutoResume { get; set; }
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.

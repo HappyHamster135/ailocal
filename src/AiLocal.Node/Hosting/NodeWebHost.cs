@@ -57,6 +57,10 @@ public static class NodeWebHost
         if (node is null) return 0;
 
         node.WriteBanner();
+        // v1.92: opt-in auto-återupptagning - om inställningen är PÅ och det
+        // finns ett färskt omstartsdödat bygge återupptas det (ett enda) när
+        // appen är uppe. Default AV; no-op för Host/Overseer.
+        AutoResumeService.ScheduleOnStart(node.App);
         await node.App.RunAsync(ct);
         return 0;
     }

@@ -50,6 +50,11 @@ public sealed class AssignmentLog
 
     public AssignmentLog() : this(Path.Combine(SettingsPaths.DataDirectory, "assignment-log.json")) { }
 
+    /// <summary>Den exakta omstartsmarkeringen - AutoResumeService (v1.92)
+    /// känner igen just den för att veta att bygget dog av en OMSTART (inte
+    /// underkändes av grinden) och därmed är säkert att återuppta.</summary>
+    public const string RestartMarker = "Noden startades om innan körningen hann bli klar.";
+
     public AssignmentLog(string path)
     {
         _path = path;
@@ -61,7 +66,7 @@ public sealed class AssignmentLog
         {
             entry.State = "Failed";
             entry.FinishedAt ??= DateTimeOffset.UtcNow;
-            entry.FinalAnswer ??= "Noden startades om innan körningen hann bli klar.";
+            entry.FinalAnswer ??= RestartMarker;
             changed = true;
         }
         if (changed) Save();

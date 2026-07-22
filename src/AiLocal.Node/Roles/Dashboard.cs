@@ -2182,6 +2182,14 @@ internal static class Dashboard
                   innan agenten bygger. Auto-godkänns efter 10 minuter; klusterkörningar pausar aldrig.
                 </span>
                 <label class="check-field wide">
+                  <input id="settingAutoResume" type="checkbox"> Återuppta avbrutna byggen automatiskt vid start
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  När noden startar om efter ett avbrutet bygge återupptas det SENASTE (ett enda, max 48h gammalt)
+                  mot leveranskontraktet - samma väg som Återuppta-knappen. Av som standard: en omstartad nod
+                  ska aldrig börja spendera tokens utan att du valt det.
+                </span>
+                <label class="check-field wide">
                   <input id="settingAllowInternet" type="checkbox"> Internetåtkomst för agenten
                 </label>
                 <span class="small" style="display:block;margin-top:-6px">
@@ -5157,6 +5165,7 @@ internal static class Dashboard
           $('settingWorkspacePath').value = data.workspacePath ?? '';
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
           $('settingMilestoneApproval').checked = data.milestoneApproval ?? false;
+          $('settingAutoResume').checked = data.autoResume ?? false;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
@@ -5490,6 +5499,7 @@ internal static class Dashboard
             workspacePath: $('settingWorkspacePath').value.trim() || null,
             aiReviewWrites: $('settingAiReviewWrites').checked,
             milestoneApproval: $('settingMilestoneApproval').checked,
+            autoResume: $('settingAutoResume').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
