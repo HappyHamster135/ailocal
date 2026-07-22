@@ -147,6 +147,18 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > baren). Multi-modell per roll/spår löst (konstnären + hårda team-spår → stark
 > tier). Ärliga avgränsningar kvar: full checkpoint/återuppta-över-sessioner
 > (C5+), verifierad Android-APK (SDK), fristående cross-modell KOD-granskare.
+>
+> **Femlistan efter genomgången (v1.84–v1.89, alla KLARA):** v1.84 revisionspass
+> (team/regissör in i kostnadsbokföringen + Max$; Overseer proxar operatörs-
+> panelerna), v1.85 Pixel Rush → GDScript med juice (ALLA sex Godot-kit nu
+> headless-verifierade + juicade; mono-beroendet borta), v1.86 ärlig
+> bild-/visionskostnad (räknas + redovisas, prissätts inte), v1.87 återuppta
+> avbrutna byggen (loggen bär projektmappen från start; Återuppta-knapp; C5+-
+> MVP:n LEVERERAD - operatörsdriven, konversationen återuppstås inte), v1.88
+> cross-modell KODgranskare i grinden (läser HELA huvudkoden på starka tiern,
+> fail-open - avgränsningen ovan LEVERERAD), v1.89 Host-panelerna göms via
+> 404-sond där rollen saknar dem. Kvar av avgränsningarna: verifierad
+> Android-APK (kräver SDK), prissatta bildanrop, automatisk återupptagning.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
