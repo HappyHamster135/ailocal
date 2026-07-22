@@ -52,7 +52,12 @@ public class IdeaBankTests
         Assert.Contains(withSeeds.Criteria, c => c.Contains("vadereffekter"));
         Assert.Contains("derbyn", withSeeds.Twist);
         Assert.Equal(plain.Criteria.Count + 2, withSeeds.Criteria.Count);
-        // Baskriterierna (golvet) finns kvar orörda.
-        Assert.All(plain.Criteria, c => Assert.Contains(c, withSeeds.Criteria));
+        // Golvets STABILA punkter finns kvar orörda. (Replay-punkten slumpas
+        // per anrop sedan v1.97 - svårighetsgrader/upplåsningar/new game+ -
+        // så den jämförs inte mellan två separata dragningar.)
+        foreach (var stable in new[] { "highscore", "Ljudeffekter", "Startskärm", "Game over" })
+            Assert.Contains(withSeeds.Criteria, c => c.Contains(stable, StringComparison.OrdinalIgnoreCase));
+        // Management-prompten får karriärstegen, inte plattformsmallen (v1.97).
+        Assert.Contains(withSeeds.Criteria, c => c.Contains("divisioner"));
     }
 }

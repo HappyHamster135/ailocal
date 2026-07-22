@@ -50,10 +50,62 @@ public class DirectorAndProbeTests : IDisposable
     {
         var game = DirectorPass.FallbackContract("bygg ett plattformsspel");
         Assert.True(game.Criteria.Count >= 4);
-        Assert.Contains(game.Criteria, c => c.Contains("nivåer") || c.Contains("vågor"));
+        Assert.Contains(game.Criteria, c => c.Contains("banor") || c.Contains("nivåer"));
 
         var app = DirectorPass.FallbackContract("bygg ett budgetverktyg");
         Assert.Contains(app.Criteria, c => c.Contains("tester"));
+    }
+
+    [Fact]
+    public void FallbackContract_ManagementFarKarriarstege_IntePlattformsmallen()
+    {
+        // v1.97 (ägarens fynd): "om man skriver simulator kommer den göra
+        // exakt samma typ av spel bara med annat substantiv" - fallbacken var
+        // EN mall för alla genrer. Nu formuleras progressionen per genre.
+        var mgmt = DirectorPass.FallbackContract("bygg ett fotbolls management simulator spel");
+        Assert.Contains(mgmt.Criteria, c => c.Contains("divisioner"));
+        Assert.DoesNotContain(mgmt.Criteria, c => c.Contains("nivåer/vågor"));
+    }
+
+    [Fact]
+    public void FallbackContract_ReplayMekanismenVarierar_SvarighetsgraderArInteTvang()
+    {
+        // v1.97: "3 svårighetsgrader måste inte vara hela tiden" - replay-
+        // mekanismen slumpas (svårighetsgrader/upplåsningar/new game+).
+        // 30 dragningar mot 3 alternativ: kräv minst 2 olika (flakefritt).
+        var seen = new HashSet<string>();
+        for (var i = 0; i < 30; i++)
+        {
+            var c = DirectorPass.FallbackContract("bygg ett plattformsspel");
+            var replay = c.Criteria.First(x =>
+                x.Contains("svårighetsgrader", StringComparison.OrdinalIgnoreCase)
+                || x.Contains("Upplåsbart") || x.Contains("New game+"));
+            seen.Add(replay);
+        }
+        Assert.True(seen.Count >= 2, $"bara {seen.Count} replay-variant på 30 dragningar");
+    }
+
+    [Fact]
+    public async Task RunAsync_SkickarKreativVinkel_TillRegissorsmodellen()
+    {
+        // v1.97: en slumpad kreativ vinkel per körning - samma prompt ska inte
+        // ge samma designangrepp två gånger.
+        Assert.True(DirectorPass.CreativeLenses.Length >= 4);
+        string? seenPrompt = null;
+        Func<AiLocal.Core.Contracts.ChatRequest, CancellationToken, Task<AiLocal.Core.Providers.ProviderResponse>> complete = (req, _) =>
+        {
+            seenPrompt = req.Messages[^1].Content;
+            return Task.FromResult(AiLocal.Core.Providers.ProviderResponse.Ok(
+                new AiLocal.Core.Contracts.ChatResponse
+                {
+                    Content = """{"pillars":"p","twist":"t","criteria":["5 banor","3 fiendetyper","boss pa bana 5","dagligt mal-system"]}""",
+                    Model = "m",
+                    Provider = "test"
+                }));
+        };
+        var contract = await DirectorPass.RunAsync("bygg ett spel", _dir, null, complete, CancellationToken.None);
+        Assert.Contains("KREATIV VINKEL", seenPrompt);
+        Assert.Contains(contract.Criteria, c => c.Contains("5 banor"));
     }
 
     [Fact]

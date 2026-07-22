@@ -22,21 +22,57 @@ public static class DirectorPass
         You are the CREATIVE DIRECTOR of a small game/app studio. Turn the
         user's request into a delivery contract for the developers.
 
-        Respond with ONLY this JSON, nothing else:
-        {"pillars":"one sentence: the experience pillars","twist":"one sentence: the unique twist","criteria":["...","..."]}
+        THINK LIKE A GAME DESIGNER, in this order, BEFORE writing the contract:
+        1. GENRE: what does this genre actually mean - what loop makes it fun?
+        2. REFERENCES: name 1-2 popular, well-known games in this genre and
+           borrow ONE proven, beloved mechanic from them, adapted to this
+           theme (mention the inspiration in the twist, e.g. "transferfonster
+           som i Football Manager").
+        3. THEME-SPECIFIC: every mechanic must only make sense in THIS theme.
+           A hospital sim and a football sim must NEVER share a criteria list
+           with swapped nouns - if a criterion would survive a theme swap
+           unchanged, make it more specific to the theme.
+        4. STRUCTURE: shape progression to the genre - seasons/divisions for a
+           management sim, handcrafted levels for a platformer, waves for an
+           arena game, escalating boards for a puzzle. Do NOT default to
+           "3 levels" when the genre suggests something better.
+        5. REPLAY VALUE: pick what fits THIS game - difficulty modes OR
+           unlockables OR new game plus OR escalating seasons. Difficulty
+           levels are one option, never a requirement.
 
-        Rules for criteria (4-8 items, in the user's language):
+        Respond with ONLY this JSON, nothing else:
+        {"pillars":"one sentence: the experience pillars","twist":"one sentence: the unique twist (name the reference game it riffs on)","criteria":["...","..."]}
+
+        Rules for criteria (5-9 items, in the user's language):
         - MEASURABLE and CHECKABLE: counts, named features, concrete content
-          ("5 levels with rising difficulty", "3 enemy types", "sound effects
-          for jump/coin/hit", "pause menu with restart") - never vague quality
-          words ("fun", "polished").
+          ("4 divisioner med upp-/nedflyttning", "3 fiendetyper", "ljud för
+          köp/mål/vinst") - never vague quality words ("fun", "polished").
         - Achievable by one developer in one sitting on the existing scaffold.
-        - When the user message contains INSPIRATION SEEDS: build the twist
-          around them and turn EACH seed into one concrete criterion.
+        - INSPIRATION SEEDS in the user message are a springboard, not law:
+          keep the ones that fit, REPLACE weak ones with better ideas from
+          your genre analysis - your design judgment outranks the seed list.
         - At least TWO criteria must be NEW named mechanics that do NOT exist
-          in a generic starter kit (the kit already has menus, score, save,
-          difficulty levels and basic play) - name each mechanic explicitly.
+          in a generic starter kit (the kit already has menus, score, save and
+          basic play) - name each mechanic explicitly.
+        - Keep the production floor but PHRASE IT FOR THE GENRE: working
+          screens (title with instructions, pause, end with restart), sound on
+          key events, and a saved best result - genre-fitting wording, not
+          boilerplate.
         """;
+
+    /// <summary>v1.97: en slumpad KREATIV VINKEL per körning - strukturell
+    /// variation utöver genrefröna, så två körningar av samma prompt angriper
+    /// designen från olika håll (förebild/twist/progression/risk/personlighet/
+    /// återspelbarhet) i stället för att följa samma mall.</summary>
+    internal static readonly string[] CreativeLenses =
+    [
+        "Bygg designen kring en FÖREBILD: välj ett känt, älskat spel i genren och anpassa dess mest omtyckta mekanik till det här temat.",
+        "Bygg designen kring en OVÄNTAD TWIST som ändrar genrens vanliga loop på ett sätt spelaren inte sett förr.",
+        "Bygg designen kring PROGRESSION: en tydlig resa från liten till stor, med namngivna milstolpar spelaren strävar mot.",
+        "Bygg designen kring RISK/BELÖNING: varje viktigt beslut ska ha en frestande chansning med kännbar nedsida.",
+        "Bygg designen kring PERSONLIGHET: namngivna karaktärer/entiteter med egenskaper och relationer spelaren bryr sig om.",
+        "Bygg designen kring ÅTERSPELBARHET: slump och variation som gör varje omgång märkbart olik den förra.",
+    ];
 
     public sealed record Contract(string Pillars, string Twist, IReadOnlyList<string> Criteria)
     {
@@ -59,7 +95,12 @@ public static class DirectorPass
         IReadOnlyList<string>? inspirationSeeds = null,
         IReadOnlyList<string>? pastLessons = null)
     {
-        var contract = await AskModelAsync(userPrompt, strongModelHint, complete, ct, inspirationSeeds, pastLessons)
+        // v1.97: slumpad kreativ vinkel per körning - samma prompt två gånger
+        // ska inte ge samma designangrepp (vinkeln styr HUR regissören tänker,
+        // fröna styr VAD den kan bygga kring).
+        var lens = CreativeLenses[Random.Shared.Next(CreativeLenses.Length)];
+        var promptWithLens = userPrompt + "\n\nKREATIV VINKEL för just den här körningen: " + lens;
+        var contract = await AskModelAsync(promptWithLens, strongModelHint, complete, ct, inspirationSeeds, pastLessons)
             ?? FallbackContract(userPrompt, inspirationSeeds);
         // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra
         // på INNEHÅLL (5 banor, 3 fiendetyper) men glömmer KÄNSLAN - och
@@ -88,8 +129,11 @@ public static class DirectorPass
                 "Synlig feedback på varje interaktion: knapptryck, träffar och poängändringar ska märkas direkt (animation/färgblink/skalpuls)"),
             (["övergång", "overgang", "transition", "fade"],
                 "Mjuka övergångar mellan skärmarna (titel/spel/resultat) - inga hårda klipp"),
-            (["svårighet", "svarighet", "difficulty"],
-                "Svårighetsgraderna ska kännas mätbart olika i spel (olika startvärden/fiendefart), inte bara heta olika"),
+            // v1.97: svårighetsgrader är ETT sätt att ge replay-värde, inte ett
+            // tvång - regissörens val (upplåsningar/new game+/svårighetsgrader)
+            // släcker det stående kriteriet via nyckelorden.
+            (["svårighet", "svarighet", "difficulty", "upplås", "upplas", "unlock", "new game", "replay", "återspel", "aterspel", "genomspel"],
+                "Ett replay-värde som KÄNNS: svårighetsgrader som skiljer sig mätbart ELLER upplåsningar/new game+ - en andra genomspelning ska inte vara identisk med den första"),
             // C1 (game-feel/juice): den konkreta grejen som skiljer en prototyp
             // från ett produktionsspel. Mer specifik än "synlig feedback" ovan.
             (["juice", "partik", "particle", "screenshake", "skärmskak", "skarmskak", "tween", "hit-stop", "hitstop", "easing"],
@@ -256,12 +300,42 @@ public static class DirectorPass
     {
         var isGame = prompt.Contains("spel", StringComparison.OrdinalIgnoreCase)
             || prompt.Contains("game", StringComparison.OrdinalIgnoreCase);
+        // v1.97: fallbacken var EN mall för alla genrer ("Minst 3 nivåer/vågor"
+        // även för en managementsimulator) och krävde alltid svårighetsgrader -
+        // exakt det "samma spel med utbytta substantiv"-mönster ägaren såg.
+        // Nu: progression formuleras per genre, och replay-mekanismen slumpas
+        // (svårighetsgrader är ETT alternativ av tre, inte ett tvång).
+        var genre = GameScaffoldService.DetectGenre(prompt);
+        var progression = genre switch
+        {
+            "management" or "simulator" or "idle" =>
+                "En karriärstege med minst 3 divisioner/ligor att avancera genom - från botten till toppen, med upp- och nedflyttning",
+            "racing" =>
+                "Minst 3 banor/cuper med stigande svårighet och egen karaktär (layout, motstånd)",
+            "puzzle" =>
+                "Minst 5 brädor/nivåer med stigande svårighet där nya moment introduceras",
+            "rpg" or "roguelike" or "shooter" =>
+                "Minst 3 vågor/zoner med stigande svårighet och nya fiendetyper per steg",
+            _ =>
+                "Minst 3 handbyggda banor/nivåer med stigande svårighetsgrad och egen karaktär",
+        };
+        string[] replayOptions =
+        [
+            "Tre svårighetsgrader som känns mätbart olika (olika startvärden/motstånd)",
+            "Upplåsbart innehåll efter framsteg (nya lag/banor/förmågor) som syns på titelskärmen",
+            "New game+-läge efter seger: en andra genomspelning med höjd utmaning och bevarat rekord",
+        ];
+        var replay = replayOptions[Random.Shared.Next(replayOptions.Length)];
+        var pillars = genre is "management" or "simulator" or "idle"
+            ? "Meningsfulla beslut varje omgång - resan från botten till toppen ska kännas förtjänad."
+            : "Lätt att lära, svår att bemästra - varje omgång ska kännas rättvis.";
         var contract = isGame
             ? new Contract(
-                "Lätt att lära, svår att bemästra - varje omgång ska kännas rättvis.",
+                pillars,
                 "Svårigheten stiger märkbart och belönar skicklighet.",
                 [
-                    "Minst 3 nivåer/vågor med stigande svårighetsgrad",
+                    progression,
+                    replay,
                     "Poängsystem med sparat highscore",
                     "Ljudeffekter för minst 3 olika händelser",
                     "Startskärm med instruktioner samt paus",

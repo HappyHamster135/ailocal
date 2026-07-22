@@ -57,7 +57,7 @@ public class WindowProbeAndFeelTests
         Assert.Contains(godot, c => c.Contains("Ljudeffekt"));
         Assert.Contains(godot, c => c.Contains("feedback", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(godot, c => c.Contains("övergångar"));
-        Assert.Contains(godot, c => c.Contains("Svårighetsgraderna"));
+        Assert.Contains(godot, c => c.Contains("replay-värde"));   // v1.97: svårighetsgrader ELLER upplåsningar/new game+
         Assert.Contains(godot, c => c.Contains("juice", StringComparison.OrdinalIgnoreCase));     // C1
         Assert.Contains(godot, c => c.Contains("prestanda", StringComparison.OrdinalIgnoreCase));  // C3
 
