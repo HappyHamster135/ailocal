@@ -157,8 +157,23 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > MVP:n LEVERERAD - operatörsdriven, konversationen återuppstås inte), v1.88
 > cross-modell KODgranskare i grinden (läser HELA huvudkoden på starka tiern,
 > fail-open - avgränsningen ovan LEVERERAD), v1.89 Host-panelerna göms via
-> 404-sond där rollen saknar dem. Kvar av avgränsningarna: verifierad
-> Android-APK (kräver SDK), prissatta bildanrop, automatisk återupptagning.
+> 404-sond där rollen saknar dem.
+>
+> **Restlistan (v1.90–v1.92, alla KLARA):** v1.90 VERIFIERAD Android-APK -
+> självprovisionerande kedja (provision("android-sdk") = cmdline-tools +
+> licenser + platform/build-tools + keystore + standard-Godot + standardmallar;
+> mono-editorn BLOCKERAR Android headless), "Bygg APK"-knapp i Projekt-vyn,
+> reservkedja zipalign+apksigner när Godots align-steg faller, och TRE grävda
+> grundbuggar: cmd-citatstrippningen (>2 citat dödade ALLA godot-exporter i
+> alla fem cmd-körare - nu /c "{cmd}"), tysta etc2/astc-valideringen (tomt
+> felmeddelande), dubblerad force-adderad projektikon (apksigner-stopp).
+> v1.91 visionsanropen PRISSÄTTS (usage+slug ur alla fyra leverantörssvaren →
+> usageByModel + Max$; usage-lösa räknas kvar i fotnoten; bildGENERERING
+> fortsatt oprissatt - ärligt). v1.92 auto-återupptagning som OPT-IN-inställning
+> (default AV; ETT bygge, bara omstartsdödade, 48h-tak, kedjnings-skydd, alla
+> 8 kopplingspunkter). Kvar därefter: APK testad på riktig enhet/emulator
+> (ingen enhet på dev-maskinen), release-signerad butiks-APK (ägarens nyckel),
+> prissatt bildgenerering.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
