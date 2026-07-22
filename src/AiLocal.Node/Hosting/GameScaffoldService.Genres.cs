@@ -51,6 +51,15 @@ public partial class GameScaffoldService
         // ballistik mot AI. "tanks" i plural (WordStart "tank" hade träffat
         // "tanke"); "worms" krockar inte med orm-regeln (WordStart).
         if (WordStart(p, "artilleri", "artillery", "shellshock", "worms", "tanks", "stridsvagn", "ballistik", "kanonad")) return "artillery";
+        // v2.1.0: party/bradspel (Mario Party-klassen) - sammansatt spel med
+        // flera minispel och bradlage. Anvander bara fras-matchning for
+        // "party" (WordStart "party" ar for brett - "party-tema" triggar
+        // felaktigt). "minigame"/"minispel" for svenska/engelska varianter.
+        if (p.Contains("mario party") || p.Contains("party game") || p.Contains("board game")
+            || p.Contains("pummel party") || p.Contains("lego party")
+            || WordStart(p, "minigame", "minispel", "bradspel", "brädspel", "boardgame",
+                "partyspel", "sallskapsspel", "sällskapsspel", "tarning", "tärning"))
+            return "party";
         if (WordStart(p, "minesweeper", "minröj", "minroj", "minor", "mines")) return "minesweeper";
         if (WordStart(p, "quiz", "frågesport", "fragesport", "trivia")) return "quiz";
         if (WordStart(p, "memory", "minnesspel", "kortspel", "card", "pairs")) return "memory";

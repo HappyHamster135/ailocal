@@ -243,6 +243,27 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > måttet") och tomma kritiker avbryter ärligt; Max$-taket respekteras (80%-
 > spärr före ny runda). KVAR: fler rundor som default när kostnadsbilden
 > bevisat sig; kritik med skärmdumpsbilder som underlag (nu text-bevisen).
+>
+> **v2.1-v2.2 PARTYSKALAN (mot "riktigt Mario Party/Pummel Party": ärvda
+> byggen + färdig-inkoppling).** v2.1 Board Bash (9:e kittet, party-genren):
+> bräda 24 rutor/2 layouter, tärning, 4 spelare, 3 minispel, engelska.
+> ÄRVDA FEL RÄTTADE FÖRE RELEASE: 6 riktiga GDScript-parse-fel (`:=` på
+> otypad indexering + PackedVector2Array*int) som förra passets fokuserade
+> tester ALDRIG såg (kitet låg inte i headless-listan - nu gör det det);
+> fokus landade på brädval så Enter aldrig startade (nu Easy); "You's turn".
+> v2.2 fem motorer - VARAV TRE VAR OINKOPPLAD DÖD KOD, nu riktigt wirade:
+> GenreContracts in i grinden MED genre+prompt (nya RequestedMinigames:
+> "15 minigames" i prompten => kravet ÄR 15; CountMinigames räknar RIKTIGA
+> minispel: minigame_type-grenar, "# Minigame N"-rubriker, Mg*.gd-filer);
+> PromptDecomposer in i TeamBuild (ritning i arkitektprompten + dekomposer-
+> fallback som buntar minispel 3 per spår => "15 minigames" bygger 9-12 i
+> EN teamkörning, resten via kontraktsräknaren i milstolpe-/utvecklings-
+> rundorna; 10 minispelsmallar + "uppfinn eget"-uppgifter över mallarna);
+> VisualStyleLib in i regissören (palettförslag per genre i prompten +
+> konkret identitetskriterium i fallbacken); GameMechanicLibrary =>
+> MECHANICS.md i varje Godot-scaffold (beprövade snuttar att klistra in);
+> AntiPatternDb var redan wirad (rådgivande). Genreord kompletterade:
+> brädspel/partyspel/sällskapsspel/tärning/pummel party/lego party.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

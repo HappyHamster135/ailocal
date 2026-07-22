@@ -346,7 +346,19 @@ public static class TeamBuild
         {
             var projectRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
             var files = ListProjectFiles(projectRoot);
-            var prompt = $"Build request: {assignment}\n\nCurrent project files:\n{files}\n\nSplit the remaining work into exactly {teamSize} independent tracks.";
+            // v2.2: dekomposer-ritningen in i arkitektprompten - sammansatta
+            // spel (party/minispel, manager, rpg) får en deterministisk
+            // basuppdelning som arkitekten justerar i stället för att hitta
+            // på strukturen från noll (svaga modeller kollapsar just där).
+            var blueprint = "";
+            if (PromptDecomposer.IsComplex(assignment))
+            {
+                var subs = PromptDecomposer.Decompose(assignment, GameScaffoldService.DetectGenre(assignment));
+                blueprint = "\n\nSuggested decomposition (deterministic baseline - merge/adjust into the requested track count; parallelizable items may be grouped):\n"
+                    + string.Join("\n", subs.Select(s =>
+                        $"- [{s.Category}] {s.Description}" + (s.Parallelizable ? "" : " (core - must be in the first/main track)")));
+            }
+            var prompt = $"Build request: {assignment}\n\nCurrent project files:\n{files}{blueprint}\n\nSplit the remaining work into exactly {teamSize} independent tracks.";
             var response = await complete(new ChatRequest
             {
                 System = ArchitectSystem,
@@ -430,6 +442,29 @@ public static class TeamBuild
             "unity" => "Lägg ny logik i EGNA C#-skript under Assets och koppla in dem med små riktade edit_file-ändringar.",
             _ => "Lägg ny logik i en EGEN js-fil och länka in den med en <script src>-rad via edit_file."
         };
+
+        // v2.2: sammansatta spel (party/minispel m.fl.) får dekomposer-spår i
+        // stället för den generiska fyran - minispel buntas 3 per spår så ett
+        // "15 minigames"-uppdrag bygger 9-12 i EN teamkörning (resten drivs
+        // av genrekontraktets räknare via milstolpe-/utvecklingsrundorna).
+        if (isGame && PromptDecomposer.IsComplex(assignment))
+        {
+            var subs = PromptDecomposer.Decompose(assignment, GameScaffoldService.DetectGenre(assignment))
+                .Where(s => s.Parallelizable).ToList();
+            var decomposed = new List<TeamTrack>();
+            var minigames = subs.Where(s => s.Id.StartsWith("mg")).ToList();
+            foreach (var chunk in minigames.Chunk(3))
+                decomposed.Add(new(
+                    "Minispel: " + string.Join(" + ", chunk.Select(c => c.Description.Split(':')[0])),
+                    "Bygg dessa minispel kompletta (countdown, 4 spelare, poang, eget ljud): "
+                    + string.Join(" | ", chunk.Select(c => c.Description)) + $". {fileHint}", "medium"));
+            foreach (var other in subs.Where(s => !s.Id.StartsWith("mg")))
+                decomposed.Add(new(other.Description.Split(':')[0],
+                    $"{other.Description}. {fileHint}",
+                    other.EstimatedComplexity >= 3 ? "hard" : other.EstimatedComplexity == 2 ? "medium" : "simple"));
+            if (decomposed.Count >= 2)
+                return decomposed;
+        }
 
         return isGame
             ?

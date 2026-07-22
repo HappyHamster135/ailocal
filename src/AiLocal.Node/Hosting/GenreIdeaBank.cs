@@ -75,6 +75,7 @@ public static class GenreIdeaBank
         "rpg" or "roguelike" or "shooter" => TopDown,
         "platformer" => Platformer,
         "artillery" => Artillery,
+        "party" => Party,
         _ => General,
     };
 
@@ -91,6 +92,22 @@ public static class GenreIdeaBank
         "forstorbara broar/plattformar som tankarna star pa",
         "vind som VAXLAR mitt i duellen och visas som prognos en tur i forvag",
         "rikoschett-vapen som studsar en gang mot terrangen",
+    ];
+
+    // v2.1.0: party/bradspel (Mario Party-klassen) - sammansatt spel med
+    // bradlage, tarning, flera minispel och 2+ bradlayouter.
+    private static readonly string[] Party =
+    [
+        "ett fjarde minispel: plata-pussel dar spelare springer till ruttor med ratt svar",
+        "stjarnans pris stiger for varje kopt stjarna (inflation over rundor)",
+        "en olycksruta som BLANDAR alla spelares positioner",
+        "duellrutor: tva spelare slas om mynt med en snabb reaktionsduell",
+        "en bankruta dar spelare kan satta in mynt och fa ranta var tredje runda",
+        "bonusrundor med dubbla myntbelopp var fjarde runda",
+        "tarning med specialytor (stjarna, olycka, teleport) utover 1-6",
+        "en butik mellan rundorna dar mynt koper power-ups (extra tarning, skold)",
+        "allianser: tva spelare slar ihop sina mynt tillfalligt for en runda",
+        "en tredje bradlayout: spiralformat som tvingar ihop spelare",
     ];
 
     /// <summary>Slumpar <paramref name="count"/> olika frön ur genrens bank.

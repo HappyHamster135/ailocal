@@ -1025,7 +1025,12 @@ public static class WorkerRole
                     var r = await new GamePlaytester(httpFactory, BuildVisionReview())
                         .FullTestAsync(root, engine, TimeSpan.FromSeconds(10), gct);
                     return (r.Success, r.Summary, (IReadOnlyList<string>)r.Issues);
-                }, ct, gameExpected: buildIntent && wantsGame);
+                }, ct, gameExpected: buildIntent && wantsGame,
+                // v2.2: genrekontraktet (grep-verifierbara formkrav, t.ex.
+                // "15 begärda minispel => 15 räknade") får genre + prompt -
+                // utan dessa var hela GenreContracts död kod i produktion.
+                genre: GameScaffoldService.DetectGenre(req.Assignment),
+                assignment: req.Assignment);
 
             // Auto-provisionera godot + exportmallar när projektet är Godot -
             // annars degraderar grinden tyst till statisk kontroll (inga

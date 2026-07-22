@@ -2932,4 +2932,923 @@ func close_overlay() -> void:
 		overlay.queue_free()
 		overlay = null
 """;
+
+
+    /// <summary>Party/bradspel (v2.1.0, Board Bash): Mario Party-klassen -
+    /// sammansatt spel med bradlage (tarning, turer, 4 spelare, ekonomi) +
+    /// flera fristaende minispel (tap race, dodge, memory) + 2 bradlayouter.
+    /// Allt i EN Main.gd med tydlig sektionering - spelflodesvaxlare mellan
+    /// titel/brade/minispel/resultat utan att ladda om scenen.</summary>
+    internal static string[] ScaffoldGodotParty(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Board Bash"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node2D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotPartyMain);
+        files.Add("Main.gd");
+        foreach (var (name, category) in new[] { ("click.wav", "jump"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotPartyDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Board Bash - Party Board Game (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbart party-bradspel i Mario Party-klassen: bradlage med\n" +
+            "tarning, turer, 4 spelare (1 mansklig + 3 AI), 24 rutor med olika\n" +
+            "effekter (mynt, stjarnor, minispel), 3 minispelstyper (Tap Race,\n" +
+            "Dodge, Memory), 2 bradlayouter (Ring / Serpentine), 6 rundor,\n" +
+            "3 svarighetsgrader, partiklar, screenshake och touchkontroller.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Styrning: Space/Enter rullar tarningen; piltangenter + Space i\n" +
+            "minispelen. All grafik ritas i kod (_draw) - byt tema via farger\n" +
+            "och spelarnamn i Main.gd.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotPartyDesignDoc(string prompt) =>
+        "# Party Board Game - Mario Party style (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEtt turbaserat bradspel for 4 spelare (1 mansklig + 3 AI) dar man rullar\n" +
+        "tarning, flyttar runt en brada med 24 rutor, samlar mynt och stjarnor,\n" +
+        "och tacklar minispel efter varje runda.\n\n" +
+        "## Mekaniker (klara)\n- Bradlage: 24 rutor i loop, 2 layouter (Ring / Serpentine)\n" +
+        "- 4 spelare: tarning (1-6), turordning, AI med svarighetsbaserad logik\n" +
+        "- Rutor: bla (+3 mynt), rod (-2 mynt), stjarna (kop for 15 mynt), minispel\n" +
+        "- 3 minispel: Tap Race (masha), Dodge (undvik fallande block), Memory (Simon)\n" +
+        "- 6 rundor, 3 svarighetsgrader, poang med stjarnor + mynt\n" +
+        "- Titel/vinst-overlay, ljud, partiklar (CPUParticles2D), screenshake, touch\n\n" +
+        "## Bygg vidare\n- Fler minispel: lagg till i _start_minigame och _minigame_process\n" +
+        "- Fler bradlayouter: lagg till i _build_board under else-grenen\n" +
+        "- Fler spelartyper: duellrutor, olyckskastor, butiker, teleportrar\n" +
+        "- Kalenderhandelser: var 3:e runda = bonusrunda med dubbelvarde\n" +
+        "- Teamlaget: varje minispel = egen worktree via TeamBuild\n";
+
+    const string GodotPartyMain = """
+extends Node2D
+# Board Bash - Mario Party-like board game with minigames.
+# 4 players (1 human + 3 AI), dice, board tiles, 3 minigame types, 2 board layouts.
+# UI built in code. CHANGE THEME: colors in _draw, player names in PLAYERS.
+# Player text in ENGLISH (house rule since v1.99).
+
+const BOARD_RING := 0
+const BOARD_SERPENTINE := 1
+const ROUNDS := 6
+const TILE_COUNT := 24
+const STAR_COST := 15
+
+# Tile types
+const TILE_BLUE := 0   # +3 coins
+const TILE_RED := 1    # -2 coins
+const TILE_STAR := 2   # buy star (15 coins)
+const TILE_MG := 3     # minigame trigger
+
+var PLAYERS: Array[Dictionary] = [
+    {"name":"You","col":Color(0.3,0.7,1), "ai":false},
+    {"name":"Bot A","col":Color(1,0.4,0.4), "ai":true},
+    {"name":"Bot B","col":Color(0.4,1,0.4), "ai":true},
+    {"name":"Bot C","col":Color(1,0.9,0.3), "ai":true},
+]
+
+var state := "title"
+var difficulty := 1        # 0=easy 1=normal 2=hard
+var board_layout := BOARD_RING
+var round := 0
+var turn_idx := 0          # which player's turn (0-3)
+var turn_phase := ""       # "rolling" "moving" "resolving" "done"
+var dice_value := 0
+var move_steps := 0
+var move_timer := 0.0
+var round_minigame := false
+var minigame_type := 0
+var board_tiles: Array[int] = []
+var star_positions: Array[int] = []
+
+# Player state: each entry is {tile, coins, stars}
+var pstate: Array[Dictionary] = []
+
+var snd: Dictionary = {}
+var ui: CanvasLayer
+var focus_pending := true
+var shake := 0.0
+var dot_tex: ImageTexture
+var flash_t := 0.0
+var ai_roll_timer := 0.0
+var resolve_timer := 0.0
+
+# --- Minigame state ---
+var mg_timer := 0.0
+var mg_rankings: Array[int] = []
+var mg_player_progress: Array[float] = []
+var mg_alive: Array[bool] = []
+
+# Minigame 1 (Tap Race) state
+var mg_tap_fill: Array[float] = []
+
+# Minigame 2 (Dodge) state
+var mg_dodge_blocks: Array = []
+var mg_dodge_player_x: Array[float] = []
+var mg_dodge_spawn_timer := 0.0
+
+# Minigame 3 (Memory) state
+var mg_mem_sequence: Array[int] = []
+var mg_mem_player_idx := 0
+var mg_mem_step := 0
+var mg_mem_input_phase := false
+var mg_mem_flash_t := 0.0
+var mg_mem_lengths: Array[int] = []
+var mg_mem_ai_timer := 0.0
+
+# Board tile positions (populated in _build_board)
+var tile_positions: Array[Vector2] = []
+
+# ---------- LIFECYCLE ----------
+
+func _ready() -> void:
+    randomize()
+    _setup_audio()
+    var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
+    img.fill(Color(1, 1, 1))
+    dot_tex = ImageTexture.create_from_image(img)
+    ui = CanvasLayer.new()
+    add_child(ui)
+    _setup_touch()
+    _show_title()
+
+# ---------- TOUCH ----------
+
+func _setup_touch() -> void:
+    if not DisplayServer.is_touchscreen_available():
+        return
+    _touch_btn(Vector2(1036, 500), "ui_accept", "ROLL")
+    _touch_btn(Vector2(28, 536), "ui_left", "<")
+    _touch_btn(Vector2(132, 536), "ui_right", ">")
+    _touch_btn(Vector2(80, 444), "ui_up", "^")
+    _touch_btn(Vector2(80, 536), "ui_down", "v")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+    var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+    img2.fill(Color(1, 1, 1, 0.20))
+    for x in range(88):
+        for y in range(88):
+            if x < 3 or y < 3 or x > 84 or y > 84:
+                img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+    var b := TouchScreenButton.new()
+    b.texture_normal = ImageTexture.create_from_image(img2)
+    b.position = pos
+    if action != "":
+        b.action = action
+    ui.add_child(b)
+    var t := Label.new()
+    t.text = text
+    t.add_theme_font_size_override("font_size", 24)
+    t.position = pos
+    t.size = Vector2(88, 88)
+    t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(t)
+    return b
+
+# ---------- AUDIO ----------
+
+func _setup_audio() -> void:
+    for key in ["click", "coin", "hurt", "win"]:
+        var p := AudioStreamPlayer.new()
+        var s = load("res://%s.wav" % key)
+        if s:
+            p.stream = s
+        add_child(p)
+        snd[key] = p
+
+func _play(key: String) -> void:
+    if snd.has(key) and snd[key].stream:
+        snd[key].play()
+
+# ---------- UI HELPERS ----------
+
+func _clear_ui() -> void:
+    for c in ui.get_children():
+        c.queue_free()
+    focus_pending = true
+
+func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(300, 46)
+    b.position = Vector2(426, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
+
+# ---------- PARTICLES / JUICE ----------
+
+func _burst(pos: Vector2, col: Color, count: int) -> void:
+    var p := CPUParticles2D.new()
+    p.position = pos
+    p.amount = count
+    p.one_shot = true
+    p.explosiveness = 0.9
+    p.lifetime = 0.5
+    p.spread = 180.0
+    p.initial_velocity_min = 60.0
+    p.initial_velocity_max = 160.0
+    p.gravity = Vector2(0, 160)
+    p.scale_amount_min = 2.0
+    p.scale_amount_max = 4.0
+    p.color = col
+    p.texture = dot_tex
+    add_child(p)
+    p.emitting = true
+    get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+
+# ---------- TITLE SCREEN ----------
+
+func _show_title() -> void:
+    state = "title"
+    position = Vector2.ZERO
+    shake = 0.0
+    _clear_ui()
+    _label("BOARD BASH", 70, 72, Color(1, 0.75, 0.2))
+    _label("A party board game! Roll dice, collect coins, buy stars, win minigames.", 170, 22)
+    _label("First to the most stars after %d rounds wins. Space/Enter to roll." % ROUNDS, 200, 18)
+    _label("Board: Ring (circle loop)", 260, 22, Color(0.5, 0.9, 1))
+    _button("Ring", 290, func(): board_layout = BOARD_RING; _play("click"))
+    _label("Board: Serpentine (snake path)", 350, 22, Color(0.5, 1, 0.7))
+    _button("Serpentine", 380, func(): board_layout = BOARD_SERPENTINE; _play("click"))
+    var diffs := ["Easy", "Normal", "Hard"]
+    for i in range(3):
+        var d := i
+        _button(diffs[i], 460 + i * 58, func(): _start_game(d, board_layout))
+    # Fokus ska landa pa START (Easy), inte pa bradvalet - annars startar
+    # Enter aldrig spelet (bekraftat i skarp korning: sonden fastnade pa
+    # titeln). Bradknapparna nas med pil-upp.
+    for c in ui.get_children():
+        if c is Button and c.text == "Easy":
+            c.grab_focus()
+    # Add a hovering instruction
+    var hint := _label("[Space/Enter = roll dice on your turn]", 630, 14, Color(0.5, 0.5, 0.5))
+    queue_redraw()
+
+# ---------- GAME START ----------
+
+func _start_game(d: int, layout: int) -> void:
+    difficulty = d
+    board_layout = layout
+    _play("click")
+    round = 1
+    turn_idx = 0
+    round_minigame = false
+    ai_roll_timer = 0.0
+    resolve_timer = 0.0
+    _build_board()
+    _init_players()
+    _clear_ui()
+    state = "playing_board"
+    turn_phase = "rolling"
+    _update_hud()
+    queue_redraw()
+
+func _build_board() -> void:
+    board_tiles.clear()
+    star_positions.clear()
+    tile_positions.clear()
+    # Generate tile types: mixed with guaranteed minimums
+    for i in range(TILE_COUNT):
+        var r := randf()
+        if r < 0.15:
+            board_tiles.append(TILE_RED)
+        elif r < 0.25:
+            board_tiles.append(TILE_STAR)
+            star_positions.append(i)
+        elif r < 0.38:
+            board_tiles.append(TILE_MG)
+        else:
+            board_tiles.append(TILE_BLUE)
+    # Guarantee minimum counts
+    var stars_have := star_positions.size()
+    var mg_count := 0
+    for i in range(TILE_COUNT):
+        if board_tiles[i] == TILE_MG:
+            mg_count += 1
+    for i in range(TILE_COUNT):
+        if stars_have < 2 and board_tiles[i] == TILE_BLUE:
+            board_tiles[i] = TILE_STAR
+            star_positions.append(i)
+            stars_have += 1
+        if mg_count < 3 and board_tiles[i] == TILE_BLUE:
+            board_tiles[i] = TILE_MG
+            mg_count += 1
+    # Compute tile positions
+    var cx := 576.0
+    var cy := 324.0
+    if board_layout == BOARD_RING:
+        var rx := 380.0
+        var ry := 240.0
+        for i in range(TILE_COUNT):
+            var a := TAU * i / TILE_COUNT - TAU * 0.25
+            tile_positions.append(Vector2(cx + cos(a) * rx, cy + sin(a) * ry))
+    else:
+        # Serpentine: 4 rows of 6, snaking back and forth
+        var rows := 4
+        var cols := 6
+        var ox := 180.0
+        var oy := 100.0
+        var dx := 140.0
+        var dy := 140.0
+        for r in range(rows):
+            var row_tiles: Array[int] = []
+            for c in range(cols):
+                row_tiles.append(r * cols + c)
+            if r % 2 == 1:
+                row_tiles.reverse()
+            for c in range(cols):
+                var ti := row_tiles[c]
+                if ti < TILE_COUNT:
+                    tile_positions.append(Vector2(ox + c * dx, oy + r * dy))
+
+func _init_players() -> void:
+    pstate.clear()
+    for i in range(4):
+        var start_tile := i * (TILE_COUNT / 4)
+        pstate.append({"tile": start_tile, "coins": 10, "stars": 0})
+
+func _update_hud() -> void:
+    # Remove old HUD labels
+    for c in ui.get_children():
+        if c.has_meta("hud"):
+            c.queue_free()
+    var y := 10.0
+    for i in range(4):
+        var ps := pstate[i]
+        var pn := PLAYERS[i]
+        var l := _label("%s  S:%d  C:%d" % [pn["name"], ps["stars"], ps["coins"]], y, 16, pn["col"])
+        l.set_meta("hud", true)
+        l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+        l.position.x = 20
+        l.size.x = 400
+        y += 20
+    var phase_text: String
+    if turn_phase == "rolling":
+        phase_text = ("Your turn - roll!" if turn_idx == 0 else PLAYERS[turn_idx]["name"] + "'s turn - roll!")
+    elif turn_phase == "moving":
+        phase_text = "Moving... (rolled " + str(dice_value) + ")"
+    else:
+        phase_text = PLAYERS[turn_idx]["name"] + " resolving..."
+    var rd := _label("Round %d/%d   %s" % [round, ROUNDS, phase_text], 10, 18, Color(1, 0.9, 0.5))
+    rd.set_meta("hud", true)
+    rd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    rd.position.x = 752
+    rd.size.x = 380
+
+# ---------- BOARD TURN LOGIC ----------
+
+func _input(event: InputEvent) -> void:
+    if state == "playing_board" and turn_phase == "rolling":
+        if event.is_action_pressed("ui_accept") and not PLAYERS[turn_idx]["ai"]:
+            _do_roll()
+    elif state == "playing_minigame":
+        _minigame_input(event)
+
+func _physics_process(delta: float) -> void:
+    # C1 juice: screenshake
+    if shake > 0.0:
+        shake = move_toward(shake, 0.0, 30.0 * delta)
+        position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+    elif position != Vector2.ZERO:
+        position = Vector2.ZERO
+
+    if state == "playing_board":
+        if turn_phase == "rolling" and PLAYERS[turn_idx]["ai"]:
+            ai_roll_timer -= delta
+            if ai_roll_timer <= 0.0:
+                _do_roll()
+        elif turn_phase == "moving":
+            move_timer -= delta
+            if move_timer <= 0.0:
+                move_steps -= 1
+                if move_steps > 0:
+                    _step_move()
+                else:
+                    _resolve_tile()
+        elif turn_phase == "resolving":
+            resolve_timer -= delta
+            if resolve_timer <= 0.0:
+                _next_player()
+    elif state == "playing_minigame":
+        _minigame_process(delta)
+
+    queue_redraw()
+
+func _do_roll() -> void:
+    _play("click")
+    dice_value = randi() % 6 + 1
+    move_steps = dice_value
+    turn_phase = "moving"
+    _update_hud()
+    _step_move()
+
+func _step_move() -> void:
+    var ps := pstate[turn_idx]
+    ps["tile"] = (ps["tile"] + 1) % TILE_COUNT
+    _play("coin")
+    _burst(tile_positions[ps["tile"]], PLAYERS[turn_idx]["col"], 5)
+    shake = maxf(shake, 1.5)
+    move_timer = 0.12
+    _update_hud()
+
+func _resolve_tile() -> void:
+    var ps := pstate[turn_idx]
+    var tile_type := board_tiles[ps["tile"]]
+    var pos: Vector2 = tile_positions[ps["tile"]]
+
+    if tile_type == TILE_BLUE:
+        ps["coins"] += 3
+        _play("coin")
+        _burst(pos, Color(0.3, 0.7, 1), 12)
+    elif tile_type == TILE_RED:
+        ps["coins"] = max(0, ps["coins"] - 2)
+        _play("hurt")
+        shake = maxf(shake, 4.0)
+        _burst(pos, Color(1, 0.3, 0.3), 8)
+    elif tile_type == TILE_STAR and ps["coins"] >= STAR_COST:
+        ps["coins"] -= STAR_COST
+        ps["stars"] += 1
+        _play("win")
+        _burst(pos, Color(1, 0.85, 0.2), 25)
+    elif tile_type == TILE_MG:
+        round_minigame = true
+    # else: TILE_STAR without enough coins = no effect
+
+    turn_phase = "resolving"
+    resolve_timer = 0.6
+    _update_hud()
+
+func _next_player() -> void:
+    turn_idx += 1
+    if turn_idx >= 4:
+        turn_idx = 0
+        if round_minigame:
+            round_minigame = false
+            _start_minigame()
+            return
+        round += 1
+        if round > ROUNDS:
+            _show_results()
+            return
+    turn_phase = "rolling"
+    ai_roll_timer = 1.0 + randf() * 0.5
+    _update_hud()
+
+# ---------- MINIGAME DISPATCH ----------
+
+func _start_minigame() -> void:
+    state = "playing_minigame"
+    _clear_ui()
+    _label("MINIGAME!", 40, 48, Color(1, 0.85, 0.2))
+
+    # Pick minigame (different from last time)
+    var last := minigame_type
+    minigame_type = (last + 1 + randi() % 2) % 3  # guaranteed different
+
+    mg_rankings.clear()
+    mg_player_progress.clear()
+    mg_alive.clear()
+    for i in range(4):
+        mg_player_progress.append(0.0)
+        mg_alive.append(true)
+    mg_timer = 0.0
+
+    if minigame_type == 0:
+        _label("TAP RACE - Mash Space/Enter to fill your bar!", 100, 24)
+        _label("First to fill wins! You have 15 seconds.", 130, 18)
+        mg_tap_fill.clear()
+        for i in range(4):
+            mg_tap_fill.append(0.0)
+    elif minigame_type == 1:
+        _label("DODGE - Avoid the falling red blocks!", 100, 24)
+        _label("Left/Right arrows to move. Don't get hit!", 130, 18)
+        mg_dodge_blocks.clear()
+        mg_dodge_player_x.clear()
+        var cx := 576.0
+        for i in range(4):
+            mg_dodge_player_x.append(cx - 180 + i * 120)
+        mg_dodge_spawn_timer = 0.0
+    else:
+        _label("MEMORY - Repeat the arrow sequence!", 100, 24)
+        _label("Watch the arrows flash, then press them in order.", 130, 18)
+        mg_mem_sequence.clear()
+        mg_mem_player_idx = 0
+        mg_mem_lengths.clear()
+        for i in range(4):
+            mg_mem_lengths.append(0)
+        mg_mem_step = 0
+        mg_mem_input_phase = false
+        mg_mem_flash_t = 0.0
+        mg_mem_ai_timer = 0.0
+        _mem_generate_sequence()
+
+    queue_redraw()
+
+func _minigame_input(event: InputEvent) -> void:
+    if state != "playing_minigame":
+        return
+    if minigame_type == 0:  # Tap Race
+        if event.is_action_pressed("ui_accept") and mg_alive[0]:
+            mg_tap_fill[0] = minf(1.0, mg_tap_fill[0] + 0.08)
+            _play("click")
+    elif minigame_type == 2:  # Memory - human input
+        if mg_mem_input_phase and mg_alive[0] and mg_mem_player_idx == 0:
+            var d := -1
+            if event.is_action_pressed("ui_left"): d = 0
+            elif event.is_action_pressed("ui_right"): d = 1
+            elif event.is_action_pressed("ui_up"): d = 2
+            elif event.is_action_pressed("ui_down"): d = 3
+            if d >= 0:
+                _mem_check_input(0, d)
+
+func _minigame_process(delta: float) -> void:
+    mg_timer += delta
+
+    if minigame_type == 0:  # Tap Race
+        # AI fill rates (difficulty-dependent)
+        var ai_rates := [0.025, 0.038, 0.052]
+        var rate: float = ai_rates[difficulty]
+        for i in range(1, 4):
+            if mg_alive[i]:
+                mg_tap_fill[i] = minf(1.0, mg_tap_fill[i] + rate * delta * 60.0)
+        # Check for finishers
+        var all_done := true
+        for i in range(4):
+            if mg_alive[i] and mg_tap_fill[i] >= 1.0:
+                mg_rankings.append(i)
+                mg_alive[i] = false
+            if mg_alive[i]:
+                all_done = false
+        if all_done or mg_timer > 16.0:
+            _end_minigame()
+
+    elif minigame_type == 1:  # Dodge
+        # Spawn blocks
+        mg_dodge_spawn_timer -= delta
+        if mg_dodge_spawn_timer <= 0.0:
+            mg_dodge_spawn_timer = 0.4 - difficulty * 0.08
+            var alive_indices: Array[int] = []
+            for i in range(4):
+                if mg_alive[i]:
+                    alive_indices.append(i)
+            if alive_indices.size() > 0:
+                var target := alive_indices[randi() % alive_indices.size()]
+                var bx := mg_dodge_player_x[target] + randf_range(-40, 40)
+                mg_dodge_blocks.append({"x": bx, "y": -20.0, "speed": 160.0 + difficulty * 30.0})
+        # Move blocks and check collisions
+        var to_remove: Array = []
+        for b in mg_dodge_blocks:
+            b["y"] += b["speed"] * delta
+            if b["y"] > 700:
+                to_remove.append(b)
+            else:
+                for i in range(4):
+                    if mg_alive[i] and abs(b["x"] - mg_dodge_player_x[i]) < 30 and b["y"] > 575 and b["y"] < 625:
+                        mg_alive[i] = false
+                        mg_rankings.append(i)
+                        _play("hurt")
+                        shake = maxf(shake, 5.0)
+                        _burst(Vector2(mg_dodge_player_x[i], 600), Color(1, 0.3, 0.3), 15)
+        for b in to_remove:
+            mg_dodge_blocks.erase(b)
+        # AI movement
+        var dodge_chance: float = [0.75, 0.55, 0.35][difficulty]
+        for i in range(1, 4):
+            if not mg_alive[i]:
+                continue
+            var danger := false
+            var best_dir := 0
+            for b in mg_dodge_blocks:
+                if abs(b["x"] - mg_dodge_player_x[i]) < 45 and b["y"] > 380 and b["y"] < 620:
+                    danger = true
+                    best_dir = -1 if b["x"] > mg_dodge_player_x[i] else 1
+            if danger and randf() < dodge_chance:
+                mg_dodge_player_x[i] = clamp(mg_dodge_player_x[i] + best_dir * 180 * delta, 100, 1050)
+            else:
+                mg_dodge_player_x[i] = clamp(mg_dodge_player_x[i] + (randf() - 0.5) * 100 * delta, 100, 1050)
+        # Human movement
+        if mg_alive[0]:
+            if Input.is_action_pressed("ui_left"):
+                mg_dodge_player_x[0] -= 280 * delta
+            if Input.is_action_pressed("ui_right"):
+                mg_dodge_player_x[0] += 280 * delta
+            mg_dodge_player_x[0] = clamp(mg_dodge_player_x[0], 100, 1050)
+        # End condition
+        var alive_count := 0
+        for i in range(4):
+            if mg_alive[i]:
+                alive_count += 1
+                mg_player_progress[i] = mg_timer
+        if alive_count <= 1 or mg_timer > 22.0:
+            _end_minigame()
+
+    elif minigame_type == 2:  # Memory
+        if mg_mem_input_phase:
+            # Sequence display phase - show arrows
+            mg_mem_flash_t -= delta
+            if mg_mem_flash_t <= 0.0:
+                if mg_mem_step < mg_mem_sequence.size():
+                    mg_mem_step += 1
+                    mg_mem_flash_t = 0.5
+                else:
+                    mg_mem_input_phase = false
+                    mg_mem_step = 0
+                    mg_mem_flash_t = 0.0
+            # AI input (only when it's their turn to respond, not during display)
+            if mg_mem_player_idx > 0 and mg_alive[mg_mem_player_idx]:
+                mg_mem_ai_timer -= delta
+                if mg_mem_ai_timer <= 0.0:
+                    mg_mem_ai_timer = 0.3 + randf() * 0.3
+                    var pidx := mg_mem_player_idx
+                    var ai_perfect: float = [1.0, 0.7, 0.4][difficulty]
+                    var d: int
+                    if randf() < ai_perfect:
+                        d = mg_mem_sequence[mg_mem_step]
+                    else:
+                        # Wrong answer - pick a random different direction
+                        d = mg_mem_sequence[mg_mem_step]
+                        while d == mg_mem_sequence[mg_mem_step]:
+                            d = randi() % 4
+                    _mem_check_input(pidx, d)
+        else:
+            # Show sequence before input
+            mg_mem_flash_t -= delta
+            if mg_mem_flash_t <= 0.0:
+                mg_mem_input_phase = true
+                mg_mem_step = 0
+                mg_mem_flash_t = 1.0
+                mg_mem_ai_timer = 0.5
+        # End condition
+        var all_done := true
+        for i in range(4):
+            if mg_alive[i]:
+                all_done = false
+        if all_done or mg_timer > 30.0:
+            _end_minigame()
+
+func _mem_generate_sequence() -> void:
+    mg_mem_sequence.clear()
+    var length := 3 + mg_mem_lengths[0]  # base 3, grows per round
+    for i in range(length):
+        mg_mem_sequence.append(randi() % 4)
+
+func _mem_check_input(player_idx: int, direction: int) -> void:
+    if not mg_alive[player_idx]:
+        return
+    if direction == mg_mem_sequence[mg_mem_step]:
+        _play("coin")
+        mg_mem_step += 1
+        if mg_mem_step >= mg_mem_sequence.size():
+            mg_mem_lengths[player_idx] += 1
+            mg_mem_step = 0
+            mg_mem_input_phase = false
+            mg_mem_flash_t = 1.0
+            _mem_generate_sequence()
+    else:
+        _play("hurt")
+        mg_alive[player_idx] = false
+        mg_player_progress[player_idx] = float(mg_mem_lengths[player_idx])
+        mg_rankings.append(player_idx)
+        if player_idx == 0:
+            _mem_next_player()
+        else:
+            # AI elimination handled in _minigame_process
+            pass
+
+func _mem_next_player() -> void:
+    mg_mem_player_idx += 1
+    while mg_mem_player_idx < 4 and not mg_alive[mg_mem_player_idx]:
+        mg_mem_player_idx += 1
+    if mg_mem_player_idx >= 4:
+        _end_minigame()
+    else:
+        mg_mem_step = 0
+        mg_mem_input_phase = false
+        mg_mem_flash_t = 1.0
+        mg_mem_ai_timer = 0.5
+
+func _end_minigame() -> void:
+    # Build final rankings
+    var final_rankings: Array[int] = []
+    if minigame_type == 0:  # Tap Race: best fill first
+        var scored: Array[Dictionary] = []
+        for i in range(4):
+            scored.append({"idx": i, "score": mg_tap_fill[i]})
+        scored.sort_custom(func(a, b): return a["score"] > b["score"])
+        for s in scored:
+            final_rankings.append(s["idx"])
+    elif minigame_type == 1:  # Dodge: reverse elimination order (last standing = best)
+        final_rankings = mg_rankings.duplicate()
+        for i in range(4):
+            if mg_alive[i] and not i in final_rankings:
+                final_rankings.append(i)
+        final_rankings.reverse()
+    else:  # Memory: longest sequence first
+        var scored2: Array[Dictionary] = []
+        for i in range(4):
+            scored2.append({"idx": i, "score": float(mg_mem_lengths[i])})
+        scored2.sort_custom(func(a, b): return a["score"] > b["score"])
+        for s in scored2:
+            final_rankings.append(s["idx"])
+    mg_rankings = final_rankings
+
+    # Award coins
+    var awards := [10, 5, 2, 0]
+    _play("win")
+    _clear_ui()
+    _label("MINIGAME RESULTS", 40, 48, Color(1, 0.85, 0.2))
+    var y := 110.0
+    for rank in range(4):
+        var pi: int = mg_rankings[rank]
+        var award: int = awards[rank]
+        pstate[pi]["coins"] += award
+        var txt := "%d. %s  +%d coins" % [rank + 1, PLAYERS[pi]["name"], award]
+        _label(txt, y, 22, PLAYERS[pi]["col"])
+        y += 30
+    _button("Continue", y + 20, func(): _return_to_board())
+    queue_redraw()
+
+func _return_to_board() -> void:
+    state = "playing_board"
+    round += 1
+    turn_idx = 0
+    turn_phase = "rolling"
+    ai_roll_timer = 1.0 + randf() * 0.5
+    _clear_ui()
+    if round > ROUNDS:
+        _show_results()
+    else:
+        _update_hud()
+    queue_redraw()
+
+# ---------- GAME RESULTS ----------
+
+func _show_results() -> void:
+    state = "results"
+    position = Vector2.ZERO
+    shake = 0.0
+    _play("win")
+    _clear_ui()
+    _label("GAME OVER!", 60, 60, Color(1, 0.85, 0.2))
+    # Sort players by stars (desc), then coins (desc)
+    var ranked: Array[Dictionary] = []
+    for i in range(4):
+        ranked.append({"idx": i, "stars": pstate[i]["stars"], "coins": pstate[i]["coins"]})
+    ranked.sort_custom(func(a, b):
+        if a["stars"] != b["stars"]:
+            return a["stars"] > b["stars"]
+        return a["coins"] > b["coins"])
+    var y := 160.0
+    var labels := ["1st", "2nd", "3rd", "4th"]
+    for rank in range(4):
+        var pi: int = ranked[rank]["idx"]
+        var ps := pstate[pi]
+        var pn := PLAYERS[pi]
+        var txt := "%s  %s  %d stars  %d coins" % [labels[rank], pn["name"], ps["stars"], ps["coins"]]
+        _label(txt, y, 24, pn["col"])
+        y += 36
+        if rank == 0:
+            _burst(Vector2(576, y - 18), pn["col"], 40)
+    _button("Play Again", y + 20, func(): _show_title())
+    queue_redraw()
+
+# ---------- DRAW ----------
+
+func _draw() -> void:
+    # Background
+    draw_rect(Rect2(Vector2.ZERO, Vector2(1152, 648)), Color(0.08, 0.1, 0.18))
+
+    if state in ["playing_board", "results"]:
+        # Draw board tiles
+        for i in range(TILE_COUNT):
+            if i < tile_positions.size() and i < board_tiles.size():
+                _draw_tile(tile_positions[i], board_tiles[i])
+        # Draw connections between tiles
+        for i in range(TILE_COUNT):
+            var j := (i + 1) % TILE_COUNT
+            if i < tile_positions.size() and j < tile_positions.size():
+                draw_line(tile_positions[i], tile_positions[j], Color(0.25, 0.25, 0.35), 2)
+        # Draw player tokens
+        var offsets := [Vector2(-10, -10), Vector2(10, -10), Vector2(-10, 10), Vector2(10, 10)]
+        for i in range(4):
+            var ps := pstate[i]
+            if ps["tile"] < tile_positions.size():
+                var pos: Vector2 = tile_positions[ps["tile"]] + offsets[i]
+                var pn := PLAYERS[i]
+                draw_circle(pos, 8, pn["col"])
+                draw_circle(pos, 8, Color.WHITE, false, 2)
+                # Highlight current player with pulsing ring
+                if i == turn_idx and state == "playing_board":
+                    var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.005) * 0.3
+                    draw_circle(pos, 12 * pulse, Color(1, 1, 1, 0.4), false, 2)
+
+    elif state == "playing_minigame":
+        _draw_minigame()
+
+func _draw_tile(pos: Vector2, ttype: int) -> void:
+    var col: Color
+    var label: String
+    match ttype:
+        TILE_BLUE:
+            col = Color(0.2, 0.4, 0.8)
+            label = "+3"
+        TILE_RED:
+            col = Color(0.8, 0.2, 0.2)
+            label = "-2"
+        TILE_STAR:
+            col = Color(0.9, 0.8, 0.2)
+            label = "*"
+        TILE_MG:
+            col = Color(0.6, 0.2, 0.8)
+            label = "MG"
+    draw_circle(pos, 16, col)
+    draw_circle(pos, 16, Color.WHITE, false, 1)
+    # Use small colored rect as label indicator (avoids draw_string complexity)
+    if label == "+3":
+        draw_rect(Rect2(pos.x - 6, pos.y - 6, 12, 12), Color(0.3, 0.7, 1, 0.8))
+    elif label == "-2":
+        draw_rect(Rect2(pos.x - 5, pos.y - 3, 10, 6), Color(1, 0.3, 0.3, 0.8))
+    elif label == "*":
+        draw_rect(Rect2(pos.x - 7, pos.y - 7, 14, 14), Color(1, 0.9, 0.2, 0.9))
+    elif label == "MG":
+        draw_rect(Rect2(pos.x - 8, pos.y - 5, 16, 10), Color(1, 0.5, 1, 0.8))
+
+func _draw_minigame() -> void:
+    if minigame_type == 0:  # Tap Race
+        var bar_w := 200.0
+        var bar_h := 24.0
+        var start_x := 576.0 - bar_w * 2 - 60
+        for i in range(4):
+            var x := start_x + i * (bar_w + 40)
+            var y := 300.0
+            var pn := PLAYERS[i]
+            # Background
+            draw_rect(Rect2(x, y, bar_w, bar_h), Color(0.2, 0.2, 0.2))
+            # Fill
+            var fill := mg_tap_fill[i] if i < mg_tap_fill.size() else 0.0
+            draw_rect(Rect2(x, y, bar_w * fill, bar_h), pn["col"])
+            # Border
+            draw_rect(Rect2(x, y, bar_w, bar_h), Color.WHITE, false, 1)
+
+    elif minigame_type == 1:  # Dodge
+        # Falling blocks
+        for b in mg_dodge_blocks:
+            draw_rect(Rect2(b["x"] - 15, b["y"] - 15, 30, 30), Color(0.9, 0.3, 0.3))
+        # Players at bottom
+        for i in range(4):
+            if not mg_alive[i]:
+                continue
+            var px := mg_dodge_player_x[i] if i < mg_dodge_player_x.size() else 576.0
+            var pn := PLAYERS[i]
+            draw_rect(Rect2(px - 12, 585, 24, 24), pn["col"])
+        # Floor line
+        draw_line(Vector2(0, 610), Vector2(1152, 610), Color(0.5, 0.5, 0.5), 2)
+
+    else:  # Memory
+        # Current sequence display
+        var arrow_colors := [Color(0.4, 0.6, 1), Color(1, 0.4, 0.4), Color(0.4, 0.9, 0.4), Color(1, 0.9, 0.3)]
+        var arrow_shapes: Array[PackedVector2Array] = [
+            PackedVector2Array([Vector2(10, 0), Vector2(-10, -6), Vector2(-10, 6)]),  # left
+            PackedVector2Array([Vector2(-10, 0), Vector2(10, -6), Vector2(10, 6)]),   # right
+            PackedVector2Array([Vector2(0, -10), Vector2(-6, 10), Vector2(6, 10)]),   # up
+            PackedVector2Array([Vector2(0, 10), Vector2(-6, -10), Vector2(6, -10)]),  # down
+        ]
+        if mg_mem_input_phase and mg_mem_step < mg_mem_sequence.size():
+            var d := mg_mem_sequence[mg_mem_step]
+            # PackedVector2Array kan inte skalas/flyttas med operatorer -
+            # transformera punktvis (samma klass av fel som fangades i v1.96).
+            var pts := PackedVector2Array()
+            for v in arrow_shapes[d]:
+                pts.append(v * 3.0 + Vector2(576, 350))
+            draw_colored_polygon(pts, arrow_colors[d])
+
+""";
 }

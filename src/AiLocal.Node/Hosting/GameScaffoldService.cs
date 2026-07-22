@@ -135,6 +135,55 @@ public sealed partial class GameScaffoldService
 
     static string[] ScaffoldGodot(string root, string prompt)
     {
+        // v2.2: golvet + MECHANICS.md - genrens relevanta, testade mekanik-
+        // snuttar ur GameMechanicLibrary läggs som fil i projektet så
+        // byggagenten KLISTRAR IN beprövad kod (double_jump, checkpoint,
+        // countdown...) i stället för att uppfinna den svagt från noll.
+        var scaffolded = ScaffoldGodotCore(root, prompt);
+        return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
+    }
+
+    static string[] AppendMechanicsDoc(string root, string prompt, string[] files)
+    {
+        try
+        {
+            var genre = DetectGenre(prompt);
+            string[] names = genre switch
+            {
+                "party" => ["countdown_timer", "score_popup", "powerup_timer"],
+                "platformer" => ["double_jump", "checkpoint", "enemy_patrol", "score_popup"],
+                "rpg" or "roguelike" or "shooter" => ["enemy_patrol", "health_bar", "damage_flash", "camera_follow"],
+                "racing" => ["checkpoint", "camera_follow", "countdown_timer"],
+                "management" or "simulator" or "idle" => ["shop", "score_popup"],
+                "artillery" => ["damage_flash", "countdown_timer", "score_popup"],
+                "puzzle" => ["score_popup", "countdown_timer"],
+                _ => ["score_popup", "countdown_timer"],
+            };
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("# Mekanikbibliotek (fardiga, testade GDScript-snuttar)");
+            sb.AppendLine();
+            sb.AppendLine("Klistra in och ANPASSA i stallet for att skriva fran noll -");
+            sb.AppendLine("snuttarna foljer kitets stil (engelsk spelartext, juice inbyggd).");
+            foreach (var name in names)
+            {
+                if (GameMechanics.GameMechanicLibrary.Get(name) is not { } m) continue;
+                sb.AppendLine();
+                sb.AppendLine($"## {m.Name} - {m.Description}");
+                sb.AppendLine("```gdscript");
+                sb.AppendLine(m.GDScript.Trim());
+                sb.AppendLine("```");
+            }
+            Write(root, "MECHANICS.md", sb.ToString());
+            return [.. files, "MECHANICS.md"];
+        }
+        catch
+        {
+            return files; // biblioteket är en bonus, aldrig ett krav
+        }
+    }
+
+    static string[] ScaffoldGodotCore(string root, string prompt)
+    {
         // Genrekit även för Godot - tidigare fanns BARA plattformaren oavsett
         // prompt, så en fotbollsmanager startade som "Pixel Rush" och agenten
         // fick bygga 95% från noll (rotorsaken bakom spretiga motorspel).
@@ -160,6 +209,8 @@ public sealed partial class GameScaffoldService
             return ScaffoldGodotPuzzle(root, prompt);
         if (genre == "artillery")
             return ScaffoldGodotArtillery(root, prompt);
+        if (genre == "party")
+            return ScaffoldGodotParty(root, prompt);
 
         // Plattformaren (Pixel Rush) - sedan v1.85 ren GDScript som de andra
         // kiten, sa den headless-verifieras och har juice-passet. Det gamla

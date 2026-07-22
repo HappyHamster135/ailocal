@@ -99,7 +99,13 @@ public static class DirectorPass
         // ska inte ge samma designangrepp (vinkeln styr HUR regissören tänker,
         // fröna styr VAD den kan bygga kring).
         var lens = CreativeLenses[Random.Shared.Next(CreativeLenses.Length)];
-        var promptWithLens = userPrompt + "\n\nKREATIV VINKEL för just den här körningen: " + lens;
+        // v2.2: kuraterad visuell riktning (VisualStyleLib) - regissören får
+        // ett konkret palettförslag per genre i stället för att "snygg
+        // grafik" bli en from förhoppning. Förslaget är en SPRÅNGBRÄDA - en
+        // egen sammanhållen riktning får ersätta det.
+        var style = VisualStyleLib.PickForGenre(GameScaffoldService.DetectGenre(userPrompt));
+        var promptWithLens = userPrompt + "\n\nKREATIV VINKEL för just den här körningen: " + lens
+            + $"\n\nVISUELL RIKTNING (förslag - gör den eller en egen till ett kriterium): {style.Name} - {style.Description}";
         var contract = await AskModelAsync(promptWithLens, strongModelHint, complete, ct, inspirationSeeds, pastLessons)
             ?? FallbackContract(userPrompt, inspirationSeeds);
         // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra
@@ -323,7 +329,9 @@ public static class DirectorPass
             "rpg" or "roguelike" or "shooter" =>
                 "Minst 3 vågor/zoner med stigande svårighet och nya fiendetyper per steg",
             "artillery" =>
-                "En motståndarstege med minst 3 namngivna motståndare med stigande träffsäkerhet/HP och egen personlighet",
+                "En motstandarstege med minst 3 namngivna motstandare med stigande traffsakerhet/HP och egen personlighet",
+            "party" =>
+                "Minst 2 olika bradlayouter och 3 fungerande minispel med olika mekaniker (reaktion, minne, skicklighet)",
             _ =>
                 "Minst 3 handbyggda banor/nivåer med stigande svårighetsgrad och egen karaktär",
         };
@@ -337,6 +345,9 @@ public static class DirectorPass
         var pillars = genre is "management" or "simulator" or "idle"
             ? "Meningsfulla beslut varje omgång - resan från botten till toppen ska kännas förtjänad."
             : "Lätt att lära, svår att bemästra - varje omgång ska kännas rättvis.";
+        // v2.2: kuraterad visuell identitet även i nyckellösa körningar -
+        // "snygg grafik" blir ett KONKRET palettkriterium ur VisualStyleLib.
+        var style = VisualStyleLib.PickForGenre(genre);
         var contract = isGame
             ? new Contract(
                 pillars,
@@ -344,6 +355,7 @@ public static class DirectorPass
                 [
                     progression,
                     replay,
+                    $"Sammanhållen visuell identitet ({style.Name}: {style.Description}) - samma palett på alla skärmar",
                     "Poängsystem med sparat highscore",
                     "Ljudeffekter för minst 3 olika händelser",
                     "Startskärm med instruktioner samt paus",

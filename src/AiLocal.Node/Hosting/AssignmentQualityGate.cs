@@ -27,7 +27,9 @@ public static class AssignmentQualityGate
         Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
         Func<string, string, CancellationToken, Task<(bool Success, string Summary, IReadOnlyList<string> Issues)>>? playtest,
         CancellationToken ct,
-        bool gameExpected = false)
+        bool gameExpected = false,
+        string? genre = null,
+        string? assignment = null)
     {
         var projectRoot = ProjectRootDetector.Detect(workspaceRoot);
         if (projectRoot is null)
@@ -66,6 +68,67 @@ public static class AssignmentQualityGate
         }
 
         var engine = GameBuilder.DetectEngine(projectRoot);
+
+        // v2.2.0: Structured genre contract verification - grep-verifiable
+        // constraints that catch structural misses (missing gravity, no dice
+        // roll, single enemy type) BEFORE the LLM playtest review.
+        if (gameExpected && genre is not null)
+        {
+            var (met, total, contractFindings) = GenreContracts.Verify(projectRoot, genre, assignment);
+            if (contractFindings.Count > 0)
+            {
+                var mustFindings = contractFindings.Where(f => f.StartsWith("SAKNAS")).ToList();
+                var shouldFindings = contractFindings.Where(f => f.StartsWith("REKOMMENDATION")).ToList();
+                // Hard fail only if > half of MUST constraints are unmet
+                if (mustFindings.Count > total / 2)
+                {
+                    hard = true;
+                    issues.Add($"Genrekontrakt ({genre}): {total - mustFindings.Count}/{total} krav uppfyllda.\n"
+                        + string.Join("\n", mustFindings.Take(5)));
+                }
+                else if (mustFindings.Count > 0)
+                {
+                    issues.Add($"Genrekontrakt ({genre}): {total - mustFindings.Count}/{total} krav uppfyllda.\n"
+                        + string.Join("\n", mustFindings.Take(3)));
+                }
+                // Should-have findings are always advisory
+                foreach (var f in shouldFindings.Take(3))
+                    okSummary.AppendLine(f);
+            }
+            else if (total > 0)
+            {
+                okSummary.AppendLine($"Genrekontrakt ({genre}): alla {total} krav uppfyllda.");
+            }
+        }
+
+        // v2.2.0: Anti-pattern scan - design-level issues (repetitive levels,
+        // missing screens, format strings) detected by regex, not LLM.
+        // (projectRoot är garanterat non-null efter early-return ovan - den
+        // ärvda is-not-null-testen fick flödesanalysen att tappa det och gav
+        // CS8604 längre ner.)
+        if (gameExpected)
+        {
+            try
+            {
+                var allSource = "";
+                foreach (var srcFile in Directory.EnumerateFiles(projectRoot, "*",
+                    SearchOption.AllDirectories)
+                    .Where(f => f.EndsWith(".gd") || f.EndsWith(".cs") || f.EndsWith(".js"))
+                    .Take(30))
+                {
+                    try { allSource += File.ReadAllText(srcFile) + "\n"; } catch { }
+                }
+                if (allSource.Length > 0)
+                {
+                    var apFindings = AntiPatternDb.Scan(allSource, engine ?? "unknown");
+                    var formatted = AntiPatternDb.FormatFindings(apFindings);
+                    foreach (var f in formatted.Take(5))
+                        okSummary.AppendLine(f);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
 
         // A game was requested but the deliverable is not a game-engine project.
         // DetectEngine returns "unknown" for a plain C#/CLI app (no project.godot,

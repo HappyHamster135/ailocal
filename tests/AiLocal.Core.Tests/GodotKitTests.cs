@@ -226,6 +226,51 @@ public class GodotKitTests
         }
         finally { Cleanup(root); }
     }
+    [Fact]
+    public void Partyspel_FarBoardBashKitet()
+    {
+        // v2.1.0: party/bradspel (Board Bash) - forsta sammansatta kitet
+        foreach (var prompt in new[]
+        {
+            "bygg ett mario party liknande spel i godot med minigames och brador",
+            "bygg ett party bradspel med minispel i godot",
+            "bygg ett board game i godot med tarning och minigames",
+        })
+        {
+            Assert.Equal("party", GameScaffoldService.DetectGenre(prompt));
+        }
+        Assert.NotEqual("party", GameScaffoldService.DetectGenre("ett plattformsspel med party-tema"));
+    }
+
+    [Fact]
+    public void PartyspelIGodot_FarBoardBashKitet()
+    {
+        const string prompt = "bygg ett mario party liknande spel i godot med minigames";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("party", GameScaffoldService.DetectGenre(prompt));
+            Assert.Contains("Board Bash", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("TILE_COUNT", script);
+            Assert.Contains("turn_phase", script);
+            Assert.Contains("minigame", script);
+            Assert.Contains("PLAYERS", script);
+            Assert.Contains("_do_roll", script);
+            Assert.Contains("_start_minigame", script);
+            Assert.Contains("BOARD_RING", script);
+            Assert.Contains("BOARD_SERPENTINE", script);
+            Assert.Contains("ROUNDS", script);
+            Assert.Contains("CPUParticles2D", script);
+            Assert.Contains("shake", script);
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+
 
     [Fact]
     public void TankOrdstammen_TrafferInteTankar()
@@ -255,7 +300,8 @@ public class GodotKitTests
             "bygg ett racingspel i godot med bilar och tre varv",   // C1 juice: Varvet
             "bygg ett 3d samlarspel i godot",                         // C1 juice: Kuben (CPUParticles3D)
             "bygg ett 2d plattformsspel i godot",                     // v1.85: Pixel Rush i GDScript
-            "bygg ett artillerispel som shellshock live i godot"      // v1.98: Kanonaden
+            "bygg ett artillerispel som shellshock live i godot",     // v1.98: Cannonade
+            "bygg ett mario party liknande spel i godot med minigames" // v2.1: Board Bash (fangade 6 riktiga parse-fel forra passet)
         })
         {
             var (root, _) = ScaffoldTo(prompt);
