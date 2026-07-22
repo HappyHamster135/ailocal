@@ -358,13 +358,76 @@ public static class WorkerRole
                 };
             }
 
-            // Ärlig kostnadsredovisning: vision- och molnbildsanrop går UTANFÖR
-            // chattkedjan (egna API:er, egna prismodeller) och kan inte prissättas
-            // i usageByModel - de RÄKNAS i stället och redovisas öppet bredvid
-            // dollarsiffran ("N bild-/visionsanrop utanför prislistan"), hellre
-            // en ärlig fotnot än en siffra som ser komplett ut men inte är det.
+            // Ärlig kostnadsredovisning: bildanrop utan usage i svaret RÄKNAS
+            // och redovisas öppet bredvid dollarsiffran ("N bild-/visionsanrop
+            // utanför prislistan") - hellre en ärlig fotnot än en siffra som
+            // ser komplett ut utan att vara det. (v1.91: visionsanrop MED usage
+            // prissätts på riktigt - se AccountVision nedan.)
             var unpricedImageCalls = 0;
             var unpricedLock = new object();
+
+            // B5: summera token-användning per modell över HELA uppdraget så
+            // kostnaden kan redovisas öppet i slutresultatet. Lokala modeller
+            // (Ollama) hoppas över - gratis compute är ingen utgift. (Blocket
+            // bor FÖRE vision-/executor-delegaterna: de fångar variablerna.)
+            var usageByModel = new Dictionary<string, (long In, long Out)>(StringComparer.OrdinalIgnoreCase);
+            var usageLock = new object();
+
+            // B5-gräns (opt-in): en per-uppdrags-kostnadstak. Bara när den är
+            // satt förhandshämtas OpenRouter-katalogen EN gång (annars påverkas
+            // inte bygglatensen), så varje svar kan prissättas live och loopen
+            // stoppas när den ackumulerade kostnaden når taket.
+            var maxCostUsd = req.MaxCostUsd.GetValueOrDefault();
+            IReadOnlyList<CatalogModel> capCatalog = [];
+            if (maxCostUsd > 0m)
+                try { capCatalog = await new OpenRouterCatalog(httpFactory).GetAsync(ct); }
+                catch { /* prissättning faller tillbaka på Anthropic-listan */ }
+            var spentUsd = 0m;
+
+            // Uppdragets ENDA väg till modellen: ensam agent, team-spår,
+            // producent-roller, regissör och fixrundor ska ALLA gå genom denna
+            // delegat - anrop utanför den hamnar utanför både kostnads-
+            // redovisningen och Max$-taket (granskningen v1.83 hittade att
+            // team-läget och regissörsanropen gick förbi: Max$ bet inte på
+            // spåren och operatören visades en kostnad som saknade merparten).
+            Func<ChatRequest, CancellationToken, Task<ProviderResponse>> completeAccounted = async (r, c) =>
+            {
+                var resp = await provider.CompleteAsync(r, c);
+                if (resp.IsSuccess && resp.Response is { IsLocal: false } chat && !string.IsNullOrWhiteSpace(chat.Model))
+                    lock (usageLock)
+                    {
+                        var cur = usageByModel.TryGetValue(chat.Model, out var v) ? v : (In: 0L, Out: 0L);
+                        usageByModel[chat.Model] = (cur.In + chat.Usage.InputTokens, cur.Out + chat.Usage.OutputTokens);
+                        if (maxCostUsd > 0m)
+                            spentUsd += AssignmentCost.Price(
+                                new Dictionary<string, (long In, long Out)> { [chat.Model] = (chat.Usage.InputTokens, chat.Usage.OutputTokens) },
+                                capCatalog).Total;
+                    }
+                return resp;
+            };
+            decimal? capLimit = maxCostUsd > 0m ? maxCostUsd : null;
+            Func<decimal>? capSpent = maxCostUsd > 0m ? () => { lock (usageLock) return spentUsd; } : null;
+
+            // v1.91: visionsanrop PRISSÄTTS när svaret bär usage (alla fyra
+            // leverantörsvägarna extraherar tokens + normaliserad modellslug) -
+            // in i usageByModel som allt annat, och Max$ ser dem. Bara anrop
+            // UTAN usage i svaret räknas kvar som oprissatta (fotnoten).
+            void AccountVision(VisionResult r)
+            {
+                if (!r.Success) return;
+                if (r.Model is { Length: > 0 } && (r.InputTokens > 0 || r.OutputTokens > 0))
+                    lock (usageLock)
+                    {
+                        var cur = usageByModel.TryGetValue(r.Model, out var v) ? v : (In: 0L, Out: 0L);
+                        usageByModel[r.Model] = (cur.In + r.InputTokens, cur.Out + r.OutputTokens);
+                        if (maxCostUsd > 0m)
+                            spentUsd += AssignmentCost.Price(
+                                new Dictionary<string, (long In, long Out)> { [r.Model] = (In: r.InputTokens, Out: r.OutputTokens) },
+                                capCatalog).Total;
+                    }
+                else
+                    lock (unpricedLock) unpricedImageCalls++;
+            }
 
             // Vision-ögat för playtestens skärmdumpar - samma analysator som
             // vision_review-verktyget använder. Utan konfigurerade nycklar
@@ -374,8 +437,7 @@ public static class WorkerRole
                 {
                     var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
-                    if (r.Success)
-                        lock (unpricedLock) unpricedImageCalls++;
+                    AccountVision(r);   // v1.91: prissätts när usage finns
                     return (r.Success, FormatVisionResult(r));
                 };
 
@@ -488,52 +550,13 @@ public static class WorkerRole
                 {
                     var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
-                    if (r.Success)
-                        lock (unpricedLock) unpricedImageCalls++;
+                    AccountVision(r);   // v1.91: prissätts när usage finns
                     return (r.Success, FormatVisionResult(r));
                 });
             var executor = BuildExecutor(workspaceRoot);
-            // B5: summera token-användning per modell över HELA uppdraget (samma
-            // loop körs för huvudkörning, continuations och fixrundor) så
-            // kostnaden kan redovisas öppet i slutresultatet. Lokala modeller
-            // (Ollama) hoppas över - gratis compute är ingen utgift.
-            var usageByModel = new Dictionary<string, (long In, long Out)>(StringComparer.OrdinalIgnoreCase);
-            var usageLock = new object();
-
-            // B5-gräns (opt-in): en per-uppdrags-kostnadstak. Bara när den är
-            // satt förhandshämtas OpenRouter-katalogen EN gång (annars påverkas
-            // inte bygglatensen), så varje svar kan prissättas live och loopen
-            // stoppas när den ackumulerade kostnaden når taket.
-            var maxCostUsd = req.MaxCostUsd.GetValueOrDefault();
-            IReadOnlyList<CatalogModel> capCatalog = [];
-            if (maxCostUsd > 0m)
-                try { capCatalog = await new OpenRouterCatalog(httpFactory).GetAsync(ct); }
-                catch { /* prissättning faller tillbaka på Anthropic-listan */ }
-            var spentUsd = 0m;
-
-            // Uppdragets ENDA väg till modellen: ensam agent, team-spår,
-            // producent-roller, regissör och fixrundor ska ALLA gå genom denna
-            // delegat - anrop utanför den hamnar utanför både kostnads-
-            // redovisningen och Max$-taket (granskningen v1.83 hittade att
-            // team-läget och regissörsanropen gick förbi: Max$ bet inte på
-            // spåren och operatören visades en kostnad som saknade merparten).
-            Func<ChatRequest, CancellationToken, Task<ProviderResponse>> completeAccounted = async (r, c) =>
-            {
-                var resp = await provider.CompleteAsync(r, c);
-                if (resp.IsSuccess && resp.Response is { IsLocal: false } chat && !string.IsNullOrWhiteSpace(chat.Model))
-                    lock (usageLock)
-                    {
-                        var cur = usageByModel.TryGetValue(chat.Model, out var v) ? v : (In: 0L, Out: 0L);
-                        usageByModel[chat.Model] = (cur.In + chat.Usage.InputTokens, cur.Out + chat.Usage.OutputTokens);
-                        if (maxCostUsd > 0m)
-                            spentUsd += AssignmentCost.Price(
-                                new Dictionary<string, (long In, long Out)> { [chat.Model] = (chat.Usage.InputTokens, chat.Usage.OutputTokens) },
-                                capCatalog).Total;
-                    }
-                return resp;
-            };
-            decimal? capLimit = maxCostUsd > 0m ? maxCostUsd : null;
-            Func<decimal>? capSpent = maxCostUsd > 0m ? () => { lock (usageLock) return spentUsd; } : null;
+            // Kostnadsblocket (usageByModel/completeAccounted/AccountVision)
+            // bor FÖRE vision-/executor-delegaterna högre upp - de fångar
+            // variablerna. Loopen skapas här där executorn finns.
             var loop = new AgentLoop(completeAccounted, executor, capLimit, capSpent);
 
             // Deterministic floor: a BUILD assignment on an EMPTY workspace

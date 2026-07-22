@@ -22,10 +22,17 @@ public sealed record ScreenshotResult(
 /// <paramref name="Issues"/> is a list of visual bugs or anomalies detected
 /// in the image, parsed from the model's structured analysis.
 /// </summary>
+/// <summary>v1.91: Model/tokens bär anropets faktiska användning (normaliserad
+/// modell-slug i OpenRouter-form där det går, t.ex. "openai/gpt-4o") så
+/// uppdragets kostnadsredovisning kan PRISSÄTTA visionsanropen i stället för
+/// att bara räkna dem. 0/null = usage saknades i svaret (räknas oprissatt).</summary>
 public sealed record VisionResult(
     bool Success,
     string Analysis,
-    List<string> Issues);
+    List<string> Issues,
+    string? Model = null,
+    long InputTokens = 0,
+    long OutputTokens = 0);
 
 /// <summary>
 /// Captures screenshots of the primary screen (or a specific window by title)
@@ -601,7 +608,7 @@ public sealed class VisionAnalyzer
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            return ParseGeminiVisionResponse(body);
+            return ParseGeminiVisionResponse(body, model);
         }
         catch (Exception ex)
         {
@@ -643,7 +650,7 @@ public sealed class VisionAnalyzer
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            return ParseOpenAIVisionResponse(body);
+            return ParseOpenAIVisionResponse(body, providerName);
         }
         catch (Exception ex)
         {
@@ -654,8 +661,10 @@ public sealed class VisionAnalyzer
 
     /// <summary>
     /// Parses an OpenAI-compatible vision response (choices[0].message.content).
+    /// v1.91: extraherar också usage + modell (normaliserad till OpenRouter-slug
+    /// för prissättning - "gpt-4o" via OpenAI direkt blir "openai/gpt-4o").
     /// </summary>
-    private static VisionResult ParseOpenAIVisionResponse(string body)
+    internal static VisionResult ParseOpenAIVisionResponse(string body, string providerName = "openai")
     {
         try
         {
@@ -674,8 +683,9 @@ public sealed class VisionAnalyzer
             if (string.IsNullOrWhiteSpace(content))
                 return new VisionResult(false, "Empty response from vision model", []);
 
+            var (model, inTok, outTok) = ReadOpenAiUsage(root, providerName);
             var issues = ExtractIssues(content);
-            return new VisionResult(true, content, issues);
+            return new VisionResult(true, content, issues, model, inTok, outTok);
         }
         catch (Exception ex)
         {
@@ -683,10 +693,28 @@ public sealed class VisionAnalyzer
         }
     }
 
+    /// <summary>Usage + modellslug ur ett OpenAI-format-svar. OpenRouter
+    /// returnerar redan "leverantör/modell"; direkta OpenAI-svar prefixas så
+    /// prislistan (OpenRouter-katalogen) känner igen dem.</summary>
+    private static (string? Model, long InTok, long OutTok) ReadOpenAiUsage(JsonElement root, string providerName)
+    {
+        var model = root.TryGetProperty("model", out var m) && m.ValueKind == JsonValueKind.String
+            ? m.GetString() : null;
+        if (model is { Length: > 0 } && !model.Contains('/') && providerName == "openai")
+            model = "openai/" + model;
+        long inTok = 0, outTok = 0;
+        if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+        {
+            if (usage.TryGetProperty("prompt_tokens", out var p) && p.TryGetInt64(out var pv)) inTok = pv;
+            if (usage.TryGetProperty("completion_tokens", out var q) && q.TryGetInt64(out var qv)) outTok = qv;
+        }
+        return (model, inTok, outTok);
+    }
+
     /// <summary>
     /// Parses an Anthropic vision response (content array with text blocks).
     /// </summary>
-    private static VisionResult ParseAnthropicVisionResponse(string body)
+    internal static VisionResult ParseAnthropicVisionResponse(string body)
     {
         try
         {
@@ -717,8 +745,18 @@ public sealed class VisionAnalyzer
                 return new VisionResult(false, "Empty response from vision model", []);
             }
 
+            // v1.91: Anthropic-slugs (claude-*) prissätts av Anthropic-listan
+            // som de är - ingen normalisering behövs.
+            var model = root.TryGetProperty("model", out var mdl) && mdl.ValueKind == JsonValueKind.String
+                ? mdl.GetString() : null;
+            long inTok = 0, outTok = 0;
+            if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+            {
+                if (usage.TryGetProperty("input_tokens", out var it) && it.TryGetInt64(out var iv)) inTok = iv;
+                if (usage.TryGetProperty("output_tokens", out var ot) && ot.TryGetInt64(out var ov)) outTok = ov;
+            }
             var issues = ExtractIssues(contentText);
-            return new VisionResult(true, contentText, issues);
+            return new VisionResult(true, contentText, issues, model, inTok, outTok);
         }
         catch (Exception ex)
         {
@@ -728,8 +766,9 @@ public sealed class VisionAnalyzer
 
     /// <summary>
     /// Parses a Gemini vision response (candidates[0].content.parts).
+    /// v1.91: usageMetadata + "google/"-prefixad modell för prissättning.
     /// </summary>
-    private static VisionResult ParseGeminiVisionResponse(string body)
+    internal static VisionResult ParseGeminiVisionResponse(string body, string? requestModel = null)
     {
         try
         {
@@ -756,8 +795,18 @@ public sealed class VisionAnalyzer
             if (string.IsNullOrWhiteSpace(contentText))
                 return new VisionResult(false, "Empty response from vision model", []);
 
+            var model = root.TryGetProperty("modelVersion", out var mv) && mv.ValueKind == JsonValueKind.String
+                ? mv.GetString() : requestModel;
+            if (model is { Length: > 0 } && !model.Contains('/'))
+                model = "google/" + model;
+            long inTok = 0, outTok = 0;
+            if (root.TryGetProperty("usageMetadata", out var um) && um.ValueKind == JsonValueKind.Object)
+            {
+                if (um.TryGetProperty("promptTokenCount", out var p) && p.TryGetInt64(out var pv)) inTok = pv;
+                if (um.TryGetProperty("candidatesTokenCount", out var q) && q.TryGetInt64(out var qv)) outTok = qv;
+            }
             var issues = ExtractIssues(contentText);
-            return new VisionResult(true, contentText, issues);
+            return new VisionResult(true, contentText, issues, model, inTok, outTok);
         }
         catch (Exception ex)
         {
