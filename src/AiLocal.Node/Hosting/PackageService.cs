@@ -64,6 +64,14 @@ public sealed class PackageService
             await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, ct);
             files.Add(metaPath);
 
+            // C7: butikssida (store.html) - en DELBAR produktsida med spelets
+            // namn, den animerade reprisen som kort "trailer", skärmdumpar,
+            // beskrivning (ur DESIGN.md) och hur man spelar. Bilderna bäddas in
+            // som data-URI:er så sidan är helt fristående och funkar var som helst.
+            var storePath = Path.Combine(outputDir, "store.html");
+            await File.WriteAllTextAsync(storePath, GenerateStorePage(gameName, engine, projectRoot, files), Encoding.UTF8, ct);
+            files.Add(storePath);
+
             // Skapa .zip
             if (File.Exists(zipPath))
                 File.Delete(zipPath);
@@ -91,6 +99,7 @@ public sealed class PackageService
             return new PackageResult(true,
                 $"Paket skapat: {zipPath} ({FormatBytes(size)}, {files.Count} filer).\n" +
                 $"- README: {readmePath}\n" +
+                $"- Butikssida: {storePath}\n" +
                 $"- Metadata: {metaPath}",
                 zipPath, size);
         }
@@ -345,6 +354,91 @@ Compress-Archive -Path ""$source\*"" -DestinationPath ""$dest"" -Force
             tags = Array.Empty<string>(),
         };
     }
+
+    // ---- C7: butikssida (store.html) ----------------------------------------
+
+    private static string GenerateStorePage(string gameName, string engine, string projectRoot, List<string> files)
+    {
+        static string DataUri(string path)
+        {
+            try { return "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(path)); }
+            catch { return ""; }
+        }
+        var shotFiles = files
+            .Where(f => f.Replace('\\', '/').Contains("/screenshots/") && f.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var replay = shotFiles.FirstOrDefault(f => Path.GetFileName(f).Equals("replay.png", StringComparison.OrdinalIgnoreCase));
+        var stills = shotFiles.Where(f => !Path.GetFileName(f).Equals("replay.png", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var description = ExtractConcept(projectRoot)
+            ?? $"Ett {(engine == "html5" ? "webbspel" : "spel")} byggt med AiLocal.";
+        var controls = engine == "html5"
+            ? "Öppna index.html i en webbläsare."
+            : $"Kör {HtmlEsc(gameName)}.exe på Windows.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<!DOCTYPE html><html lang=\"sv\"><head><meta charset=\"utf-8\">");
+        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+        sb.AppendLine($"<title>{HtmlEsc(gameName)}</title>");
+        sb.AppendLine("<style>");
+        sb.AppendLine("body{margin:0;font-family:system-ui,Arial,sans-serif;background:#0e1116;color:#e6e6e6;line-height:1.6}");
+        sb.AppendLine(".wrap{max-width:820px;margin:0 auto;padding:32px 20px}");
+        sb.AppendLine("h1{font-size:2.4rem;margin:0 0 4px}.tag{color:#8aa0b4;margin:0 0 24px}");
+        sb.AppendLine("img{max-width:100%;border-radius:10px;display:block;margin:0 auto}");
+        sb.AppendLine(".hero{margin:0 0 24px}.shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 24px}");
+        sb.AppendLine("h2{border-bottom:1px solid #223;padding-bottom:6px;margin-top:32px}");
+        sb.AppendLine("footer{margin-top:40px;color:#66788a;font-size:.9rem}");
+        sb.AppendLine("</style></head><body><div class=\"wrap\">");
+        sb.AppendLine($"<h1>{HtmlEsc(gameName)}</h1><p class=\"tag\">{HtmlEsc(engine)}-spel · byggt med AiLocal</p>");
+        if (replay is not null && DataUri(replay) is { Length: > 0 } r)
+            sb.AppendLine($"<div class=\"hero\"><img src=\"{r}\" alt=\"Speltest-repris (trailer)\"></div>");
+        if (stills.Count > 0)
+        {
+            sb.AppendLine("<div class=\"shots\">");
+            foreach (var s in stills.Take(4))
+                if (DataUri(s) is { Length: > 0 } d)
+                    sb.AppendLine($"<img src=\"{d}\" alt=\"Skärmdump\">");
+            sb.AppendLine("</div>");
+        }
+        sb.AppendLine($"<h2>Om spelet</h2><p>{HtmlEsc(description)}</p>");
+        sb.AppendLine($"<h2>Spela</h2><p>{controls}</p>");
+        sb.AppendLine("<footer>Byggd med AiLocal.</footer>");
+        sb.AppendLine("</div></body></html>");
+        return sb.ToString();
+    }
+
+    /// <summary>Första meningsfulla stycket ur DESIGN.md:s "Koncept"-avsnitt -
+    /// spelets egen designvision blir butikssidans beskrivning. Null utan
+    /// DESIGN.md eller koncept.</summary>
+    private static string? ExtractConcept(string projectRoot)
+    {
+        try
+        {
+            var design = Path.Combine(projectRoot, "DESIGN.md");
+            if (!File.Exists(design)) return null;
+            var sb = new StringBuilder();
+            var inConcept = false;
+            foreach (var raw in File.ReadAllLines(design))
+            {
+                var line = raw.Trim();
+                if (line.StartsWith("## "))
+                {
+                    if (inConcept) break;
+                    inConcept = line.Contains("Koncept", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+                if (inConcept && line.Length > 0 && !line.StartsWith('#'))
+                    sb.Append(line.Replace("**", "")).Append(' ');
+            }
+            var concept = sb.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(concept)) return null;
+            return concept.Length > 400 ? concept[..400] + "…" : concept;
+        }
+        catch { return null; }
+    }
+
+    private static string HtmlEsc(string s) =>
+        (s ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
 
     private static string? FindButler()
     {

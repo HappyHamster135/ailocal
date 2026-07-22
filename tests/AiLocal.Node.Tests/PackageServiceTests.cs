@@ -57,4 +57,34 @@ public class PackageServiceTests : IDisposable
         var readme = await reader.ReadToEndAsync();
         Assert.Contains("playtest.png", readme);
     }
+
+    [Fact]
+    public async Task PackageAsync_GenererarButikssida_MedInbaddadReprisOchBeskrivning()
+    {
+        // C7: en delbar produktsida (store.html) med spelnamn, reprisen som
+        // trailer, inbäddade skärmdumpar (data-URI) och beskrivning ur DESIGN.md.
+        var buildDir = Path.Combine(_root, "build");
+        Directory.CreateDirectory(buildDir);
+        await File.WriteAllTextAsync(Path.Combine(buildDir, "Spelet.exe"), "MZ dummy");
+        var shots = Path.Combine(_root, "screenshots");
+        Directory.CreateDirectory(shots);
+        await File.WriteAllBytesAsync(Path.Combine(shots, "replay.png"), new byte[] { 137, 80, 78, 71, 1, 2, 3, 4 });
+        await File.WriteAllBytesAsync(Path.Combine(shots, "playtest.png"), new byte[] { 137, 80, 78, 71, 5, 6, 7, 8 });
+        await File.WriteAllTextAsync(Path.Combine(_root, "DESIGN.md"),
+            "# Spelet\n\n## Koncept\nByggt fran: **ett rymdaventyr**\n\nSamla stjarnor och undvik asteroider.\n\n## Mekaniker\n- rorelse\n");
+
+        var result = await new PackageService().PackageAsync(_root, "godot", "Spelet", Path.Combine(_root, "dist"), CancellationToken.None);
+        Assert.True(result.Success, result.Output);
+
+        using var zip = ZipFile.OpenRead(result.PackagePath!);
+        var store = zip.Entries.FirstOrDefault(e => e.FullName.EndsWith("store.html"));
+        Assert.NotNull(store);
+        using var reader = new StreamReader(store!.Open());
+        var html = await reader.ReadToEndAsync();
+
+        Assert.Contains("Spelet", html);                   // spelnamnet
+        Assert.Contains("data:image/png;base64,", html);   // inbäddad repris/skärmdump (fristående sida)
+        Assert.Contains("Samla stjarnor", html);           // beskrivning ur DESIGN.md-konceptet
+        Assert.Contains("Speltest-repris", html);          // reprisen som "trailer"
+    }
 }
