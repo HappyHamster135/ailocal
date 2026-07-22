@@ -62,6 +62,11 @@ public sealed class ConversationEntry
     public string? TaskId { get; init; }
 }
 
+/// <summary>B6: one project in the cluster-wide gallery - a node's project
+/// tagged with which node it lives on, so the dashboard can Play it via the
+/// Host proxy (/api/nodes/{NodeId}/preview/...).</summary>
+public sealed record ClusterProject(string NodeId, string NodeName, ProjectSummary Project);
+
 /// <summary>Thread-safe registry of nodes known to the Host.</summary>
 public sealed class WorkerRegistry
 {
@@ -828,6 +833,12 @@ public static class HostRole
             string id, string? path, WorkerRegistry reg, IHttpClientFactory hf, CancellationToken ct) =>
             ProxyNodeFile(id, "/execute/artifact?path=" + Uri.EscapeDataString(path ?? ""), reg, hf, ct, attachment: true));
 
+        // B6: klustergalleri - aggregera alla noders portföljer till EN vy.
+        // Varje projekt taggas med noden det bor på; Spela går via den
+        // befintliga /api/nodes/{id}/preview-proxyn (v1.40).
+        app.MapGet("/api/cluster/projects", async (WorkerRegistry reg, IHttpClientFactory hf, CancellationToken ct) =>
+            Results.Text(JsonSerializer.Serialize(await ClusterProjectsAsync(reg, hf, ct)), "application/json"));
+
         // Flottuppdatering: trigga självuppdateraren på alla registrerade
         // workers med ETT klick i stället för att operatören går runt till
         // varje maskin per release. Upptagna noder hoppas över (uppdateringen
@@ -1465,6 +1476,28 @@ public static class HostRole
     /// från noden som byggde, med klustertoken via "cluster"-klienten.
     /// Strömmande passthrough - en Godot-exe är 50-100 MB och ska aldrig
     /// buffras i Hostens minne.</summary>
+    /// <summary>B6: fetches every registered node's portfolio (/execute/projects,
+    /// node-token-gated via the "cluster" client) in parallel and tags each
+    /// project with the node it lives on. A node that is offline or errors just
+    /// contributes nothing - the gallery shows whatever answered.</summary>
+    private static async Task<List<ClusterProject>> ClusterProjectsAsync(
+        WorkerRegistry reg, IHttpClientFactory httpFactory, CancellationToken ct)
+    {
+        var perNode = await Task.WhenAll(reg.All.Select(async node =>
+        {
+            try
+            {
+                var client = httpFactory.CreateClient("cluster");
+                client.Timeout = TimeSpan.FromSeconds(6); // offline noder ska inte hanga galleriet
+                var json = await client.GetStringAsync($"{node.PreferredEndpoint}/execute/projects", ct);
+                var projects = JsonSerializer.Deserialize<List<ProjectSummary>>(json) ?? [];
+                return projects.Select(p => new ClusterProject(node.Id, node.Name, p));
+            }
+            catch { return Enumerable.Empty<ClusterProject>(); }
+        }));
+        return perNode.SelectMany(x => x).OrderByDescending(c => c.Project.LastModified).ToList();
+    }
+
     private static async Task<IResult> ProxyNodeFile(
         string id, string upstreamPath, WorkerRegistry reg, IHttpClientFactory httpFactory,
         CancellationToken ct, bool attachment = false)

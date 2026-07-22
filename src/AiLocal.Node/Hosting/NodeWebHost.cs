@@ -380,6 +380,10 @@ public static class NodeWebHost
             WorkerRole.ServePreviewFile(s, path));
         app.MapGet("/execute/artifact", (string? path, NodeSettings s) =>
             WorkerRole.ServeArtifactFile(s, path));
+        // B6: den här nodens projektportfölj åt Hostens klustergalleri
+        // (/api/cluster/projects). Node-token-gated via /execute-prefixet.
+        app.MapGet("/execute/projects", (NodeSettings s) =>
+            Results.Text(System.Text.Json.JsonSerializer.Serialize(WorkerRole.ListLocalProjects(s)), "application/json"));
         app.MapPost("/execute/self-update", async (
             HttpContext ctx, AssignmentLog assignmentLog,
             IHttpClientFactory hf, IHostApplicationLifetime lifetime, CancellationToken ct) =>

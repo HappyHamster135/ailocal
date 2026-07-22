@@ -62,4 +62,42 @@ public class ProjectResolveTests : IDisposable
 
         Assert.Null(WorkerRole.ResolveProjectDir(_settings, "bara-en-mapp"));
     }
+
+    [Fact]
+    public void ListLocalProjects_ScaffoldatProjekt_ListasMedFalt()
+    {
+        // B6: /execute/projects (och /api/projects) matar ut den har listan.
+        var result = new GameScaffoldService().Scaffold("godot", "bygg ett plattformsspel i godot", _workspace);
+        Assert.True(result.Success, result.Output);
+
+        var projects = WorkerRole.ListLocalProjects(_settings);
+
+        Assert.NotEmpty(projects);
+        var p = projects[0];
+        Assert.Equal("godot", p.Engine);
+        Assert.True(p.Files > 0, "projektet borde ha filer");
+        Assert.False(string.IsNullOrWhiteSpace(p.Name));
+        Assert.False(string.IsNullOrWhiteSpace(p.Rel));
+    }
+
+    [Fact]
+    public void ProjectSummary_RundgarGenomJson_MedPascalCase()
+    {
+        // B6: noden serialiserar List<ProjectSummary>, Hosten deserialiserar
+        // den. Lasa att fältnamnen (PascalCase) matchar over rundturen - annars
+        // blir klustergalleriet tomt trots att noden svarade.
+        var original = new List<ProjectSummary>
+        {
+            new("spel", "Spelet", "Godot", "godot", 12, DateTimeOffset.UtcNow, false, 2, true, "v1"),
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(original);
+        var back = System.Text.Json.JsonSerializer.Deserialize<List<ProjectSummary>>(json);
+
+        Assert.NotNull(back);
+        Assert.Single(back!);
+        Assert.Equal("spel", back![0].Rel);
+        Assert.Equal("godot", back[0].Engine);
+        Assert.Equal(12, back[0].Files);
+        Assert.True(back[0].LatestClean);
+    }
 }

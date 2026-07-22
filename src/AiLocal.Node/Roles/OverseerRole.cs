@@ -232,6 +232,12 @@ public static class OverseerRole
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/assignment-log", null, ct));
 
+        // B6: klustergalleriet aggregeras på primära Hosten (den når alla
+        // workers) - Overseer proxar bara vidare, annars 404 för operatören.
+        app.MapGet("/api/cluster/projects", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/cluster/projects", null, ct));
+
         // Sessioner på Host-datorn: hela /api/sessions-ytan proxas till
         // primära Hosten (buffrat för CRUD, strömmande för /run) så operatören
         // kan skapa och köra sessioner i mappar PÅ HOST-MASKINEN från sitt

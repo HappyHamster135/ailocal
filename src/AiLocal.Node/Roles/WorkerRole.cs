@@ -18,6 +18,13 @@ namespace AiLocal.Node.Roles;
 /// itself.</summary>
 public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null);
 
+/// <summary>One project in a node's portfolio (B6: shared by the local
+/// /api/projects view and the cluster-reachable /execute/projects that the
+/// Host aggregates into a cluster-wide gallery).</summary>
+public sealed record ProjectSummary(
+    string Rel, string Name, string Kind, string Engine, int Files,
+    DateTimeOffset LastModified, bool Playable, int Snapshots, bool? LatestClean, string? LatestLabel);
+
 /// <summary>Body for POST /api/benchmark/run: how many of the standard
 /// prompts to run (default 3, clamped to the catalog size).</summary>
 public sealed record BenchmarkRunRequest(int? Count = null);
@@ -1178,46 +1185,7 @@ public static class WorkerRole
 
         // ---- Projektvyn: portfölj, paketering, mapp, radering, rollback ----
         app.MapGet("/api/projects", (NodeSettings settings) =>
-        {
-            var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
-            var verifier = new ProjectVerifier();
-            var candidates = new List<string>();
-            if (Directory.Exists(root))
-            {
-                if (verifier.Detect(root) != ProjectVerifier.ProjectKind.Unknown)
-                    candidates.Add(root);
-                try
-                {
-                    candidates.AddRange(Directory.EnumerateDirectories(root)
-                        .Where(d => !Path.GetFileName(d).StartsWith('.')
-                            && verifier.Detect(d) != ProjectVerifier.ProjectKind.Unknown));
-                }
-                catch { /* oläsbar arbetsyta - visa det som gick */ }
-            }
-
-            var projects = candidates.Select(dir =>
-            {
-                var rel = Path.GetRelativePath(root, dir);
-                var latest = ProjectSnapshots.List(root, dir).FirstOrDefault();
-                int files;
-                try { files = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(f => !f.Contains(".git")); }
-                catch { files = 0; }
-                return new
-                {
-                    Rel = rel == "." ? "." : rel.Replace('\\', '/'),
-                    Name = rel == "." ? Path.GetFileName(root) + " (roten)" : Path.GetFileName(dir),
-                    Kind = verifier.Detect(dir).ToString(),
-                    Engine = GameBuilder.DetectEngine(dir),
-                    Files = files,
-                    LastModified = ProjectRootDetector.NewestWriteUtc(dir),
-                    Playable = File.Exists(Path.Combine(dir, "index.html")),
-                    Snapshots = ProjectSnapshots.List(root, dir).Count,
-                    LatestClean = latest?.Clean,
-                    LatestLabel = latest?.Label
-                };
-            }).OrderByDescending(p => p.LastModified).ToList();
-            return Results.Text(JsonSerializer.Serialize(projects), "application/json");
-        });
+            Results.Text(JsonSerializer.Serialize(ListLocalProjects(settings)), "application/json"));
 
         app.MapPost("/api/projects/package", async (ProjectActionRequest req, NodeSettings settings,
             IHttpClientFactory httpFactory, CancellationToken ct) =>
@@ -1294,6 +1262,49 @@ public static class WorkerRole
         // Nedladdning av byggd artefakt (Godot-exe / paket-zip) från den här
         // nodens arbetsyta - ClusterDelivery vaktar traversal + filtyp.
         app.MapGet("/api/artifact", (string? path, NodeSettings settings) => ServeArtifactFile(settings, path));
+    }
+
+    /// <summary>The node's project portfolio: recognizable projects in the
+    /// workspace root (and its immediate subfolders), newest first. Shared by
+    /// the local /api/projects view and the cluster-reachable /execute/projects
+    /// the Host aggregates (B6).</summary>
+    internal static List<ProjectSummary> ListLocalProjects(NodeSettings settings)
+    {
+        var root = Path.GetFullPath(PreviewWorkspaceRoot(settings));
+        var verifier = new ProjectVerifier();
+        var candidates = new List<string>();
+        if (Directory.Exists(root))
+        {
+            if (verifier.Detect(root) != ProjectVerifier.ProjectKind.Unknown)
+                candidates.Add(root);
+            try
+            {
+                candidates.AddRange(Directory.EnumerateDirectories(root)
+                    .Where(d => !Path.GetFileName(d).StartsWith('.')
+                        && verifier.Detect(d) != ProjectVerifier.ProjectKind.Unknown));
+            }
+            catch { /* oläsbar arbetsyta - visa det som gick */ }
+        }
+
+        return candidates.Select(dir =>
+        {
+            var rel = Path.GetRelativePath(root, dir);
+            var latest = ProjectSnapshots.List(root, dir).FirstOrDefault();
+            int files;
+            try { files = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(f => !f.Contains(".git")); }
+            catch { files = 0; }
+            return new ProjectSummary(
+                rel == "." ? "." : rel.Replace('\\', '/'),
+                rel == "." ? Path.GetFileName(root) + " (roten)" : Path.GetFileName(dir),
+                verifier.Detect(dir).ToString(),
+                GameBuilder.DetectEngine(dir),
+                files,
+                ProjectRootDetector.NewestWriteUtc(dir),
+                File.Exists(Path.Combine(dir, "index.html")),
+                ProjectSnapshots.List(root, dir).Count,
+                latest?.Clean,
+                latest?.Label);
+        }).OrderByDescending(p => p.LastModified).ToList();
     }
 
     /// <summary>Resolves a project's rel path against the workspace with a

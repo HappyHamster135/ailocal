@@ -1443,6 +1443,7 @@ internal static class Dashboard
         .replay-cap { color: var(--muted); }
         .replay-img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
         .msg-cost { margin-top: 6px; color: var(--muted); }
+        .proj-head-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
         .node-version-stale { color: var(--bad); font-weight: 600; }
         .contract-card {
           border: 1px solid var(--line); border-radius: 10px;
@@ -2015,7 +2016,11 @@ internal static class Dashboard
                 <h2>Projekt</h2>
                 <p class="small">Allt som byggts i den här nodens arbetsyta - spela, fortsätt, packa eller rulla tillbaka.</p>
               </div>
-              <button class="mini-btn" id="projectsRefreshBtn">Uppdatera</button>
+              <div class="proj-head-actions">
+                <button class="view-tab active" id="projScopeLocal">Denna nod</button>
+                <button class="view-tab" id="projScopeCluster">Hela klustret</button>
+                <button class="mini-btn" id="projectsRefreshBtn">Uppdatera</button>
+              </div>
             </div>
             <div class="notice" id="projectsNotice"></div>
             <div id="projectsGrid" class="projects-grid"></div>
@@ -5627,9 +5632,56 @@ internal static class Dashboard
           box.className = message ? `notice show ${isError ? 'bad' : ''}` : 'notice';
         }
 
+        // B6: 'local' = den har nodens portfolj, 'cluster' = alla noders
+        // portfoljer aggregerade av Hosten (/api/cluster/projects).
+        let projectScope = 'local';
+        function setProjectScope(scope) {
+          projectScope = scope;
+          const l = $('projScopeLocal'), c = $('projScopeCluster');
+          if (l) l.classList.toggle('active', scope === 'local');
+          if (c) c.classList.toggle('active', scope === 'cluster');
+          loadProjects();
+        }
+
+        // Klustergalleriet: skrivskyddad oversikt over ALLA noders projekt med
+        // Spela via Host-proxyn (/api/nodes/{id}/preview). Lokala atgarder
+        // (packa/mapp/radera) galler bara egna noden och visas inte har.
+        async function loadClusterProjects(grid) {
+          let items;
+          try {
+            items = await fetchJson('/api/cluster/projects') ?? [];
+          } catch {
+            grid.innerHTML = '';
+            showProjectsNotice('Klustergalleriet finns i Host- och Overseer-vyn (den som ser hela flottan).', true);
+            return;
+          }
+          showProjectsNotice('');
+          if (!items.length) {
+            grid.innerHTML = '<div class="empty">Inga projekt i klustret ännu - bygg något så dyker det upp här.</div>';
+            return;
+          }
+          grid.innerHTML = items.map(it => {
+            const p = it.Project || {};
+            const rel = p.Rel || '.';
+            const playHref = `/api/nodes/${encodeURIComponent(it.NodeId)}/preview/${rel === '.' ? '' : esc(rel) + '/'}index.html`;
+            return `
+            <article class="project-card">
+              <div class="project-card-head">
+                <strong>${esc(p.Name || '(namnlöst)')}</strong>
+                <span class="pill">${esc(p.Engine && p.Engine !== 'unknown' ? p.Engine : (p.Kind || '?'))}</span>
+              </div>
+              <div class="small">${esc(it.NodeName || it.NodeId)} · ${p.Files || 0} filer · ${esc(new Date(p.LastModified).toLocaleString('sv-SE'))}</div>
+              <div class="detail-actions">
+                ${p.Playable ? `<a class="mini-btn" href="${playHref}" target="_blank" rel="noopener">Spela</a>` : '<span class="small">Motorspel - öppna på noden som byggde det</span>'}
+              </div>
+            </article>`;
+          }).join('');
+        }
+
         async function loadProjects() {
           const grid = $('projectsGrid');
           if (!grid) return;
+          if (projectScope === 'cluster') { await loadClusterProjects(grid); return; }
           let projects;
           try {
             projects = await fetchJson('/api/projects') ?? [];
@@ -6619,6 +6671,10 @@ internal static class Dashboard
         if (benchmarkRunBtn) benchmarkRunBtn.onclick = runBenchmark;
         const projectsRefreshBtn = $('projectsRefreshBtn');
         if (projectsRefreshBtn) projectsRefreshBtn.onclick = loadProjects;
+        const projScopeLocal = $('projScopeLocal');
+        if (projScopeLocal) projScopeLocal.onclick = () => setProjectScope('local');
+        const projScopeCluster = $('projScopeCluster');
+        if (projScopeCluster) projScopeCluster.onclick = () => setProjectScope('cluster');
 
         // Milstolpsknapparna byggs om vid varje render - eventdelegering på
         // dokumentet i stället för omkoppling per render.
