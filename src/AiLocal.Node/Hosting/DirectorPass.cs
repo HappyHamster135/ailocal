@@ -144,20 +144,29 @@ public static class DirectorPass
         IReadOnlyList<string> criteria,
         string projectRoot,
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? reviewModelHint = null)
     {
         if (criteria.Count == 0) return [];
         try
         {
             var evidence = BuildEvidence(projectRoot);
+            // Cross-modell-granskning: en OBEROENDE modell (reviewModelHint,
+            // ideal en starkare/annan an den som byggde) bedomer bade kontraktet
+            // OCH uppenbara fel - tva olika modeller fangar fler felmoder an en
+            // modell som granskar sitt eget arbete.
             var prompt = "Delivery contract criteria:\n" + string.Join("\n", criteria.Select(c => "- " + c)) +
                 "\n\nProject evidence (files and key contents):\n" + evidence +
-                "\n\nWhich criteria are clearly NOT met by the evidence? Respond ONLY with JSON: {\"unmet\":[\"...\"]}. " +
-                "Be strict about counts but give benefit of the doubt when evidence is ambiguous.";
+                "\n\nYou are an INDEPENDENT reviewer - a DIFFERENT model than the one that built this. List what is clearly wrong:\n" +
+                "1) Which contract criteria are clearly NOT met by the evidence?\n" +
+                "2) Any OBVIOUS bugs or clearly-missing production quality (broken/empty screens, crash risks, missing core game-feel).\n" +
+                "Respond ONLY with JSON: {\"unmet\":[\"concrete problem\"]} (max 8 items). " +
+                "Be strict about counts but give benefit of the doubt when evidence is ambiguous - do NOT invent nitpicks.";
             var response = await complete(new ChatRequest
             {
-                System = "You are a meticulous QA lead verifying a delivery against its contract.",
+                System = "You are a meticulous, independent QA lead reviewing another developer's delivery against its contract and for obvious defects.",
                 Messages = [new ChatMessage("user", prompt)],
+                ModelHint = reviewModelHint,
                 MaxTokens = 500
             }, ct);
             if (!response.IsSuccess || string.IsNullOrWhiteSpace(response.Response!.Content)) return [];

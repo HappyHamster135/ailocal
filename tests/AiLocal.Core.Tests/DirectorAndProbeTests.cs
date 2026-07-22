@@ -1,3 +1,5 @@
+using AiLocal.Core.Contracts;
+using AiLocal.Core.Providers;
 using AiLocal.Node.Hosting;
 using Xunit;
 
@@ -64,6 +66,31 @@ public class DirectorAndProbeTests : IDisposable
         var read = DirectorPass.ReadCriteria(_dir);
         Assert.Equal(contract.Criteria.Count, read.Count);
         Assert.Equal(contract.Criteria[0], read[0]);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_KorPaReviewModel_OberoendeGranskare()
+    {
+        // Cross-modell-granskning: granskaren ska köra på reviewModelHint (en
+        // ANNAN/starkare modell än byggaren), inte på standardmodellen - det är
+        // hela poängen (olika modeller fångar olika felmoder).
+        string? capturedHint = "NOT-SET";
+        Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete = (req, _) =>
+        {
+            capturedHint = req.ModelHint;
+            return Task.FromResult(ProviderResponse.Ok(new ChatResponse
+            {
+                Content = "{\"unmet\":[]}",
+                Model = "reviewer",
+                Provider = "test"
+            }));
+        };
+
+        await DirectorPass.ReviewAsync(
+            new[] { "5 banor med stigande svårighet" }, _dir, complete, CancellationToken.None,
+            reviewModelHint: "z-ai/glm-5.2");
+
+        Assert.Equal("z-ai/glm-5.2", capturedHint);
     }
 
     // ---- Interaktiv QA (riktig Chromium) -----------------------------------

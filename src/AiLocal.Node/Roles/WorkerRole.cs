@@ -949,9 +949,17 @@ public static class WorkerRole
                 // den som kräver INTRESSANT.
                 if (round == 0 && findings.Clean && contractCriteria.Count > 0)
                 {
-                    await EmitStep("tool_call", "regissörens uppföljning (leveranskontraktet)");
+                    // Cross-modell-granskning: granskaren kör på den STARKA
+                    // tiern - en ANNAN modell än byggaren (modelHint) i det
+                    // vanliga fallet (billig modell bygger, stark granskar), så
+                    // granskningen har andra felmoder än modellen som byggde.
+                    var reviewModel = settings.Worker.ModelTiers.Complex;
+                    var reviewHint = string.IsNullOrWhiteSpace(reviewModel) ? null : reviewModel;
+                    await EmitStep("tool_call",
+                        "oberoende granskning (kontrakt + uppenbara fel)" + (reviewHint is null ? "" : $" - modell {reviewHint}"));
                     var unmet = await DirectorPass.ReviewAsync(
-                        contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct);
+                        contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct,
+                        reviewModelHint: reviewHint);
                     await EmitStep("contract_status",
                         JsonSerializer.Serialize(new { criteria = contractCriteria, unmet }));
                     if (unmet.Count > 0)
