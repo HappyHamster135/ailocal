@@ -41,7 +41,10 @@ public sealed class PackageService
             Directory.CreateDirectory(outputDir);
 
             var packageName = SanitizeFileName(gameName);
-            var zipPath = Path.Combine(outputDir, $"{packageName}-v1.0.zip");
+            // Versionsnamn (B4): AiLocal-versionen som byggde paketet - spårbart
+            // och stabilt per release i stället för den gamla hårdkodade v1.0.
+            var version = typeof(PackageService).Assembly.GetName().Version?.ToString(3) ?? "1.0";
+            var zipPath = Path.Combine(outputDir, $"{packageName}-v{version}.zip");
 
             // Ta reda på vad som ska inkluderas
             var buildDir = FindBuildDirectory(projectRoot, engine);
@@ -56,7 +59,7 @@ public sealed class PackageService
             files.Add(readmePath);
 
             // Skapa metadata
-            var metaPath = Path.Combine(outputDir, "aitown-metadata.json");
+            var metaPath = Path.Combine(outputDir, "ailocal-metadata.json");
             var meta = GenerateMetadata(gameName, engine, projectRoot);
             await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, ct);
             files.Add(metaPath);
@@ -67,13 +70,17 @@ public sealed class PackageService
 
             using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
             {
+                var outDirName = Path.GetFileName(outputDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 foreach (var file in files.Distinct())
                 {
                     if (!File.Exists(file)) continue;
                     var entryName = Path.GetRelativePath(projectRoot, file).Replace('\\', '/');
-                    // Undvik duplicering i build-mappen
-                    if (entryName.StartsWith("release/") && file.StartsWith(outputDir))
-                        entryName = entryName["release/".Length..];
+                    // README/metadata skrivs i outputmappen (dist/ eller release/) -
+                    // lägg dem i zip-roten där mottagaren förväntar sig dem i
+                    // stället för nästlade under mappnamnet (bugg: strippade bara
+                    // hårdkodat "release/", men Packa-knappen skickar "dist/").
+                    if (file.StartsWith(outputDir) && entryName.StartsWith(outDirName + "/"))
+                        entryName = entryName[(outDirName.Length + 1)..];
                     zip.CreateEntryFromFile(file, entryName, CompressionLevel.Optimal);
                 }
             }
@@ -273,6 +280,12 @@ Compress-Archive -Path ""$source\*"" -DestinationPath ""$dest"" -Force
         if (File.Exists(steamAppId))
             files.Add(steamAppId);
 
+        // Skärmdumpar + ev. repris (B4): "så här ser spelet ut" följer med
+        // paketet så mottagaren ser spelet utan att köra det.
+        var shotsDir = Path.Combine(projectRoot, "screenshots");
+        if (Directory.Exists(shotsDir))
+            files.AddRange(Directory.GetFiles(shotsDir, "*.png", SearchOption.TopDirectoryOnly));
+
         return files.Where(f => File.Exists(f)).Distinct().ToList();
     }
 
@@ -299,6 +312,15 @@ Compress-Archive -Path ""$source\*"" -DestinationPath ""$dest"" -Force
         sb.AppendLine($"- AiLocal v{typeof(PackageService).Assembly.GetName().Version?.ToString(3) ?? "?"}");
         sb.AppendLine($"- Motor: {engine}");
         sb.AppendLine();
+        var shots = files.Where(f => f.Replace('\\', '/').Contains("/screenshots/") && f.EndsWith(".png")).ToList();
+        if (shots.Count > 0)
+        {
+            sb.AppendLine("## Skärmdumpar");
+            sb.AppendLine();
+            foreach (var s in shots)
+                sb.AppendLine($"- screenshots/{Path.GetFileName(s)}");
+            sb.AppendLine();
+        }
         sb.AppendLine("## Innehåll");
         sb.AppendLine();
         var exeFiles = files.Where(f => f.EndsWith(".exe")).ToList();
