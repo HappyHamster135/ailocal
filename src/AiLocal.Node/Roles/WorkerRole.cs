@@ -16,7 +16,7 @@ namespace AiLocal.Node.Roles;
 /// from the same plan that need to land on the same machine to share a
 /// workspace. The Worker itself ignores it; a Worker only ever executes on
 /// itself.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null);
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null);
 
 /// <summary>Body for POST /api/benchmark/run: how many of the standard
 /// prompts to run (default 3, clamped to the catalog size).</summary>
@@ -1098,6 +1098,20 @@ public static class WorkerRole
                     statusCode: StatusCodes.Status403Forbidden);
             if (string.IsNullOrWhiteSpace(req.Assignment))
                 return Results.Problem(detail: "assignment text is required", statusCode: StatusCodes.Status400BadRequest);
+
+            // B2 (iterationsknappen): klienten kanner bara projektets RELATIVA
+            // vag, sa den skickar ProjectRel i stallet for en absolut
+            // WorkspaceOverride. Resolva den till projektmappen (samma
+            // traversal-/projektvakt som ovriga portfoljendpoints) sa
+            // kontinuitetsbriefen kor mot RATT projekt - inte bara det senast
+            // aktiva som ProjectRootDetector annars skulle gissa pa.
+            if (string.IsNullOrWhiteSpace(req.WorkspaceOverride) && !string.IsNullOrWhiteSpace(req.ProjectRel))
+            {
+                var projectDir = ResolveProjectDir(settings, req.ProjectRel);
+                if (projectDir is null)
+                    return Results.Problem(detail: "okänt projekt att vidareutveckla", statusCode: StatusCodes.Status404NotFound);
+                req = req with { WorkspaceOverride = projectDir };
+            }
 
             ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.ContentType = "text/event-stream";

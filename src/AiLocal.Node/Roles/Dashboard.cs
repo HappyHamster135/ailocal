@@ -1460,6 +1460,13 @@ internal static class Dashboard
         .project-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
         .project-versions { border-top: 1px solid var(--kv-line); margin-top: 4px; padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
         .project-version-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .project-iterate { border-top: 1px solid var(--kv-line); margin-top: 4px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+        .project-iterate .mini-btn { margin-top: 0; align-self: auto; }
+        .iterate-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+        .iterate-row { display: flex; gap: 6px; }
+        .iterate-input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); transition: border-color .15s ease; }
+        .iterate-input:focus { outline: none; border-color: var(--accent); }
+        .iterate-hint { color: var(--muted); }
         .milestone-card { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--surface-soft); display: flex; flex-direction: column; gap: 6px; }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
@@ -5642,23 +5649,66 @@ internal static class Dashboard
               <div class="small">${p.LatestClean === true ? 'Senaste kvalitet: godkänd' : p.LatestClean === false ? 'Senaste kvalitet: anmärkningar' : 'Ingen kvalitetsdata ännu'}${p.Snapshots ? ` · ${p.Snapshots} versioner` : ''}</div>
               <div class="detail-actions">
                 ${p.Playable ? `<a class="mini-btn" href="/api/preview/${p.Rel === '.' ? '' : esc(p.Rel) + '/'}index.html" target="_blank" rel="noopener">Spela</a>` : ''}
-                <button class="mini-btn" data-proj-continue="${esc(p.Rel)}" data-proj-name="${esc(p.Name)}">Fortsätt</button>
+                <button class="mini-btn" data-proj-iterate="${esc(p.Rel)}">Vidareutveckla</button>
                 <button class="mini-btn" data-proj-package="${esc(p.Rel)}">Packa</button>
                 <button class="mini-btn" data-proj-folder="${esc(p.Rel)}">Mapp</button>
                 ${p.Snapshots ? `<button class="mini-btn" data-proj-versions="${esc(p.Rel)}">Versioner</button>` : ''}
                 ${p.Rel !== '.' ? `<button class="mini-btn" data-proj-delete="${esc(p.Rel)}">Radera</button>` : ''}
+              </div>
+              <div class="project-iterate hidden" data-iterate-for="${esc(p.Rel)}">
+                <div class="iterate-presets">
+                  <button class="mini-btn" data-iterate-preset="Gör spelet svårare: snabbare tempo, fler och tuffare fiender, och hårdare mål">Svårare</button>
+                  <button class="mini-btn" data-iterate-preset="Lägg till en ny bana eller nivå med ny utmaning">Ny bana</button>
+                  <button class="mini-btn" data-iterate-preset="Lägg till ljudeffekter och bakgrundsmusik som passar spelet">Ljud &amp; musik</button>
+                  <button class="mini-btn" data-iterate-preset="Snygga till grafiken med bättre sprites, animationer och partikeleffekter">Snyggare grafik</button>
+                </div>
+                <div class="iterate-row">
+                  <input type="text" class="iterate-input" data-iterate-input="${esc(p.Rel)}" placeholder="...eller beskriv en ändring själv">
+                  <button class="mini-btn" data-iterate-run="${esc(p.Rel)}" data-iterate-name="${esc(p.Name)}">Kör</button>
+                </div>
+                <div class="small iterate-hint">Startar ett nytt bygge som fortsätter på DET HÄR projektet (kontinuitetsbrief). Kräver Agentläge på noden.</div>
               </div>
               <div class="project-versions hidden" data-versions-for="${esc(p.Rel)}"></div>
             </article>`).join('');
           wireProjectCards();
         }
 
+        // B2: vidareutveckla-knappen kör ett uppföljningsuppdrag mot ETT
+        // specifikt projekt. projectRel skickas till /api/assignment som
+        // resolvar den till projektmappen -> kontinuitetsbriefen kör mot RÄTT
+        // projekt (inte bara det senast aktiva). Strömmen visas i Delegera-vyn
+        // via samma runPlanSubtask som planer/team använder.
+        async function iterateProject(rel, tweak) {
+          tweak = (tweak || '').trim();
+          if (!rel || !tweak) return;
+          const card = document.querySelector(`.project-card[data-project="${CSS.escape(rel)}"]`);
+          const name = card?.querySelector('strong')?.textContent || rel;
+          const box = document.querySelector(`[data-iterate-for="${CSS.escape(rel)}"]`);
+          if (box) box.classList.add('hidden');
+          switchView('delegate');
+          const subtask = { title: `Vidareutveckla: ${name}`, description: tweak };
+          await runPlanSubtask(subtask, tweak, $('workerSelect')?.value || null, null, rel);
+        }
+
         function wireProjectCards() {
-          document.querySelectorAll('[data-proj-continue]').forEach(btn => btn.onclick = () => {
-            switchView('delegate');
-            const prompt = $('prompt');
-            prompt.value = `Fortsätt på projektet ${btn.dataset.projName}: `;
-            prompt.focus();
+          document.querySelectorAll('[data-proj-iterate]').forEach(btn => btn.onclick = () => {
+            const box = document.querySelector(`[data-iterate-for="${CSS.escape(btn.dataset.projIterate)}"]`);
+            if (box) box.classList.toggle('hidden');
+          });
+          // Snabbval FYLLER faltet (fokus) - ett bygge startar aldrig pa ett
+          // rakt klick, bara nar operatoren bekraftar med Kor/Enter (bygget
+          // kostar tokens). Fritexten later en beskriva andringen sjalv.
+          document.querySelectorAll('[data-iterate-preset]').forEach(btn => btn.onclick = () => {
+            const rel = btn.closest('.project-card')?.dataset.project;
+            const input = document.querySelector(`[data-iterate-input="${CSS.escape(rel)}"]`);
+            if (input) { input.value = btn.dataset.iteratePreset; input.focus(); }
+          });
+          document.querySelectorAll('[data-iterate-run]').forEach(btn => btn.onclick = () => {
+            const input = document.querySelector(`[data-iterate-input="${CSS.escape(btn.dataset.iterateRun)}"]`);
+            iterateProject(btn.dataset.iterateRun, input?.value || '');
+          });
+          document.querySelectorAll('[data-iterate-input]').forEach(inp => inp.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); iterateProject(inp.dataset.iterateInput, inp.value || ''); }
           });
           document.querySelectorAll('[data-proj-package]').forEach(btn => btn.onclick = async () => {
             btn.disabled = true;
@@ -6111,7 +6161,7 @@ internal static class Dashboard
         // "worker" frame /api/assignment now sends first, so a sequential
         // group's later steps can pin to the same Worker the first one landed
         // on (see HostRole's /api/assignment WorkerId handling).
-        async function runPlanSubtask(subtask, assignmentText, workerId, teamSize) {
+        async function runPlanSubtask(subtask, assignmentText, workerId, teamSize, projectRel) {
           const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title, startedAt: Date.now(), steps: [] };
           state.assignmentMessages.push(stepMsg);
           state.assignmentStreamLive = true;
@@ -6129,7 +6179,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null })
+              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null })
             });
 
             if (!response.ok || !response.body) {
