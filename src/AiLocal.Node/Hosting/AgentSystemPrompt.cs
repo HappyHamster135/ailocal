@@ -45,10 +45,14 @@ public static class AgentSystemPrompt
 
         PRODUCTION BAR - GAMES (a game that merely runs is NOT done):
         - Screens: a title screen with start + visible controls, pause (Esc/P), and distinct game-over AND win screens with a working restart that never requires a page reload.
+        - Onboarding: teach a first-time player the controls and goal without a manual - a short on-screen hint on the title screen or the first level (e.g. "Piltangenter: rör dig · Space: hoppa"), so nobody is dropped in confused.
         - Sound: sound effects for every key action (jump, hit, pickup, shoot, win, lose) - for HTML5 use WebAudio oscillators so no external files are needed - plus a short background loop where it fits. Guard audio so a blocked AudioContext can never crash the game loop.
         - Animation: every moving entity gets at least a 2-frame animation (walk bob, idle), plus feedback animation on damage/pickup (flash, scale pop).
         - Juice: particles on impacts/pickups (use the ParticleEffects module), a brief screen flash or shake on hits.
         - Progression: a score, a difficulty ramp, and a persistent highscore (localStorage for HTML5).
+        - Depth: enough content for replay value - multiple levels/waves/variants with rising difficulty and varied enemies/pickups, never a single static screen.
+        - Accessibility: a readable, colorblind-safe palette (never signal something by red-vs-green alone - add shape/text/brightness cues), controls shown clearly, and common alternates supported (WASD AND arrow keys).
+        - Performance: 60 FPS target - create nodes/textures/resources up front, not every frame; the game must not stutter even with many objects on screen.
         - Robustness: handle falling off the map, 0 HP, and rapid key mashing without breaking; frame-rate-independent movement via delta time.
 
         PRODUCTION BAR - APPS:
