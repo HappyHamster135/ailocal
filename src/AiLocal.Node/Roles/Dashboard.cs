@@ -1443,6 +1443,7 @@ internal static class Dashboard
         .replay-cap { color: var(--muted); }
         .replay-img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
         .msg-cost { margin-top: 6px; color: var(--muted); }
+    .msg-cost-note { opacity: .65; }
         .proj-head-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
         .cost-cap-input { width: 70px; }
         .node-version-stale { color: var(--bad); font-weight: 600; }
@@ -6088,9 +6089,13 @@ internal static class Dashboard
             ? `<div class="msg-replay"><div class="small replay-cap">Repris - så här ser spelet ut när det spelas:</div><img class="replay-img" src="${esc(m.replayPath)}" alt="Speltest-repris" loading="lazy"></div>`
             : '';
           // B5: oppen kostnadsredovisning. Sma summor visas med fler decimaler
-          // sa $0.003 inte blir ett missvisande $0.00.
-          const cost = (!running && typeof m.costUsd === 'number')
-            ? `<div class="small msg-cost">Uppskattad kostnad: $${m.costUsd < 0.01 ? m.costUsd.toFixed(4) : m.costUsd.toFixed(2)}</div>`
+          // sa $0.003 inte blir ett missvisande $0.00. Bild-/visionsanrop gar
+          // utanfor prislistan (egna API:er) - de raknas och redovisas arligt
+          // bredvid siffran i stallet for att latsas vara med i den.
+          const unpriced = (!running && typeof m.unpricedCalls === 'number' && m.unpricedCalls > 0)
+            ? ` <span class="msg-cost-note">(+${m.unpricedCalls} bild-/visionsanrop utanför prislistan)</span>` : '';
+          const cost = (!running && (typeof m.costUsd === 'number' || unpriced))
+            ? `<div class="small msg-cost">${typeof m.costUsd === 'number' ? `Uppskattad kostnad: $${m.costUsd < 0.01 ? m.costUsd.toFixed(4) : m.costUsd.toFixed(2)}` : 'Kostnad: bara bild-/visionsanrop'}${unpriced}</div>`
             : '';
 
           const milestone = (running && m.milestone && m.milestone.id)
@@ -6324,6 +6329,7 @@ internal static class Dashboard
                   stepMsg.artifactPath = payload.artifactPath || null;
                   stepMsg.replayPath = payload.replayPath || null;
                   stepMsg.costUsd = (typeof payload.costUsd === 'number') ? payload.costUsd : null;
+                  stepMsg.unpricedCalls = (typeof payload.unpricedCalls === 'number') ? payload.unpricedCalls : null;
                   stepMsg.state = success ? 'Completed' : 'Failed';
                   // The final answer lives in content; the running step-log
                   // stays in steps[]. If the run produced no steps at all

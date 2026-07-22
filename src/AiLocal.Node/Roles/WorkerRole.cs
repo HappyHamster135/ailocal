@@ -358,6 +358,14 @@ public static class WorkerRole
                 };
             }
 
+            // Ärlig kostnadsredovisning: vision- och molnbildsanrop går UTANFÖR
+            // chattkedjan (egna API:er, egna prismodeller) och kan inte prissättas
+            // i usageByModel - de RÄKNAS i stället och redovisas öppet bredvid
+            // dollarsiffran ("N bild-/visionsanrop utanför prislistan"), hellre
+            // en ärlig fotnot än en siffra som ser komplett ut men inte är det.
+            var unpricedImageCalls = 0;
+            var unpricedLock = new object();
+
             // Vision-ögat för playtestens skärmdumpar - samma analysator som
             // vision_review-verktyget använder. Utan konfigurerade nycklar
             // misslyckas analysen tyst och skärmdumpen rapporteras ändå.
@@ -366,6 +374,8 @@ public static class WorkerRole
                 {
                     var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
+                    if (r.Success)
+                        lock (unpricedLock) unpricedImageCalls++;
                     return (r.Success, FormatVisionResult(r));
                 };
 
@@ -432,6 +442,10 @@ public static class WorkerRole
                     var gen = new AssetGenerator(httpFactory,
                         cloudImages: new CloudImageGenerator(httpFactory, settingsStore.GetApiKey));
                     var r = await gen.GenerateAsync(type, prompt, width, height, output, act);
+                    // "molnmodell" i utdatan = riktigt betalt bildanrop (den
+                    // procedurella fallbacken är gratis och räknas inte).
+                    if (r.Success && r.Output.Contains("molnmodell"))
+                        lock (unpricedLock) unpricedImageCalls++;
                     return (r.Success, r.Output, r.FilePath);
                 },
                 screenshotTool: async (windowTitle, output, sct) =>
@@ -467,6 +481,8 @@ public static class WorkerRole
                 {
                     var analyzer = new VisionAnalyzer(httpFactory, settingsStore, settings.Providers);
                     var r = await analyzer.AnalyzeAsync(imagePath, question, vct);
+                    if (r.Success)
+                        lock (unpricedLock) unpricedImageCalls++;
                     return (r.Success, FormatVisionResult(r));
                 });
             var executor = BuildExecutor(workspaceRoot);
@@ -1178,9 +1194,13 @@ public static class WorkerRole
             // Null (allt lokalt/okänt pris) döljer siffran i stället för att visa
             // en missvisande nolla.
             decimal? costUsd = await AssignmentCost.EstimateAsync(usageByModel, httpFactory, ct);
+            // Ärlighet: bild-/visionsanrop kan inte prissättas (egna API:er) -
+            // antalet redovisas bredvid siffran så den aldrig ser komplett ut
+            // när den inte är det. 0 = fältet utelämnas (null) i UI:t.
+            int? unpricedCalls = unpricedImageCalls > 0 ? unpricedImageCalls : null;
 
             await WriteFrameAsync(
-                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath, replayPath, costUsd })}\n\n", ct);
+                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath, replayPath, costUsd, unpricedCalls })}\n\n", ct);
             return Results.Empty;
             }
             finally
