@@ -15,15 +15,25 @@ public static class AssetStyle
 
     public static string Apply(string workspaceRoot, string type, string prompt)
     {
-        if (type?.Trim().ToLowerInvariant() is not ("image" or "texture" or "sprite" or "ui"))
+        // C10 (art-bibel): tilesets, bakgrunder och miljögrafik måste följa
+        // SAMMA konstriktning som sprites/UI - annars ser spelet ut som ett
+        // collage även om karaktärerna är enhetliga.
+        if (type?.Trim().ToLowerInvariant() is not
+            ("image" or "texture" or "sprite" or "ui" or "tileset" or "tile"
+             or "background" or "bg" or "backdrop" or "environment"))
             return prompt;
 
         var projectRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
-        var style = ExtractStyle(Path.Combine(projectRoot, "DESIGN.md"))
+        var design = Path.Combine(projectRoot, "DESIGN.md");
+        var style = ExtractStyle(design)
             ?? "ren 2d-spelgrafik med enhetlig palett och tydliga konturer";
         if (prompt.Contains(style, StringComparison.OrdinalIgnoreCase))
             return prompt;
-        return $"{prompt}. Konsekvent stil för HELA spelet: {style}. Spelasset med enkel/transparent bakgrund.";
+        // Nagel fast paletten om DESIGN.md har ett palett-avsnitt - da delar
+        // varje asset exakt samma farger, inte bara "en enhetlig palett".
+        var palette = ExtractPalette(design);
+        var bible = palette is null ? style : $"{style}. Samma palett överallt: {palette}";
+        return $"{prompt}. ART-BIBEL - samma stil, palett och stämning för HELA spelet (sprites, tiles, bakgrunder, UI): {bible}. Spelasset med enkel/transparent bakgrund.";
     }
 
     /// <summary>First paragraph under an art-direction-ish heading in
@@ -41,6 +51,28 @@ public static class AssetStyle
             var style = Regex.Replace(match.Groups[1].Value, @"\s+", " ").Trim().TrimEnd('.');
             if (style.Length == 0) return null;
             return style.Length > MaxStyleChars ? style[..MaxStyleChars] : style;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>C10: palette/colour section from DESIGN.md so every asset shares
+    /// the SAME colours, or null when there is no explicit palette.</summary>
+    internal static string? ExtractPalette(string designPath)
+    {
+        try
+        {
+            if (!File.Exists(designPath)) return null;
+            var text = File.ReadAllText(designPath);
+            var match = Regex.Match(text,
+                @"^#{1,4}\s*(?:palett|palette|färger|farger|colou?rs?)\s*$\s+(.+?)(?:\r?\n\r?\n|\r?\n#|\z)",
+                RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline);
+            if (!match.Success) return null;
+            var pal = Regex.Replace(match.Groups[1].Value, @"\s+", " ").Trim().TrimEnd('.');
+            if (pal.Length == 0) return null;
+            return pal.Length > 120 ? pal[..120] : pal;
         }
         catch
         {

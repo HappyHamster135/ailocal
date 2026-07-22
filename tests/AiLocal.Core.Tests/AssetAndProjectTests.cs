@@ -119,6 +119,24 @@ public class AssetAndProjectTests : IDisposable
         Assert.Equal("hoppljud", AssetStyle.Apply(_dir, "sfx", "hoppljud"));
     }
 
+    [Fact]
+    public void AssetStyle_TilesetsOchBakgrunder_FarSammaArtbibelOchPalett()
+    {
+        File.WriteAllText(Path.Combine(_dir, "index.html"), "<!DOCTYPE html><html></html>");
+        File.WriteAllText(Path.Combine(_dir, "DESIGN.md"),
+            "# Spelet\n\n## Art Direction\n16-bit pixelart med tjocka konturer\n\n## Palett\nmorka blaa toner med varm orange accent\n");
+
+        // C10: tileset OCH background får nu art-bibeln (passerade tidigare orört).
+        var tileset = AssetStyle.Apply(_dir, "tileset", "grasmark");
+        Assert.Contains("ART-BIBEL", tileset);
+        Assert.Contains("pixelart", tileset);
+        Assert.Contains("orange accent", tileset); // paletten naglad fast
+
+        var bg = AssetStyle.Apply(_dir, "background", "skog");
+        Assert.Contains("ART-BIBEL", bg);
+        Assert.Contains("pixelart", bg);
+    }
+
     // ---- Ljudvägen genom AssetGenerator ------------------------------------
 
     [Fact]

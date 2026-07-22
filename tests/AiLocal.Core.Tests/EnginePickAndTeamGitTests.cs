@@ -122,8 +122,17 @@ public class EnginePickAndTeamGitTests
     {
         // Poängen med multi-modell: fallbacken måste variera svårighet så
         // per-spår-modellvalet har något att jobba med (inte allt "medium").
-        var tracks = TeamBuild.FallbackTracks("bygg ett spel", Path.GetTempPath());
-        Assert.Contains(tracks, t => t.Difficulty == "hard");
-        Assert.Contains(tracks, t => t.Difficulty == "simple");
+        // EGEN temp-mapp (inte delade Path.GetTempPath() - FallbackTracks
+        // enumererar den, och en parallell testklass som muterar temp-roten
+        // fick enumereringen att kasta = flaky).
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-fallback-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var tracks = TeamBuild.FallbackTracks("bygg ett spel", dir);
+            Assert.Contains(tracks, t => t.Difficulty == "hard");
+            Assert.Contains(tracks, t => t.Difficulty == "simple");
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { /* städning */ } }
     }
 }
