@@ -75,9 +75,11 @@ public class DirectorAndProbeTests : IDisposable
         // ANNAN/starkare modell än byggaren), inte på standardmodellen - det är
         // hela poängen (olika modeller fångar olika felmoder).
         string? capturedHint = "NOT-SET";
+        string? capturedPrompt = null;
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete = (req, _) =>
         {
             capturedHint = req.ModelHint;
+            capturedPrompt = req.Messages[^1].Content;
             return Task.FromResult(ProviderResponse.Ok(new ChatResponse
             {
                 Content = "{\"unmet\":[]}",
@@ -91,6 +93,9 @@ public class DirectorAndProbeTests : IDisposable
             reviewModelHint: "z-ai/glm-5.2");
 
         Assert.Equal("z-ai/glm-5.2", capturedHint);
+        // C2: den oberoende granskaren analyserar ocksa BALANS (ovinnbart/
+        // trivialt/identiska svarighetsgrader) ur tuning-vardena i koden.
+        Assert.Contains("BALANCE", capturedPrompt);
     }
 
     // ---- Interaktiv QA (riktig Chromium) -----------------------------------

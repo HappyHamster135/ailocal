@@ -165,6 +165,7 @@ public static class DirectorPass
                 "\n\nYou are an INDEPENDENT reviewer - a DIFFERENT model than the one that built this. List what is clearly wrong:\n" +
                 "1) Which contract criteria are clearly NOT met by the evidence?\n" +
                 "2) Any OBVIOUS bugs or clearly-missing production quality (broken/empty screens, crash risks, missing core game-feel).\n" +
+                "3) Obvious BALANCE problems from the tuning values in the code: unwinnable difficulty (enemies too fast/strong or timers too short to ever beat), trivial difficulty (the player essentially cannot lose), or difficulty levels that are effectively identical (same speeds/counts). Read the actual numbers and reason about whether a real player could win the hardest level and could lose the easiest.\n" +
                 "Respond ONLY with JSON: {\"unmet\":[\"concrete problem\"]} (max 8 items). " +
                 "Be strict about counts but give benefit of the doubt when evidence is ambiguous - do NOT invent nitpicks.";
             var response = await complete(new ChatRequest
