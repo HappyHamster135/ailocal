@@ -463,7 +463,23 @@ public static class WorkerRole
                     return (r.Success, FormatVisionResult(r));
                 });
             var executor = BuildExecutor(workspaceRoot);
-            var loop = new AgentLoop(provider.CompleteAsync, executor);
+            // B5: summera token-användning per modell över HELA uppdraget (samma
+            // loop körs för huvudkörning, continuations och fixrundor) så
+            // kostnaden kan redovisas öppet i slutresultatet. Lokala modeller
+            // (Ollama) hoppas över - gratis compute är ingen utgift.
+            var usageByModel = new Dictionary<string, (long In, long Out)>(StringComparer.OrdinalIgnoreCase);
+            var usageLock = new object();
+            var loop = new AgentLoop(async (r, c) =>
+            {
+                var resp = await provider.CompleteAsync(r, c);
+                if (resp.IsSuccess && resp.Response is { IsLocal: false } chat && !string.IsNullOrWhiteSpace(chat.Model))
+                    lock (usageLock)
+                    {
+                        var cur = usageByModel.TryGetValue(chat.Model, out var v) ? v : (In: 0L, Out: 0L);
+                        usageByModel[chat.Model] = (cur.In + chat.Usage.InputTokens, cur.Out + chat.Usage.OutputTokens);
+                    }
+                return resp;
+            }, executor);
 
             // Deterministic floor: a BUILD assignment on an EMPTY workspace
             // gets its scaffold created by the node itself, up-front - weak
@@ -1045,8 +1061,14 @@ public static class WorkerRole
             assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath);
             logCompleted = true;
 
+            // B5: uppskatta uppdragets kostnad (Anthropic + OpenRouter-pris) och
+            // redovisa den öppet - även ett misslyckat bygge kostade tokens.
+            // Null (allt lokalt/okänt pris) döljer siffran i stället för att visa
+            // en missvisande nolla.
+            decimal? costUsd = await AssignmentCost.EstimateAsync(usageByModel, httpFactory, ct);
+
             await WriteFrameAsync(
-                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath, replayPath })}\n\n", ct);
+                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath, replayPath, costUsd })}\n\n", ct);
             return Results.Empty;
             }
             finally

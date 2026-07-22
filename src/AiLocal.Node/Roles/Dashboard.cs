@@ -1442,6 +1442,7 @@ internal static class Dashboard
         .msg-replay { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
         .replay-cap { color: var(--muted); }
         .replay-img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
+        .msg-cost { margin-top: 6px; color: var(--muted); }
         .node-version-stale { color: var(--bad); font-weight: 600; }
         .contract-card {
           border: 1px solid var(--line); border-radius: 10px;
@@ -6024,6 +6025,11 @@ internal static class Dashboard
           const replay = (!running && m.replayPath)
             ? `<div class="msg-replay"><div class="small replay-cap">Repris - så här ser spelet ut när det spelas:</div><img class="replay-img" src="${esc(m.replayPath)}" alt="Speltest-repris" loading="lazy"></div>`
             : '';
+          // B5: oppen kostnadsredovisning. Sma summor visas med fler decimaler
+          // sa $0.003 inte blir ett missvisande $0.00.
+          const cost = (!running && typeof m.costUsd === 'number')
+            ? `<div class="small msg-cost">Uppskattad kostnad: $${m.costUsd < 0.01 ? m.costUsd.toFixed(4) : m.costUsd.toFixed(2)}</div>`
+            : '';
 
           const milestone = (running && m.milestone && m.milestone.id)
             ? `<div class="milestone-card">
@@ -6052,6 +6058,7 @@ internal static class Dashboard
             ${answer}
             ${preview}
             ${replay}
+            ${cost}
             ${!running && m.content ? msgActionsHtml : ''}
           </article>`;
         }
@@ -6240,6 +6247,7 @@ internal static class Dashboard
                   stepMsg.previewPath = payload.previewPath || null;
                   stepMsg.artifactPath = payload.artifactPath || null;
                   stepMsg.replayPath = payload.replayPath || null;
+                  stepMsg.costUsd = (typeof payload.costUsd === 'number') ? payload.costUsd : null;
                   stepMsg.state = success ? 'Completed' : 'Failed';
                   // The final answer lives in content; the running step-log
                   // stays in steps[]. If the run produced no steps at all
