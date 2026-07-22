@@ -1785,6 +1785,9 @@ internal static class Dashboard
                       <label class="check-field small" title="PÅ = uppdraget byggs av ett team: en arkitekt delar upp arbetet i oberoende spår, parallella utvecklaragenter bygger i varsin git-worktree, och grenarna mergas ihop. Parallellitet-fältet styr teamstorleken (2-4). Kräver Agentläge.">
                         <input id="teamMode" type="checkbox"> Team-läge
                       </label>
+                      <label class="check-field small" title="PÅ = producent-läge: en SEKVENTIELL studiopipeline där programmerare, konstnär och ljuddesigner lämnar över till varandra på SAMMA projekt (konstnären kör den starka modellen). Bra för polerade spel. Kräver Agentläge.">
+                        <input id="producerMode" type="checkbox"> Producent-läge
+                      </label>
                     </div>
                   </div>
                   <div class="composer-tools">
@@ -5935,6 +5938,10 @@ internal static class Dashboard
               await runTeamAssignment(prompt);
               return;
             }
+            if ($('producerMode')?.checked) {
+              await runProducerAssignment(prompt);
+              return;
+            }
             await planAndRunGoal(prompt);
             return;
           }
@@ -6133,6 +6140,20 @@ internal static class Dashboard
           }
         }
 
+        // C4: producent-läge - noden kör en SEKVENTIELL rollpipeline
+        // (programmerare -> konstnär -> ljuddesigner) på samma projekt.
+        async function runProducerAssignment(goalText) {
+          $('prompt').value = '';
+          $('composerNotice').className = 'notice';
+          state.assignmentMessages.push({ role: 'user', content: goalText, isAssignment: true });
+          try {
+            await runPlanSubtask({ title: 'Producent-pipeline' }, goalText, $('workerSelect')?.value || null, null, null, true);
+          } finally {
+            renderMessages();
+            syncComposerLock();
+          }
+        }
+
         // Assignment mode plans before it runs: the goal gets broken into a
         // reviewable list of subtasks (POST /api/goal-plan) instead of being
         // handed straight to one Worker as one big vague instruction. The
@@ -6232,7 +6253,7 @@ internal static class Dashboard
         // "worker" frame /api/assignment now sends first, so a sequential
         // group's later steps can pin to the same Worker the first one landed
         // on (see HostRole's /api/assignment WorkerId handling).
-        async function runPlanSubtask(subtask, assignmentText, workerId, teamSize, projectRel) {
+        async function runPlanSubtask(subtask, assignmentText, workerId, teamSize, projectRel, producerMode) {
           const stepMsg = { role: 'assistant', content: '', state: 'Running', isAssignment: true, subtaskTitle: subtask.title, startedAt: Date.now(), steps: [] };
           state.assignmentMessages.push(stepMsg);
           state.assignmentStreamLive = true;
@@ -6250,7 +6271,7 @@ internal static class Dashboard
             const response = await fetch('/api/assignment', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null, maxCostUsd: Number($('maxCostUsd')?.value) || null })
+              body: JSON.stringify({ assignment: assignmentText, workerId, teamSize: teamSize || null, projectRel: projectRel || null, maxCostUsd: Number($('maxCostUsd')?.value) || null, producerMode: !!producerMode })
             });
 
             if (!response.ok || !response.body) {

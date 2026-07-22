@@ -16,7 +16,7 @@ namespace AiLocal.Node.Roles;
 /// from the same plan that need to land on the same machine to share a
 /// workspace. The Worker itself ignores it; a Worker only ever executes on
 /// itself.</summary>
-public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null, decimal? MaxCostUsd = null);
+public sealed record AssignmentRequest(string Assignment, string? ModelHint = null, string? WorkerId = null, string? WorkspaceOverride = null, bool UseIsolation = false, int? TeamSize = null, string? ProjectRel = null, decimal? MaxCostUsd = null, bool ProducerMode = false);
 
 /// <summary>One project in a node's portfolio (B6: shared by the local
 /// /api/projects view and the cluster-reachable /execute/projects that the
@@ -780,10 +780,17 @@ public static class WorkerRole
             // totalt). Utan filframsteg står taket kvar som runaway-skydd
             // precis som förut. (Rapporterat: "den slutar alltid vid 50
             // iterations även fast den fortfarande jobbar".)
-            async Task<AgentRunResult> RunWithContinuationsAsync(string prompt)
+            async Task<AgentRunResult> RunWithContinuationsAsync(string prompt) =>
+                await RunWithContinuationsForModelAsync(prompt, modelHint);
+
+            // Samma continuation-skydd men med valfri modell per körning, så
+            // producent-lägets roller (t.ex. konstnären på den starka tiern) får
+            // EXAKT samma iterationstak- och plan-vakts-skydd som en ensam agent
+            // - inte en bar loop.RunAsync utan skyddsnät (granskning v1.83).
+            async Task<AgentRunResult> RunWithContinuationsForModelAsync(string prompt, string? runModel)
             {
                 var windowStart = DateTime.UtcNow;
-                var runResult = await loop.RunAsync(prompt, accessLevel, modelHint, onStep: emitAgentStep, ct, system: system);
+                var runResult = await loop.RunAsync(prompt, accessLevel, runModel, onStep: emitAgentStep, ct, system: system);
                 for (var round = 2; runResult.HitIterationCap && round <= 4; round++)
                 {
                     if (ProjectRootDetector.NewestWriteUtc(workspaceRoot) < windowStart)
@@ -798,7 +805,7 @@ public static class WorkerRole
                     runResult = await loop.RunAsync(
                         "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
                         "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
-                        accessLevel, modelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                        accessLevel, runModel, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
                 }
 
                 // Plan-i-stället-för-utförande-vakten: svaga modeller avslutar
@@ -815,7 +822,7 @@ public static class WorkerRole
                         "Planen är godkänd. UTFÖR den nu i sin helhet - fråga aldrig om lov eller bekräftelse; " +
                         "ingen människa läser eller svarar under bygget. Bygg alla delar, kör verify, och avsluta " +
                         "först när allt är klart och verifierat.",
-                        accessLevel, modelHint, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                        accessLevel, runModel, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
                 }
                 return runResult;
             }
@@ -838,6 +845,12 @@ public static class WorkerRole
                 };
                 await teamEmit(new AgentStep("thinking",
                     $"Team-läge: upp till {Math.Clamp(req.TeamSize.Value, 2, 4)} parallella utvecklare i varsin git-worktree."));
+                // Både team- och producent-läge begärt (bara nåbart via råa
+                // API:t - dashboarden gör dem ömsesidigt uteslutande): degradera
+                // öppet så anroparen ser att producent-pipelinen hoppas över.
+                if (req.ProducerMode)
+                    await teamEmit(new AgentStep("thinking",
+                        "Både team-läge och producent-läge begärdes - team-läget körs, producent-pipelinen hoppas över."));
                 var gitService = new GitService();
                 // Team-läget står och faller med git: på en dator utan git
                 // (varken PATH eller provisionerad katalog) dog hela team-
@@ -893,6 +906,21 @@ public static class WorkerRole
                     await teamEmit(new AgentStep("thinking",
                         "Team-läget slutförde inte bygget - kör som en ensam agent i stället."));
                 result = teamResult ?? await RunWithContinuationsAsync(assignmentText);
+            }
+            else if (req.ProducerMode && buildIntent)
+            {
+                // C4: producent-läge - sekventiell rollpipeline (programmerare ->
+                // konstnär -> ljuddesigner) på SAMMA arbetsyta, överlämning via
+                // filerna. Konstnären kör den starka tiern (multi-modell).
+                await emitAgentStep(new AgentStep("thinking",
+                    "Producent-läge: sekventiell studiopipeline - programmerare, konstnär och ljuddesigner lämnar över till varandra."));
+                // Varje roll körs genom SAMMA kostnadsbokförda, kostnadstakade loop
+                // och samma continuation-skydd som en ensam agent (granskning v1.83:
+                // producent-läget kringgick förr både kostnadstaket och continuations).
+                result = await ProducerPipeline.RunAsync(
+                    assignmentText, modelHint, settings.Worker.ModelTiers.Complex,
+                    runRole: (prompt, model) => RunWithContinuationsForModelAsync(prompt, model),
+                    emitAgentStep, ct);
             }
             else
             {

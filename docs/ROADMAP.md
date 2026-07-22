@@ -135,6 +135,19 @@ Golvet är stabilt: svag prompt → fungerande, polerat spel. Gapet till
 PRODUKTIONSNIVÅ + RIKTIG STUDIO ligger i fem saker; punkterna är grupperade
 efter vilket gap de stänger (S/M/L = grov storlek).
 
+> **STATUS: HELA Del C levererad** (v1.72.0–v1.83.0). Alla 13 punkter klara:
+> C1 game-feel/juice (v1.72–v1.74, adversariellt granskad), C2 testad balans +
+> C3 prestanda-koll (regissörens kriterier + sond), C4 producent-läge (v1.83.0 —
+> sekventiell rollpipeline programmerare→konstnär→ljuddesigner med riktiga
+> överlämningar, hårdad efter 11-agents-granskning: ärver kostnadstak +
+> continuation-skydd, leveransen styrs av kärnbygget), C5 milstolpe-drivet bygge
+> (v1.82.0), C6 regressionsskydd, C7 trailer/butikssida + C8 spelbar länk
+> (PackageService), C9 Android-export (best-effort, kräver Android SDK), C10
+> art-bibel (AssetStyle), C11–C13 djup/tillgänglighet/onboarding (produktions-
+> baren). Multi-modell per roll/spår löst (konstnären + hårda team-spår → stark
+> tier). Ärliga avgränsningar kvar: full checkpoint/återuppta-över-sessioner
+> (C5+), verifierad Android-APK (SDK), fristående cross-modell KOD-granskare.
+
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
   hit-stop, easing - LEVERERAT och VERIFIERAT (sonden mäter rörelse/partikel-
