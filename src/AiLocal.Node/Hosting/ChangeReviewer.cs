@@ -34,6 +34,9 @@ public sealed class ChangeReviewer
     private const string ReviewerSystem =
         "You are a strict but fair code reviewer inside an AI agent cluster. " +
         "An agent (often a small local model) wants to write a file. You see the task it was given and the diff of the change. " +
+        "The project is usually an EXISTING scaffolded game/app that the task EXTENDS - adding new files, new features, " +
+        "autoloads, helper scripts or modifying existing code IS the job. NEVER reject because the change 'adds something new', " +
+        "'modifies existing code' or 'was not asked for' - extension is the default expectation. " +
         "Reject only real problems: the change contradicts the task, destroys existing content that clearly should be kept, is syntactically broken for its file type, or is dangerous. " +
         "Style, naming, file organization, missing error handling, or 'could be better' are NEVER reasons to reject. " +
         "If you are unsure, approve. " +
@@ -77,6 +80,17 @@ public sealed class ChangeReviewer
                 "convention", "konvention", "file organization", "consider adding",
                 "consider using", "could be better"];
             if (nitpicks.Any(n => lower.Contains(n)))
+                return (true, null);
+
+            // Scope-nonsens (v1.95, sett live i team-bygget): granskaren avvisade
+            // LEGITIM vidareutveckling med "the task was not to add any new
+            // features", "appears to be modifying an existing..." och "no
+            // indication that this change..." - att UTÖKA ett befintligt kit ÄR
+            // uppdraget. Sådana motiveringar är trasiga granskarsvar -> fail open.
+            string[] scopeNonsense = ["not to add any new", "was not to add",
+                "modifying an existing", "modifies an existing",
+                "no indication that", "not related to building", "unrelated to the task"];
+            if (scopeNonsense.Any(n => lower.Contains(n)))
                 return (true, null);
 
             return (false, reason.Length > 0 ? reason : "Ändringen avvisades av granskaren utan angiven orsak.");

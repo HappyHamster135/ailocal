@@ -175,10 +175,29 @@ public sealed record ModelRoute(string Skill, string Provider, string Model, int
         if (stored is null || stored.Count == 0) return Defaults();
         var defaults = Defaults();
         return stored.Select(r =>
-            !Retired.Contains(r.Model) ? r
-            : defaults.FirstOrDefault(d =>
-                d.Skill.Equals(r.Skill, StringComparison.OrdinalIgnoreCase) && d.MinComplexity == r.MinComplexity) ?? r
-        ).ToList();
+            {
+                // v1.95: claude-/anthropic-routes är ALLTID fossiler från eran
+                // då routes var Anthropic-ids (UI:t kan inte skapa routes, så
+                // lagrade routes är alltid gamla fabriksdefaults) - och de
+                // auto-valde Opus för tunga byggen (live: "Modellval:
+                // claude-opus-4-8 (anthropic-rutt) - komplexitet 5/5", 500kr).
+                // Läks till dagens billiga default för samma (skill,
+                // komplexitet), annars närmaste lägre, annars släpps routen
+                // (ForTask faller vidare till billiga tiern).
+                var legacy = Retired.Contains(r.Model)
+                    || r.Provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                    || r.Model.StartsWith("claude-", StringComparison.OrdinalIgnoreCase);
+                if (!legacy) return r;
+                return defaults.FirstOrDefault(d =>
+                        d.Skill.Equals(r.Skill, StringComparison.OrdinalIgnoreCase) && d.MinComplexity == r.MinComplexity)
+                    ?? defaults.Where(d => d.Skill.Equals(r.Skill, StringComparison.OrdinalIgnoreCase) && d.MinComplexity <= r.MinComplexity)
+                        .OrderByDescending(d => d.MinComplexity)
+                        .FirstOrDefault();
+            })
+            .Where(r => r is not null)
+            .Select(r => r!)
+            .Distinct()
+            .ToList();
     }
 }
 

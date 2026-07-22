@@ -173,7 +173,12 @@ public sealed class OpenRouterProvider : IChatProvider
 
             if (!root.TryGetProperty("choices", out var choices) ||
                 choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
-                return ProviderResponse.Fail(ProviderOutcome.FatalError, "no choices in response");
+                // v1.95: TRANSIENT, inte fatalt. OpenRouter svarar ibland 200
+                // med tomt choices (upstream-hicka/ratelimit) - som FatalError
+                // dödade det HELA kedjan varje gång det inträffade mitt i ett
+                // bygge ("crashar alltid vid något tillfälle", live). Transient
+                // -> cooldown + nästa provider/försök i stället för totalstopp.
+                return ProviderResponse.Fail(ProviderOutcome.TransientError, "no choices in response (tomt svar - transient)");
 
             var message = choices[0].GetProperty("message");
             var content = message.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String

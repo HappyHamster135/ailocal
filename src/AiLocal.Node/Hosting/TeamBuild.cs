@@ -120,7 +120,12 @@ public static class TeamBuild
 
         await Task.WhenAll(runs.Where(r => r.Iso is not null).Select(async run =>
         {
-            var loop = new AgentLoop(complete, executorFor(run.Iso!.WorktreePath), maxCostUsd, spentSoFar);
+            // v1.95: inhägna spårets executor i worktreen - live sågs spår
+            // skriva med absoluta vägar RAKT I HUVUDROTEN (förbi isolationen)
+            // så två spår krockade i samma Main.gd.
+            var trackExecutor = executorFor(run.Iso!.WorktreePath);
+            trackExecutor.ConfineToRoot = true;
+            var loop = new AgentLoop(complete, trackExecutor, maxCostUsd, spentSoFar);
             Func<AgentStep, Task> trackEmit = step =>
                 emit(new AgentStep(step.Kind, $"[{run.Track.Title}] {step.Detail}"));
             var trackModel = ModelFor(run.Track);
@@ -179,19 +184,28 @@ public static class TeamBuild
                 redo.Add(run.Track);
                 continue;
             }
-            if (run.Result is not { Success: true } || !run.ProducedChanges)
+            if (!run.ProducedChanges)
             {
                 // En tom gren "mergar" alltid (Already up to date) - att kalla
                 // det "klart" vore exakt det falska-Klar-mönster grinden finns
                 // för att stoppa. Ärlig rapport + kassering i stället.
                 var reason = run.Result is { Success: true }
                     ? "producerade inga ändringar"
-                    : "utvecklaren misslyckades";
+                    : "misslyckades utan att skriva något";
                 await emit(new AgentStep("tool_error",
                     $"[{run.Track.Title}] {reason} - spåret kasseras."));
                 await isolation.DiscardAsync(run.Iso.TaskId, ct);
                 summary.AppendLine($"- {run.Track.Title}: {reason}.");
                 continue;
+            }
+            if (run.Result is not { Success: true })
+            {
+                // v1.95: ett spår som slog i taket/föll MEN skrev riktiga
+                // ändringar kasseras INTE längre - live kasserades ALLA fyra
+                // spåren (timmar av arbete) och bygget började om från noll.
+                // Ändringarna mergas; kvalitetsgrinden + fixrundorna tar resten.
+                await emit(new AgentStep("thinking",
+                    $"[{run.Track.Title}] nådde taket/föll men skrev riktiga ändringar - mergas ändå (grinden tar resten)."));
             }
 
             var (merged, mergeOutput) = await isolation.MergeAsync(run.Iso.TaskId, ct);
@@ -421,6 +435,7 @@ public static class TeamBuild
         "Regler för teamarbetet:\n" +
         "- ARBETA ENBART GENOM VERKTYGEN (write_file/edit_file/verify). Ett svar utan verktygsanrop kastas bort - ingen människa läser det.\n" +
         "- Håll dig till ditt spår - andra utvecklare arbetar parallellt med sina.\n" +
+        "- Använd RELATIVA vägar (t.ex. \"Main.gd\"). Din arbetsmapp är en ISOLERAD git-worktree - absoluta vägar utanför den avvisas; huvudprojektet mergas efteråt.\n" +
         "- Lägg ny kod i EGNA filer när det går, och koppla in dem med små edit_file-ändringar. Skriv ALDRIG om hela filer som andra spår också rör.\n" +
         "- Kör verify innan du avslutar.";
 

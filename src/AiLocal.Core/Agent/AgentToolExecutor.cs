@@ -66,6 +66,11 @@ public sealed class AgentToolExecutor
     // manager-prompten gav PLATTFORMAR-kittet för att genreväljaren fick tom
     // sträng när en svag modell utelämnade prompt-argumentet).
     private readonly string? _taskHint;
+
+    /// <summary>v1.95: PÅ för team-spårens executors - Full-läge men inhägnat
+    /// i worktree-roten, så ett spår aldrig kan skriva förbi sin isolation
+    /// med absoluta vägar (sett live: två spår krockade i huvudrotens Main.gd).</summary>
+    public bool ConfineToRoot { get; set; }
     // Optional game-BUILDER delegate (Node layer wires this to GameBuilder,
     // same inject pattern as _gameScaffolder). Takes (engine, root) and
     // produces a standalone .exe via the engine's headless build; returns
@@ -423,6 +428,17 @@ public sealed class AgentToolExecutor
     {
         var path = ResolvePath(RequireString(args, "path"));
         var content = RequireString(args, "content");
+        // v1.95: maskningsvakt på SKRIVNINGAR. v1.32-vakten stoppade jakt på
+        // [ADDRESS] i sök/edit-oldText, men live sågs det VÄRRE fallet: en
+        // modell som läst maskade verktygsresultat SKREV OM hela filen och
+        // materialiserade "[ADDRESS]" på disk (PackedVector2Array blev
+        // [ADDRESS] i Main.gd -> obyggbart projekt). Blockera skrivningen med
+        // facit i stället för att låta korruptionen landa.
+        if (RedactionArtifactIn(content) is { } writeMarker)
+            return Error(call,
+                $"content innehåller \"{writeMarker}\" - det är AI-leverantörens integritetsmaskning av det DU LÄST, " +
+                "inte filens riktiga innehåll. Skriv ALDRIG platshållaren till disk. Läs de exakta raderna via " +
+                "run_command (type/findstr) och skriv innehållet med de riktiga värdena i stället.");
         var append = args.TryGetProperty("append", out var ap) && ap.ValueKind == JsonValueKind.True;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
@@ -522,6 +538,13 @@ public sealed class AgentToolExecutor
         }
         if (!replaceAll && occurrences > 1)
             return Error(call, $"edit_file failed: oldText matched {occurrences} locations and replaceAll is false. Make oldText more specific, or set replaceAll=true to replace all of them.");
+
+        // v1.95: samma maskningsvakt på NYA texten - en modell som skriver in
+        // "[ADDRESS]" materialiserar leverantörsmaskningen på disk (sett live).
+        if (RedactionArtifactIn(newText) is { } newMarker)
+            return Error(call,
+                $"edit_file: newText innehåller \"{newMarker}\" - det är AI-leverantörens integritetsmaskning av det du läst, " +
+                "inte riktig kod. Läs de exakta raderna via run_command (type/findstr) och gör om ändringen med de riktiga värdena.");
 
         var updated = replaceAll ? content.Replace(oldText, newText) : content.Replace(oldText, newText);
 
@@ -714,7 +737,19 @@ public sealed class AgentToolExecutor
     {
         // Mirror ResolvePath's contract for directories.
         if (_level == AgentAccessLevel.Full)
-            return Path.GetFullPath(requestedPath, _workspaceRoot);
+        {
+            var full = Path.GetFullPath(requestedPath, _workspaceRoot);
+            if (ConfineToRoot)
+            {
+                var rootSep = _workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
+                    ? _workspaceRoot : _workspaceRoot + Path.DirectorySeparatorChar;
+                if (!full.StartsWith(rootSep, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(full, _workspaceRoot, StringComparison.OrdinalIgnoreCase))
+                    throw new UnauthorizedAccessException(
+                        $"ditt teamspår arbetar ISOLERAT i worktreen '{_workspaceRoot}' - '{requestedPath}' pekar utanför den. Använd RELATIVA vägar.");
+            }
+            return full;
+        }
         if (Path.IsPathRooted(requestedPath))
             throw new UnauthorizedAccessException(
                 $"absolute paths are not allowed in sandboxed mode: '{requestedPath}'");
@@ -1091,7 +1126,24 @@ public sealed class AgentToolExecutor
         // overload resolves a relative path against _workspaceRoot instead,
         // while still returning an absolute path as-is when one is given.
         if (_level == AgentAccessLevel.Full)
-            return Path.GetFullPath(requestedPath, _workspaceRoot);
+        {
+            var full = Path.GetFullPath(requestedPath, _workspaceRoot);
+            // v1.95: worktree-inhägnad för TEAM-spår. I team-läget SKA spåren
+            // vara isolerade i varsin worktree - live sågs spår skriva med
+            // ABSOLUTA vägar rakt i huvudroten (förbi sin worktree) så två
+            // spår krockade i samma Main.gd. Inhägnaden ger facit i felet.
+            if (ConfineToRoot)
+            {
+                var rootSep = _workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
+                    ? _workspaceRoot : _workspaceRoot + Path.DirectorySeparatorChar;
+                if (!full.StartsWith(rootSep, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(full, _workspaceRoot, StringComparison.OrdinalIgnoreCase))
+                    throw new UnauthorizedAccessException(
+                        $"ditt teamspår arbetar ISOLERAT i worktreen '{_workspaceRoot}' - '{requestedPath}' pekar utanför den. " +
+                        "Använd RELATIVA vägar (t.ex. \"Main.gd\"); huvudroten och andra spår får inte röras (mergen sker efteråt).");
+            }
+            return full;
+        }
 
         // Sandboxed: reject absolute paths outright rather than trying to
         // "combine" them - Path.Combine(root, absolutePath) on Windows
