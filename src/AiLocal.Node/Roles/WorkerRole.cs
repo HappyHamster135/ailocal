@@ -1181,6 +1181,93 @@ public static class WorkerRole
                 }
             }
 
+            // ---- v2.0.0: utvecklingsrundor - prototyp -> riktigt spel --------
+            // Ägarens fundamentala krav: grindens gröna leverans är PROTOTYPEN,
+            // inte slutprodukten. Studion granskar sitt eget verk (kritik på
+            // billig Medium-tier över fyra axlar: större / snyggare / bättre
+            // ljud / stabilare) och BYGGER förbättringarna som nya rundor
+            // ovanpå historiken. Snapshot före varje runda = en försämrande
+            // runda ÅTERSTÄLLS i stället för att skeppas. Max$-taket gäller.
+            var polishTotal = Math.Clamp(settings.Worker.PolishRounds, 0, 3);
+            if (result.Success && findings is { Clean: true } && buildIntent && wantsGame && polishTotal > 0)
+            {
+                for (var pr = 1; pr <= polishTotal; pr++)
+                {
+                    if (maxCostUsd > 0m && spentUsd >= maxCostUsd * 0.8m)
+                    {
+                        await EmitStep("thinking",
+                            $"Utvecklingsrunda {pr}/{polishTotal} hoppas över - kostnadstaket är nästan nått (~${spentUsd:0.00} av max ${maxCostUsd:0.00}).");
+                        break;
+                    }
+                    var polishRoot = findings.ProjectRoot ?? workspaceRoot;
+                    var preSnap = ProjectSnapshots.Capture(workspaceRoot, polishRoot,
+                        $"prototyp före utvecklingsrunda {pr}", clean: true, findings.Engine);
+                    var preSnapFile = preSnap.Success
+                        ? ProjectSnapshots.List(workspaceRoot, polishRoot).FirstOrDefault()?.File
+                        : null;
+
+                    var critiqueHint = string.IsNullOrWhiteSpace(settings.Worker.ModelTiers.Medium)
+                        ? null : settings.Worker.ModelTiers.Medium;
+                    await EmitStep("tool_call",
+                        $"studiokritik (utvecklingsrunda {pr}/{polishTotal}): vad hade kunnat göras bättre?"
+                        + (critiqueHint is null ? "" : $" - modell {critiqueHint}"));
+                    var improvements = await PolishPass.CritiqueAsync(
+                        polishRoot, req.Assignment, findings.Report, completeAccounted, ct, critiqueHint);
+                    if (improvements.Count == 0)
+                    {
+                        await EmitStep("tool_result",
+                            "Studiokritiken: inget väsentligt att lyfta - spelet levereras som det är.");
+                        break;
+                    }
+                    await EmitStep("tool_result",
+                        $"Utvecklingsrunda {pr}/{polishTotal} - studion bygger:\n" +
+                        string.Join("\n", improvements.Select(s => "- " + s)));
+
+                    result = await loop.RunAsync(PolishPass.BuildPrompt(pr, polishTotal, improvements),
+                        accessLevel, modelHint, onStep: emitAgentStep, ct, history: result.Messages, system: system);
+
+                    await EmitStep("tool_call", $"kvalitetskontroll efter utvecklingsrunda {pr}");
+                    var after = await InspectAsync();
+                    await EmitStep(after.Clean ? "tool_result" : "tool_error", after.Report);
+                    if (!after.Clean && !(maxCostUsd > 0m && spentUsd >= maxCostUsd))
+                    {
+                        // EN åtgärdsrunda - samma feedbackmönster som grinden.
+                        result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(after), accessLevel, modelHint,
+                            onStep: emitAgentStep, ct, history: result.Messages, system: system);
+                        await EmitStep("tool_call", $"kvalitetskontroll efter åtgärd (runda {pr})");
+                        after = await InspectAsync();
+                        await EmitStep(after.Clean ? "tool_result" : "tool_error", after.Report);
+                    }
+                    if (after.Clean)
+                    {
+                        findings = after;
+                        // Grinden är sanningen: landade rundan grönt räknas
+                        // uppdraget som lyckat även om modellturen slog i tak
+                        // (v1.95-lärdomen - kassera aldrig landat arbete).
+                        result = result with { Success = true };
+                        continue;
+                    }
+                    // Rundan försämrade bygget - återställ prototypen ärligt.
+                    if (preSnapFile is not null
+                        && ProjectSnapshots.Restore(workspaceRoot, polishRoot, preSnapFile) is { Success: true })
+                    {
+                        await EmitStep("tool_result",
+                            $"Utvecklingsrunda {pr} försämrade bygget - prototypen ÅTERSTÄLLD från snapshot. Levererar den godkända versionen.");
+                        await EmitStep("tool_call", "kvalitetskontroll efter återställning");
+                        findings = await InspectAsync();
+                        await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                        result = result with { Success = true };
+                    }
+                    else
+                    {
+                        await EmitStep("tool_error",
+                            $"Utvecklingsrunda {pr} försämrade bygget och kunde inte återställas - kvarvarande brister redovisas.");
+                        findings = after;
+                    }
+                    break;
+                }
+            }
+
             if (result.Success && findings is not null)
             {
                 result = findings switch

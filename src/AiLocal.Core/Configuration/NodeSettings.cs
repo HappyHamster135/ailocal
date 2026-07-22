@@ -79,6 +79,14 @@ public sealed class WorkerProfileSettings
     /// princip: en omstartad nod ska aldrig börja spendera tokens tyst.</summary>
     public bool AutoResume { get; set; }
 
+    /// <summary>v2.0.0: utvecklingsrundor efter godkänd prototyp (0-3).
+    /// Grindens gröna leverans behandlas som PROTOTYP: en studiokritik
+    /// (billig Medium-tier) listar de viktigaste förbättringarna (större /
+    /// snyggare / bättre ljud / stabilare) och en byggrunda utför dem, med
+    /// snapshot-återställning om rundan försämrar. Default 1 - ägarens
+    /// produktmål ÄR iterationen, men varje runda kostar tokens.</summary>
+    public int PolishRounds { get; set; } = 1;
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.

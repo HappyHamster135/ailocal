@@ -228,6 +228,21 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > sv/en-växel) - engelska är nu default; de 16 HTML5-kiten är kvar på
 > ASCII-svenska (Godot är husmotorn; regissörskriteriet styr agenten till
 > engelska även där).
+>
+> **v2.0.0 UTVECKLINGSRUNDORNA (ägarens fundamentala krav: "det som var
+> finalprodukten ska vara PROTOTYPEN").** Grindens gröna leverans är inte
+> längre slutet: PolishPass låter en kritikermodell (billiga Medium-tiern)
+> granska det GODKÄNDA spelet - kod + grindens speltest-/visionsbevis - över
+> exakt ägarens fyra axlar (STÖRRE innehåll, SNYGGARE, BÄTTRE LJUD, MINDRE
+> BUGGIGT) och producera max 6 konkreta byggbara förbättringar; en byggrunda
+> utför dem ovanpå historiken; grinden körs om; en försämrande runda
+> ÅTERSTÄLLS från snapshot i stället för att skeppas (och grindens gröna
+> räknas som lyckat även om modellturen slog i tak - v1.95-lärdomen).
+> Inställningen "Utvecklingsrundor efter godkänd prototyp" (0-3, default 1,
+> alla 8 kopplingspunkter). Kritik-done-signalen ("spelet håller redan
+> måttet") och tomma kritiker avbryter ärligt; Max$-taket respekteras (80%-
+> spärr före ny runda). KVAR: fler rundor som default när kostnadsbilden
+> bevisat sig; kritik med skärmdumpsbilder som underlag (nu text-bevisen).
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

@@ -2192,6 +2192,16 @@ internal static class Dashboard
                   mot leveranskontraktet - samma väg som Återuppta-knappen. Av som standard: en omstartad nod
                   ska aldrig börja spendera tokens utan att du valt det.
                 </span>
+                <label class="field">
+                  <span>Utvecklingsrundor efter godkänd prototyp</span>
+                  <input id="settingPolishRounds" type="number" min="0" max="3" step="1" value="1">
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Grindens godkända leverans behandlas som PROTOTYP: studion kritiserar sitt eget spel
+                  (större · snyggare · bättre ljud · stabilare) och bygger förbättringarna i så här många
+                  rundor, med snapshot-återställning om en runda försämrar. 0 = leverera prototypen direkt.
+                  Varje runda kostar tokens (kritiken körs på billiga Medium-tiern).
+                </span>
                 <label class="check-field wide">
                   <input id="settingAllowInternet" type="checkbox"> Internetåtkomst för agenten
                 </label>
@@ -5169,6 +5179,7 @@ internal static class Dashboard
           $('settingAiReviewWrites').checked = data.aiReviewWrites ?? false;
           $('settingMilestoneApproval').checked = data.milestoneApproval ?? false;
           $('settingAutoResume').checked = data.autoResume ?? false;
+          $('settingPolishRounds').value = data.polishRounds ?? 1;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
@@ -5503,6 +5514,7 @@ internal static class Dashboard
             aiReviewWrites: $('settingAiReviewWrites').checked,
             milestoneApproval: $('settingMilestoneApproval').checked,
             autoResume: $('settingAutoResume').checked,
+            polishRounds: Math.max(0, Math.min(3, parseInt($('settingPolishRounds').value, 10) || 0)),
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
