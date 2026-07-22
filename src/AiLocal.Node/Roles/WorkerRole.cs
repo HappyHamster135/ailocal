@@ -867,7 +867,15 @@ public static class WorkerRole
                     assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, teamHint,
                     system, provider.CompleteAsync, BuildExecutor, teamEmit,
                     gitService, new GitIsolationService(gitService), ct,
-                    architectHint: settings.Worker.ModelTiers.Complex);
+                    architectHint: settings.Worker.ModelTiers.Complex,
+                    // Multi-modell: hårda spår får den starka tiern, enkla den
+                    // billiga - olika modeller jobbar mot samma mål på EN maskin.
+                    modelForTrack: difficulty => difficulty switch
+                    {
+                        "hard" => settings.Worker.ModelTiers.Complex,
+                        "simple" => settings.Worker.ModelTiers.Simple,
+                        _ => teamHint
+                    });
                 // null = git saknas/repo gick inte att skapa ELLER inget spår
                 // producerade ändringar (TeamBuild har redan förklarat vilket
                 // i strömmen) - den ensamma agenten med kvalitetsgrindens

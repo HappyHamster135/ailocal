@@ -6,8 +6,11 @@ using AiLocal.Core.Providers;
 
 namespace AiLocal.Node.Hosting;
 
-/// <summary>One developer's slice of a team build.</summary>
-public sealed record TeamTrack(string Title, string Description);
+/// <summary>One developer's slice of a team build. Difficulty ("hard" |
+/// "medium" | "simple") lets the team assign a STRONGER model to the harder
+/// tracks and cheaper models to the easy ones - different models collaborating
+/// on one goal, one machine (B5/multi-modell).</summary>
+public sealed record TeamTrack(string Title, string Description, string Difficulty = "medium");
 
 /// <summary>
 /// The "small company" build: an ARCHITECT model call splits the remaining
@@ -43,9 +46,14 @@ public static class TeamBuild
         GitService git,
         GitIsolationService isolation,
         CancellationToken ct,
-        string? architectHint = null)
+        string? architectHint = null,
+        Func<string, string?>? modelForTrack = null)
     {
         teamSize = Math.Clamp(teamSize, 2, MaxTeamSize);
+        // Per-spår-modell: hårda spår får den starka modellen, enkla en billig -
+        // arkitektens svårighetsbedömning avgör. Utan resolver (eller okänd
+        // svårighet) faller allt tillbaka på modelHint = tidigare beteende.
+        string? ModelFor(TeamTrack t) => modelForTrack?.Invoke(t.Difficulty) is { Length: > 0 } m ? m : modelHint;
 
         // ---- 1. Grund: repo + baslinje ----------------------------------
         // Varje tidigt avhopp EMITTAS med orsak - "Team-läget slutförde inte
@@ -81,7 +89,7 @@ public static class TeamBuild
         if (tracks.Count < 2)
             tracks = FallbackTracks(assignment, workspaceRoot).Take(teamSize).ToList();
         await emit(new AgentStep("tool_result",
-            string.Join("\n", tracks.Select((t, i) => $"Spår {i + 1}: {t.Title} - {t.Description}"))));
+            string.Join("\n", tracks.Select((t, i) => $"Spår {i + 1} [{t.Difficulty}]: {t.Title} - {t.Description}"))));
 
         // ---- 3. Worktrees + parallella utvecklare -----------------------
         var runs = new List<TrackRun>();
@@ -110,8 +118,11 @@ public static class TeamBuild
             var loop = new AgentLoop(complete, executorFor(run.Iso!.WorktreePath));
             Func<AgentStep, Task> trackEmit = step =>
                 emit(new AgentStep(step.Kind, $"[{run.Track.Title}] {step.Detail}"));
+            var trackModel = ModelFor(run.Track);
+            await trackEmit(new AgentStep("thinking",
+                $"svårighet {run.Track.Difficulty} - modell {(string.IsNullOrWhiteSpace(trackModel) ? "auto" : trackModel)}"));
             var result = await loop.RunAsync(
-                TrackPrompt(assignment, run.Track, tracks.Count), accessLevel, modelHint,
+                TrackPrompt(assignment, run.Track, tracks.Count), accessLevel, trackModel,
                 onStep: trackEmit, ct, system: system);
             AddUsage(result);
 
@@ -126,7 +137,7 @@ public static class TeamBuild
                     "Planen är godkänd. UTFÖR den nu i sin helhet - fråga aldrig om lov; ingen människa läser " +
                     "under bygget. Skapa/ändra filerna med write_file/edit_file, kör verify, och avsluta först " +
                     "när ändringarna ligger på disk.",
-                    accessLevel, modelHint, onStep: trackEmit, ct, history: result.Messages, system: system);
+                    accessLevel, trackModel, onStep: trackEmit, ct, history: result.Messages, system: system);
                 AddUsage(result);
             }
 
@@ -142,7 +153,7 @@ public static class TeamBuild
                     "Du skrev inga filer alls. Genomför ditt spår PÅ RIKTIGT nu: skapa/ändra filerna med " +
                     "write_file/edit_file, kör verify, och avsluta först när ändringarna ligger på disk. " +
                     "Svara inte med text, planer eller frågor - de kastas bort.",
-                    accessLevel, modelHint, onStep: trackEmit, ct, history: result.Messages, system: system);
+                    accessLevel, trackModel, onStep: trackEmit, ct, history: result.Messages, system: system);
                 AddUsage(result);
             }
 
@@ -202,8 +213,9 @@ public static class TeamBuild
             if (ct.IsCancellationRequested) break;
             await emit(new AgentStep("tool_call", $"gör om spåret \"{track.Title}\" ovanpå det mergade projektet"));
             var loop = new AgentLoop(complete, executorFor(workspaceRoot));
+            var redoModel = ModelFor(track);
             var result = await loop.RunAsync(
-                RedoPrompt(assignment, track), accessLevel, modelHint,
+                RedoPrompt(assignment, track), accessLevel, redoModel,
                 onStep: step => emit(new AgentStep(step.Kind, $"[{track.Title}] {step.Detail}")),
                 ct, system: system);
             AddUsage(result);
@@ -214,7 +226,7 @@ public static class TeamBuild
                 result = await loop.RunAsync(
                     "Planen är godkänd. UTFÖR den nu i sin helhet - skapa/ändra filerna, kör verify, " +
                     "och avsluta först när ändringarna ligger på disk.",
-                    accessLevel, modelHint,
+                    accessLevel, redoModel,
                     onStep: step => emit(new AgentStep(step.Kind, $"[{track.Title}] {step.Detail}")),
                     ct, history: result.Messages, system: system);
                 AddUsage(result);
@@ -276,8 +288,13 @@ public static class TeamBuild
           finishable by one developer in one sitting.
         - NEVER create a planning/design/documentation-only track. Every
           track produces working code on disk.
+        - RATE each track's difficulty as "hard", "medium", or "simple" by how
+          much careful reasoning the CODE needs: core gameplay/mechanics/state
+          = hard; content/levels/variation = medium; audio/menus/polish = simple.
+          The team gives a STRONGER model to harder tracks and a cheaper one to
+          the easy tracks, so an honest rating spends the budget where it matters.
         - Respond with ONLY this JSON, nothing else:
-          {"tracks":[{"title":"...","description":"..."}]}
+          {"tracks":[{"title":"...","description":"...","difficulty":"hard|medium|simple"}]}
         """;
 
     private static async Task<List<TeamTrack>?> PlanTracksAsync(
@@ -333,8 +350,9 @@ public static class TeamBuild
             {
                 var title = el.TryGetProperty("title", out var t) ? t.GetString() : null;
                 var description = el.TryGetProperty("description", out var d) ? d.GetString() : null;
+                var difficulty = el.TryGetProperty("difficulty", out var df) ? df.GetString() : null;
                 if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(description))
-                    tracks.Add(new TeamTrack(title.Trim(), description.Trim()));
+                    tracks.Add(new TeamTrack(title.Trim(), description.Trim(), NormalizeDifficulty(difficulty)));
             }
             return tracks.Count >= 2 ? tracks : null;
         }
@@ -342,6 +360,14 @@ public static class TeamBuild
         {
             return null;
         }
+    }
+
+    /// <summary>Klampar arkitektens svar till "hard"/"medium"/"simple" - okänt/
+    /// tomt blir "medium" (den routade standardmodellen).</summary>
+    internal static string NormalizeDifficulty(string? raw)
+    {
+        var d = (raw ?? "").Trim().ToLowerInvariant();
+        return d is "hard" or "simple" ? d : "medium";
     }
 
     /// <summary>Deterministic floor, same philosophy as the pre-scaffold: a
@@ -367,17 +393,17 @@ public static class TeamBuild
         return isGame
             ?
             [
-                new("Innehåll och nivåer", $"Utöka spelet med mer innehåll: fler nivåer/vågor/varianter med stigande svårighetsgrad. {fileHint}"),
-                new("Ljud och effekter", $"Förbättra ljudbilden och effekterna: ljud för varje viktig händelse och visuella effekter vid poäng, träffar och game over. {fileHint}"),
-                new("Meny och polish", $"Förbättra menyer och känsla: startskärm med instruktioner, paus, game over med highscore och konsekvent färgtema. Gör små riktade edit_file-ändringar - skriv aldrig om hela filer andra spår rör."),
-                new("Mekanik och variation", $"Lägg till en ny spelmekanik som ger djup (power-ups, combo eller liknande) kopplad till poängsystemet. {fileHint}")
+                new("Innehåll och nivåer", $"Utöka spelet med mer innehåll: fler nivåer/vågor/varianter med stigande svårighetsgrad. {fileHint}", "medium"),
+                new("Ljud och effekter", $"Förbättra ljudbilden och effekterna: ljud för varje viktig händelse och visuella effekter vid poäng, träffar och game over. {fileHint}", "simple"),
+                new("Meny och polish", $"Förbättra menyer och känsla: startskärm med instruktioner, paus, game over med highscore och konsekvent färgtema. Gör små riktade edit_file-ändringar - skriv aldrig om hela filer andra spår rör.", "simple"),
+                new("Mekanik och variation", $"Lägg till en ny spelmekanik som ger djup (power-ups, combo eller liknande) kopplad till poängsystemet. {fileHint}", "hard")
             ]
             :
             [
-                new("Kärnfunktioner", "Implementera och förbättra applikationens kärnfunktioner enligt uppdraget. Håll dig till kärnlogikens filer."),
-                new("Robusthet och tester", "Lägg till felhantering, indata-validering och tester för den befintliga funktionaliteten. Skapa testerna i egna filer."),
-                new("Gränssnitt och finish", "Förbättra användarupplevelsen: tydliga utskrifter/gränssnitt, hjälptext och en README som förklarar hur allt används."),
-                new("Utökade funktioner", "Lägg till närliggande funktioner som gör applikationen mer komplett, i egna filer/moduler.")
+                new("Kärnfunktioner", "Implementera och förbättra applikationens kärnfunktioner enligt uppdraget. Håll dig till kärnlogikens filer.", "hard"),
+                new("Robusthet och tester", "Lägg till felhantering, indata-validering och tester för den befintliga funktionaliteten. Skapa testerna i egna filer.", "medium"),
+                new("Gränssnitt och finish", "Förbättra användarupplevelsen: tydliga utskrifter/gränssnitt, hjälptext och en README som förklarar hur allt används.", "simple"),
+                new("Utökade funktioner", "Lägg till närliggande funktioner som gör applikationen mer komplett, i egna filer/moduler.", "medium")
             ];
     }
 

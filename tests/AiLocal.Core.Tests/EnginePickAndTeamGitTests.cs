@@ -86,4 +86,44 @@ public class EnginePickAndTeamGitTests
             try { Directory.Delete(dir, recursive: true); } catch { /* städning */ }
         }
     }
+
+    // ---- Multi-modell: per-spår-svårighet (olika modeller, samma mål) -------
+
+    [Fact]
+    public void ParseTracks_LaserSvarighetPerSpar()
+    {
+        var json = """
+            {"tracks":[
+              {"title":"Gameplay","description":"karnmekaniken","difficulty":"hard"},
+              {"title":"Meny","description":"startskarm","difficulty":"simple"}
+            ]}
+            """;
+        var tracks = TeamBuild.ParseTracks(json);
+        Assert.NotNull(tracks);
+        Assert.Equal(2, tracks!.Count);
+        Assert.Equal("hard", tracks[0].Difficulty);
+        Assert.Equal("simple", tracks[1].Difficulty);
+    }
+
+    [Theory]
+    [InlineData("hard", "hard")]
+    [InlineData("HARD", "hard")]
+    [InlineData("simple", "simple")]
+    [InlineData("medium", "medium")]
+    [InlineData("nonsens", "medium")]   // okänt -> medium (standardmodellen)
+    [InlineData(null, "medium")]
+    public void NormalizeDifficulty_KlamparTillGiltiga(string? raw, string expected)
+    {
+        Assert.Equal(expected, TeamBuild.NormalizeDifficulty(raw));
+    }
+
+    [Fact]
+    public void FallbackTracks_HarBadeHardaOchEnklaSpar()
+    {
+        // Poängen med multi-modell: fallbacken måste variera svårighet så
+        // per-spår-modellvalet har något att jobba med (inte allt "medium").
+        var tracks = TeamBuild.FallbackTracks("bygg ett spel", Path.GetTempPath());
+        Assert.Contains(tracks, t => t.Difficulty == "hard");
+        Assert.Contains(tracks, t => t.Difficulty == "simple");
+    }
 }
