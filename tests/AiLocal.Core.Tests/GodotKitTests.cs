@@ -117,6 +117,8 @@ public class GodotKitTests
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("_physics_process", script);
             Assert.Contains("checkpoint", script);
+            Assert.Contains("CPUParticles2D", script);  // C1 juice
+            Assert.Contains("shake", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -134,6 +136,8 @@ public class GodotKitTests
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("CharacterBody3D", script);
             Assert.Contains("Camera3D", script);
+            Assert.Contains("CPUParticles3D", script);  // C1 juice
+            Assert.Contains("shake", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -157,7 +161,7 @@ public class GodotKitTests
     }
 
     [Fact]
-    public async Task GodotHeadless_ParsarBadaKiten_UtanSkriptfel()
+    public async Task GodotHeadless_ParsarKiten_UtanSkriptfel()
     {
         // Miljöberoende men SKARPT där godot finns i verktygskatalogen (dev-
         // maskinen har den sedan v1.45.0). Utan godot finns inget att parsa
@@ -169,7 +173,9 @@ public class GodotKitTests
         foreach (var prompt in new[]
         {
             "bygg ett fotbolls management spel i godot",
-            "top-down äventyr i godot där man överlever vågor"
+            "top-down äventyr i godot där man överlever vågor",
+            "bygg ett racingspel i godot med bilar och tre varv",   // C1 juice: Varvet
+            "bygg ett 3d samlarspel i godot"                          // C1 juice: Kuben (CPUParticles3D)
         })
         {
             var (root, _) = ScaffoldTo(prompt);

@@ -166,15 +166,42 @@ var best := 0.0
 var checkpoints: Array[Vector2] = []
 var snd := {}
 var ui: CanvasLayer
+var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
+var dot_tex: ImageTexture  # C1 juice: liten vit partikeltextur (utan blir de osynliga)
+var car_flash := 0.0  # C1 juice: bilens egen vita blixt vid checkpoint (avtar)
 
 func _ready() -> void:
     randomize()
     _build_checkpoints()
     _setup_audio()
     best = _load_best()
+    var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
+    img.fill(Color(1, 1, 1))
+    dot_tex = ImageTexture.create_from_image(img)
     ui = CanvasLayer.new()
     add_child(ui)
     _show_title()
+
+# C1 juice: en engangs-partikelskur. UI ligger pa CanvasLayer och paverkas inte
+# av att varldens Node2D (self) skakas.
+func _burst(pos: Vector2, col: Color, count: int) -> void:
+    var p := CPUParticles2D.new()
+    p.position = pos
+    p.amount = count
+    p.one_shot = true
+    p.explosiveness = 0.9
+    p.lifetime = 0.5
+    p.spread = 180.0
+    p.initial_velocity_min = 60.0
+    p.initial_velocity_max = 160.0
+    p.gravity = Vector2(0, 160)
+    p.scale_amount_min = 2.0
+    p.scale_amount_max = 4.0
+    p.color = col
+    p.texture = dot_tex
+    add_child(p)
+    p.emitting = true
+    get_tree().create_timer(1.0).timeout.connect(p.queue_free)
 
 func _build_checkpoints() -> void:
     var m := (OUT + INN) * 0.5
@@ -223,6 +250,8 @@ func _button(txt: String, y: float, cb: Callable) -> void:
 
 func _show_title() -> void:
     state = "title"
+    position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden
+    shake = 0.0
     _clear_ui()
     _label("VARVET", 80, 72, Color(1, 0.85, 0.2))
     _label("Kor %d varv sa fort du kan - piltangenter: gas/broms/styr." % LAPS, 180, 22)
@@ -256,6 +285,14 @@ func _on_track(p: Vector2) -> bool:
 func _physics_process(delta: float) -> void:
     if state != "playing":
         return
+    # C1 juice: screenshake genom att flytta varldens Node2D en avtagande offset.
+    if shake > 0.0:
+        shake = move_toward(shake, 0.0, 30.0 * delta)
+        position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+    elif position != Vector2.ZERO:
+        position = Vector2.ZERO
+    if car_flash > 0.0:
+        car_flash = move_toward(car_flash, 0.0, delta)
     t += delta
     var accel := Input.get_action_strength("ui_up") - Input.get_action_strength("ui_down")
     var steer := Input.get_action_strength("ui_right") - Input.get_action_strength("ui_left")
@@ -269,6 +306,8 @@ func _physics_process(delta: float) -> void:
     if not _on_track(nxt):
         vel = move_toward(vel, 0.0, 700.0 * delta)
         nxt = car + dir * vel * delta
+        if abs(vel) > 20.0:
+            shake = max(shake, 2.5)  # C1 juice: skrammel nar man kor av banan
     car = nxt
     _progress()
     var hud := ui.get_node_or_null("Hud")
@@ -281,6 +320,9 @@ func _progress() -> void:
     if car.distance_to(target) < 95.0:
         checkpoint = (checkpoint + 1) % 4
         _play("coin")
+        _burst(target, Color(1, 0.85, 0.2), 14)  # C1 juice: bekraftelse-skur
+        shake = max(shake, 4.0)
+        car_flash = 0.25  # C1 juice: bilen blinkar vitt
         if checkpoint == 0:
             lap += 1
             if lap >= LAPS:
@@ -288,7 +330,12 @@ func _progress() -> void:
 
 func _finish() -> void:
     state = "over"
+    position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden
+    shake = 0.0
     _play("win")
+    # C1 juice: malskuren firas har - shake i _progress hann nollstallas av
+    # denna funktion samma bildruta, sa den storsta stunden fick ingen effekt.
+    _burst(checkpoints[0], Color(1, 0.9, 0.3), 40)
     var rec := best <= 0.0 or t < best
     if rec:
         best = t
@@ -310,7 +357,7 @@ func _draw() -> void:
         var fwd := Vector2(cos(heading), sin(heading))
         var side := fwd.rotated(PI * 0.5)
         var pts := PackedVector2Array([car + fwd * 16, car + side * 9 - fwd * 12, car - side * 9 - fwd * 12])
-        draw_colored_polygon(pts, Color(0.9, 0.2, 0.2))
+        draw_colored_polygon(pts, Color(0.9, 0.2, 0.2).lerp(Color.WHITE, car_flash / 0.25))  # C1 juice: checkpoint-blixt
         draw_circle(car, 4, Color(1, 1, 0.85))
 
 func _ellipse(c: Vector2, r: Vector2, col: Color) -> void:
@@ -663,6 +710,7 @@ var best := 0
 var snd := {}
 var ui: CanvasLayer
 var cam: Camera3D
+var shake := 0.0  # C1 juice: kamerashake-magnitud (varldsenheter), avtar mot 0
 
 func _ready() -> void:
     randomize()
@@ -672,6 +720,35 @@ func _ready() -> void:
     ui = CanvasLayer.new()
     add_child(ui)
     _show_title()
+
+# C1 juice: en engangs 3D-partikelskur vid myntplock. Meshens StandardMaterial3D
+# barr fargen. VIKTIGT: scale_amount ar en MULTIPLIER pa mesh-storleken (default
+# 1.0), sa 0.12*0.12 blev ~0.03 units = osynligt fran ~20-enheters kamera -
+# 1.0-2.0 x mesh-radie 0.12 ger ~0.12-0.24 units = synlig skur.
+func _burst3d(pos: Vector3, col: Color) -> void:
+    var p := CPUParticles3D.new()
+    p.position = pos
+    p.amount = 16
+    p.one_shot = true
+    p.explosiveness = 0.9
+    p.lifetime = 0.6
+    p.direction = Vector3(0, 1, 0)
+    p.spread = 80.0
+    p.initial_velocity_min = 2.5
+    p.initial_velocity_max = 6.0
+    p.gravity = Vector3(0, -12, 0)
+    p.scale_amount_min = 1.0
+    p.scale_amount_max = 2.0
+    var m := SphereMesh.new()
+    m.radius = 0.12
+    m.height = 0.24
+    var mat := StandardMaterial3D.new()
+    mat.albedo_color = col
+    m.material = mat
+    p.mesh = m
+    add_child(p)
+    p.emitting = true
+    get_tree().create_timer(1.4).timeout.connect(p.queue_free)
 
 func _setup_audio() -> void:
     for key in ["click", "coin", "hurt", "win"]:
@@ -815,12 +892,18 @@ func _physics_process(delta: float) -> void:
     else:
         player.velocity.y -= 24.0 * delta
     player.move_and_slide()
-    cam.position = player.position + Vector3(0, 14, 14)
+    # C1 juice: kamerashake - lagg en avtagande slump-offset pa foljekameran.
+    if shake > 0.0:
+        shake = move_toward(shake, 0.0, 2.0 * delta)
+    var sh := Vector3(randf_range(-shake, shake), randf_range(-shake, shake), 0.0)
+    cam.position = player.position + Vector3(0, 14, 14) + sh
     cam.look_at(player.position, Vector3.UP)
     for coin in coins:
         if is_instance_valid(coin):
             coin.rotate_y(delta * 3.0)
             if player.position.distance_to(coin.position) < 1.3:
+                _burst3d(coin.position, Color(1, 0.85, 0.2))  # C1 juice
+                shake = max(shake, 0.4)
                 coin.queue_free()
                 collected += 1
                 _play("coin")

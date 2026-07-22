@@ -131,4 +131,44 @@ public class WindowProbeAndFeelTests
             try { Directory.Delete(parent, recursive: true); } catch { /* städning */ }
         }
     }
+
+    [Fact]
+    public async Task PlayAsync_3dKitMotRiktigGodot_StartarOchSpelas()
+    {
+        // v1.74.0 (C1 del 3): runtime-bevis att 3D-kitet (Kuben) med juice
+        // faktiskt STARTAR och gar att spela. Den adversariella granskningen
+        // fangade att en slarvig edit hade lagt _ready:s boot-rader (ui +
+        // _show_title) inuti _burst3d, sa spelet aldrig visade en titel - ett
+        // LOGIKfel som headless-parsen inte kan se. Det har testet kor spelet
+        // pa riktigt (fonster + input utan krasch) sa regressionen inte aterkommer.
+        var godot = ToolLocator.Find("godot");
+        if (godot is null || !File.Exists(godot) || !OperatingSystem.IsWindows()) return;
+
+        var parent = Path.Combine(Path.GetTempPath(), "ailocal-probe-3d-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(parent);
+        var scaffold = new GameScaffoldService().Scaffold("godot", "bygg ett 3d samlarspel i godot", parent);
+        Assert.True(scaffold.Success, scaffold.Output);
+        var screenshot = Path.Combine(parent, "probe.png");
+
+        var psi = new ProcessStartInfo(godot)
+        {
+            Arguments = $"--path \"{scaffold.Path}\"",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        };
+        using var proc = Process.Start(psi)!;
+        try
+        {
+            var result = await GodotWindowProbe.PlayAsync(proc, screenshot, CancellationToken.None);
+            Assert.True(result.Ran, result.Notes); // startar, visar fonster, kraschar inte
+            Assert.True(File.Exists(screenshot), "3D-kitet lamnade ingen dump: " + result.Notes);
+            Assert.True(new FileInfo(screenshot).Length > 1000, "dumpen misstänkt liten");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(); } catch { /* redan död */ }
+            await Task.Delay(300);
+            try { Directory.Delete(parent, recursive: true); } catch { /* städning */ }
+        }
+    }
 }
