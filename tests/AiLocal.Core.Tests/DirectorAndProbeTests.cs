@@ -104,6 +104,15 @@ public class DirectorAndProbeTests : IDisposable
         Assert.True(result.Ran, result.Notes);
         Assert.True(result.Responded, result.Notes);
         Assert.True(File.Exists(result.FinalScreenshotPath));
+        // B3-uppfoljning: HTML5-repris (animerad PNG) spelas in bredvid dumpen -
+        // RGBA-rutor hamtas via getImageData i sidan (ingen PNG-avkodning).
+        // Giltig PNG-signatur + acTL-chunk = faktisk APNG-animation.
+        Assert.NotNull(result.ReplayPath);
+        Assert.True(File.Exists(result.ReplayPath), "reprisen saknas: " + result.Notes);
+        var replayBytes = await File.ReadAllBytesAsync(result.ReplayPath!);
+        Assert.True(replayBytes.Length > 500, "reprisen misstänkt liten");
+        Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, replayBytes[..8]);
+        Assert.Contains("acTL", System.Text.Encoding.ASCII.GetString(replayBytes));
     }
 
     [Fact]

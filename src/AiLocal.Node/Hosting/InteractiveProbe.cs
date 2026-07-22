@@ -8,7 +8,7 @@ namespace AiLocal.Node.Hosting;
 
 public sealed record ProbeResult(
     bool Ran, bool Responded, string Notes, string? FinalScreenshotPath,
-    string? TitleScreenshotPath = null);
+    string? TitleScreenshotPath = null, string? ReplayPath = null);
 
 /// <summary>
 /// Interactive QA: PLAYS the game instead of just looking at it. Drives real
@@ -103,9 +103,10 @@ public class InteractiveProbe
                 // inputrespons från animationens egna förändringar - ge
                 // spelet benefit of the doubt i stället för falska fynd.
                 var animShot = await CaptureAsync(cdp, screenshotOut, ct);
+                var animReplay = await CaptureReplayAsync(cdp, screenshotOut, ct);
                 return new(true, true,
                     "Interaktiv QA: canvasen animerar kontinuerligt - spelet renderar levande innehåll (inputrespons kan inte isoleras via pixeljämförelse).",
-                    animShot);
+                    animShot, null, animReplay);
             }
 
             // Titeldump FÖRE input: stabiliserad startskärm = visionens bästa
@@ -121,13 +122,14 @@ public class InteractiveProbe
 
             var after = await CanvasHashAsync(cdp, ct);
             var shotPath = await CaptureAsync(cdp, screenshotOut, ct);
+            var replay = await CaptureReplayAsync(cdp, screenshotOut, ct);
 
             var responded = before != after;
             return new(true, responded,
                 responded
                     ? "Interaktiv QA: spelet reagerar på tangenttryck (canvasen förändrades under spelsessionen)."
                     : "Interaktiv QA: canvasen är IDENTISK före och efter tangenttryck - spelet verkar inte reagera på spelarens input.",
-                shotPath, titlePath);
+                shotPath, titlePath, replay);
         }
         catch (OperationCanceledException) when (outerCt.IsCancellationRequested)
         {
@@ -184,6 +186,80 @@ public class InteractiveProbe
             }
         }
         catch { /* dumpen är bonus */ }
+        return null;
+    }
+
+    /// <summary>B3-uppföljning (HTML5-repris): fångar ~9 nedskalade canvas-rutor
+    /// medan input drivs och skriver dem som en animerad PNG bredvid dumpen
+    /// (replay.png). Rutorna hämtas som RGBA via getImageData och base64-kodas
+    /// REDAN i sidan, så ingen PNG-avkodning behövs på .NET-sidan. 2D-canvas
+    /// funkar; WebGL-spel ger tomma rutor (getImageData är blankt där) och får
+    /// då ingen repris - ärlig degradering, samma gräns som pixelhashen.</summary>
+    private static async Task<string?> CaptureReplayAsync(CdpSession cdp, string screenshotOut, CancellationToken ct)
+    {
+        const int frameCount = 9, frameDelayMs = 160;
+        string[] keys = { "ArrowRight", " ", "ArrowLeft", "ArrowUp", "Enter", "ArrowRight", "ArrowRight", " ", "ArrowLeft" };
+        try
+        {
+            var frames = new List<byte[]>();
+            int w = 0, h = 0;
+            for (var i = 0; i < frameCount; i++)
+            {
+                var frame = await CaptureCanvasRgbaAsync(cdp, ct);
+                if (frame is { } f)
+                {
+                    if (w == 0) { w = f.Width; h = f.Height; }
+                    if (f.Width == w && f.Height == h) frames.Add(f.Rgba);
+                }
+                await PressKeyAsync(cdp, keys[i % keys.Length], ct);
+                await Task.Delay(frameDelayMs, ct);
+            }
+            if (frames.Count < 2 || w == 0) return null;
+
+            var apng = AssetGenerator.EncodeApng(w, h, frames, frameDelayMs);
+            var replayPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(screenshotOut))!, "replay.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(replayPath)!);
+            await File.WriteAllBytesAsync(replayPath, apng, ct);
+            return replayPath;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>En nedskalad (~360px bred) RGBA-ögonblicksbild av spelets
+    /// canvas. drawImage till en liten off-screen-canvas i sidan, getImageData,
+    /// base64 - returnerar "base64|BxH" eller null (ingen canvas / WebGL).</summary>
+    private static async Task<(byte[] Rgba, int Width, int Height)?> CaptureCanvasRgbaAsync(CdpSession cdp, CancellationToken ct)
+    {
+        const string script = """
+            (() => {
+              const c = document.querySelector('canvas');
+              if (!c || !c.width) return null;
+              try {
+                const tw = Math.min(c.width, 360);
+                const th = Math.max(1, Math.round(c.height * tw / c.width));
+                const off = document.createElement('canvas');
+                off.width = tw; off.height = th;
+                const octx = off.getContext('2d');
+                octx.drawImage(c, 0, 0, tw, th);
+                const d = octx.getImageData(0, 0, tw, th).data;
+                let bin = '';
+                for (let i = 0; i < d.length; i++) bin += String.fromCharCode(d[i]);
+                return btoa(bin) + '|' + tw + 'x' + th;
+              } catch { return null; }
+            })()
+            """;
+        var result = await cdp.SendAsync("Runtime.evaluate", new { expression = script, returnByValue = true }, ct);
+        if (result.TryGetProperty("result", out var r) && r.TryGetProperty("value", out var v)
+            && v.ValueKind == JsonValueKind.String && v.GetString() is { } s)
+        {
+            var sep = s.LastIndexOf('|');
+            if (sep > 0 && s[(sep + 1)..].Split('x') is { Length: 2 } dims
+                && int.TryParse(dims[0], out var w) && int.TryParse(dims[1], out var h) && w > 0 && h > 0)
+            {
+                var rgba = Convert.FromBase64String(s[..sep]);
+                if (rgba.Length == w * h * 4) return (rgba, w, h);
+            }
+        }
         return null;
     }
 
