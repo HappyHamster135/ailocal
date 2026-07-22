@@ -116,6 +116,35 @@ public sealed class ToolProvisioner
             null,
             "",
             ExtractAllTo: "dotnet"),
+        // Android SDK (v1.90): officiella command-line tools fran Googles egen
+        // CDN (dl.google.com). Zipen har en inre "cmdline-tools"-rot ->
+        // extraheras till android-sdk/. Efterat kor ProvisionAsync HELA
+        // kedjan: sdkmanager-licenser + platform-tools/build-tools/platform
+        // (via provisionerad JDK) + debug-keystore - sa "provisionera
+        // android-sdk" lamnar en komplett APK-exportkedja for Godot.
+        ["android-sdk"] = new("Android SDK (command-line tools)",
+            "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: "android-sdk"),
+        // Godot STANDARD (icke-mono) + dess mallar: mono-editorn VAGRAR
+        // Android-export headless ("Exporting to Android when using C#/.NET
+        // is experimental" ar ett blockerande konfigurationsfel, upptackt
+        // live v1.90). Kiten ar ren GDScript sedan v1.85 - standardbygget
+        // exporterar dem felfritt. Anvands BARA for Android-exporten.
+        ["godot-standard"] = new("Godot 4.3 standard (for Android-export)",
+            "https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip",
+            null,
+            null,
+            "",
+            ExtractAllTo: "Godot_v4.3-stable_win64"),
+        ["godot-templates-standard"] = new("Godot exportmallar 4.3 (standard)",
+            "https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz",
+            null,
+            null,
+            "",
+            ExtractAllTo: ""),
     };
 
     public ToolProvisioner()
@@ -152,6 +181,11 @@ public sealed class ToolProvisioner
             dest = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "Godot", "export_templates", "4.3.stable.mono");
+        // Standardmallarna har sin EGEN versionsmapp (utan .mono-suffix).
+        if (key.Equals("godot-templates-standard", StringComparison.OrdinalIgnoreCase))
+            dest = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Godot", "export_templates", "4.3.stable");
         Directory.CreateDirectory(dest);
 
         CrashLog.Write("ProvisionStart", new Exception($"fetching {spec.Display} from pinned trusted source: {spec.TrustedUrl}"));
@@ -202,11 +236,28 @@ public sealed class ToolProvisioner
                 // .tpz-arkivet har en inre "templates/"-mapp men Godot förväntar
                 // sig filerna DIREKT i versionsmappen - platta ut.
                 var inner = Path.Combine(target, "templates");
-                if (key.Equals("godot-templates", StringComparison.OrdinalIgnoreCase) && Directory.Exists(inner))
+                if ((key.Equals("godot-templates", StringComparison.OrdinalIgnoreCase)
+                        || key.Equals("godot-templates-standard", StringComparison.OrdinalIgnoreCase))
+                    && Directory.Exists(inner))
                 {
                     foreach (var file in Directory.EnumerateFiles(inner))
                         File.Move(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
                     try { Directory.Delete(inner, recursive: true); } catch { /* best effort */ }
+                }
+
+                // Android SDK: cmdline-tools är bara nyckeln in - de riktiga
+                // paketen (platform-tools, build-tools, platform) installeras
+                // av sdkmanager, som också kräver licensgodkännande. Hela
+                // kedjan körs här + debug-keystore genereras, så EN
+                // provisionering lämnar en komplett Godot-APK-exportkedja.
+                if (key.Equals("android-sdk", StringComparison.OrdinalIgnoreCase))
+                {
+                    var setup = await RunAndroidSdkSetupAsync(target, ct);
+                    if (!setup.Success)
+                        return Reject(spec, setup.Output);
+                    return new(true,
+                        $"{spec.Display} provisionerad till {target}. {setup.Output} " +
+                        "Godot-APK-export (preset \"Android\") pekas hit automatiskt av build_game.");
                 }
             }
             else if (spec.ArchiveEntry is not null)
@@ -240,6 +291,127 @@ public sealed class ToolProvisioner
             return new(false, $"provisioneringsfel: {ex.Message}");
         }
     }
+
+    /// <summary>Kör hela Android-SDK-efterkedjan: licensgodkännande + paket
+    /// via sdkmanager (kräver JDK - provisioneras automatiskt vid behov) och
+    /// debug-keystore via keytool. Licensgodkännandet sker HÄR, öppet: att
+    /// provisionera android-sdk är att acceptera Googles SDK-licensvillkor
+    /// (samma automatiserade godkännande som CI-system gör).</summary>
+    private async Task<ProvisionResult> RunAndroidSdkSetupAsync(string sdkRoot, CancellationToken ct)
+    {
+        var sdkManager = Path.Combine(sdkRoot, "cmdline-tools", "bin", "sdkmanager.bat");
+        if (!File.Exists(sdkManager))
+            return new(false, $"sdkmanager saknas efter extrahering: {sdkManager}");
+
+        // sdkmanager är Java-baserad - se till att en JDK finns (Temurin ur
+        // samma katalog) och peka JAVA_HOME på den.
+        var java = ToolLocator.Find("java");
+        if (java is null)
+        {
+            var jdk = await ProvisionAsync("java", "", ct);
+            if (!jdk.Success)
+                return new(false, "Android SDK kräver en JDK och java-provisioneringen misslyckades: " + jdk.Output);
+            java = ToolLocator.Find("java");
+            if (java is null)
+                return new(false, "JDK provisionerad men java.exe kunde inte lokaliseras efteråt.");
+        }
+        var javaHome = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(java)!, ".."));
+
+        // 1) Licenser: sdkmanager frågar y/N per licens - jakande svar matas
+        //    på stdin. Detta är det öppna godkännandesteget.
+        var (licExit, licOut) = await RunAndroidToolAsync(sdkManager,
+            $"--sdk_root=\"{sdkRoot}\" --licenses", javaHome, stdinYes: true, ct);
+        if (licExit != 0)
+            return new(false, $"sdkmanager --licenses misslyckades (exit {licExit}): {Tail(licOut)}");
+
+        // 2) Paketen Godots APK-export behöver: platform-tools (adb),
+        //    build-tools (apksigner/zipalign) och en Android-plattform.
+        var (pkgExit, pkgOut) = await RunAndroidToolAsync(sdkManager,
+            $"--sdk_root=\"{sdkRoot}\" \"platform-tools\" \"build-tools;34.0.0\" \"platforms;android-34\"",
+            javaHome, stdinYes: true, ct);
+        if (pkgExit != 0)
+            return new(false, $"sdkmanager-paketinstallationen misslyckades (exit {pkgExit}): {Tail(pkgOut)}");
+
+        // 3) Debug-keystore med Godots standardvärden (androiddebugkey/android).
+        var keystore = Path.Combine(sdkRoot, "debug.keystore");
+        if (!File.Exists(keystore))
+        {
+            var keytool = Path.Combine(javaHome, "bin", "keytool.exe");
+            var (ksExit, ksOut) = await RunAndroidToolAsync(keytool,
+                $"-genkeypair -keystore \"{keystore}\" -storepass android -alias androiddebugkey " +
+                "-keypass android -keyalg RSA -keysize 2048 -validity 9999 " +
+                "-dname \"CN=Android Debug,O=Android,C=US\"", javaHome, stdinYes: false, ct);
+            if (ksExit != 0 || !File.Exists(keystore))
+                return new(false, $"debug-keystore kunde inte genereras (exit {ksExit}): {Tail(ksOut)}");
+        }
+        // 4) Standard-Godot + standardmallar: mono-editorn blockerar Android-
+        //    export headless (".NET experimental"), sa APK-exporten kor det
+        //    rena standardbygget - kiten ar ren GDScript sedan v1.85.
+        var extras = new List<string>();
+        if (ToolLocator.Find("godot-standard") is null)
+        {
+            var g = await ProvisionAsync("godot-standard", "", ct);
+            if (!g.Success) return new(false, "godot-standard kunde inte provisioneras: " + g.Output);
+            extras.Add("godot-standard");
+        }
+        var stdTemplates = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Godot", "export_templates", "4.3.stable");
+        if (!File.Exists(Path.Combine(stdTemplates, "android_debug.apk")))
+        {
+            var t = await ProvisionAsync("godot-templates-standard", "", ct);
+            if (!t.Success) return new(false, "standardmallarna kunde inte provisioneras: " + t.Output);
+            extras.Add("standardmallar");
+        }
+        return new(true,
+            "sdkmanager: licenser godkända, platform-tools + build-tools;34.0.0 + platforms;android-34 " +
+            "installerade, debug-keystore på plats" +
+            (extras.Count > 0 ? ", " + string.Join(" + ", extras) + " provisionerade" : "") + ".");
+    }
+
+    /// <summary>Kör sdkmanager.bat (via cmd.exe) eller keytool.exe med
+    /// JAVA_HOME satt; stdinYes matar jakande licens-svar. 15 min-tak med
+    /// kill - en hängd nedladdning får aldrig blockera noden för evigt.</summary>
+    private static async Task<(int ExitCode, string Output)> RunAndroidToolAsync(
+        string exe, string args, string javaHome, bool stdinYes, CancellationToken ct)
+    {
+        var isBat = exe.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
+        var psi = new ProcessStartInfo(
+            isBat ? "cmd.exe" : exe,
+            isBat ? $"/c \"\"{exe}\" {args}\"" : args)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = stdinYes,
+            CreateNoWindow = true
+        };
+        psi.Environment["JAVA_HOME"] = javaHome;
+        psi.Environment["PATH"] = Path.Combine(javaHome, "bin") + ";" + Environment.GetEnvironmentVariable("PATH");
+        using var proc = Process.Start(psi)!;
+        try
+        {
+            if (stdinYes)
+            {
+                for (var i = 0; i < 40; i++)
+                    await proc.StandardInput.WriteLineAsync("y");
+                proc.StandardInput.Close();
+            }
+            var stdout = proc.StandardOutput.ReadToEndAsync(ct);
+            var stderr = proc.StandardError.ReadToEndAsync(ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromMinutes(15));
+            await proc.WaitForExitAsync(timeout.Token);
+            return (proc.ExitCode, await stdout + "\n" + await stderr);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* redan död */ }
+            throw;
+        }
+    }
+
+    private static string Tail(string s) => s.Length <= 800 ? s : s[^800..];
 
     private static void TryDelete(string path)
     {

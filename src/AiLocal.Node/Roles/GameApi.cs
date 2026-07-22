@@ -59,7 +59,9 @@ public static class GameApi
         string command, string workingDirectory, CancellationToken ct)
     {
         var psi = OperatingSystem.IsWindows()
-            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c {command}")
+            // Wrappad /c "{cmd}" - se WorkerRole.runCmd: >2 citat i kommandot
+            // (godot-exporter) strippades annars sönder av cmd.exe (v1.90).
+            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{command}\"")
             : new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"");
         psi.WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory : Environment.CurrentDirectory;
         psi.RedirectStandardOutput = true;

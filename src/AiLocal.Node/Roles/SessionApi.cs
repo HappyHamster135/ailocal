@@ -200,7 +200,8 @@ public static class SessionApi
                     (cmd, dir, rcCt) =>
                     {
                         var psi = OperatingSystem.IsWindows()
-                            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c {cmd}")
+                            // Wrappad /c "{cmd}" - cmd.exe:s citatstrippning (v1.90).
+                            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{cmd}\"")
                             : new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{cmd.Replace("\"", "\\\"")}\"");
                         psi.WorkingDirectory = Directory.Exists(dir) ? dir : Environment.CurrentDirectory;
                         psi.RedirectStandardOutput = true;

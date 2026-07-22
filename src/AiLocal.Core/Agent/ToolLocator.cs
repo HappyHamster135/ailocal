@@ -54,8 +54,27 @@ public static class ToolLocator
         "blender" => FirstExisting(
             GlobFilesDeep(ToolsRoot, "blender*.exe"),
             [@"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"]),
+        // v1.90: standard-Godot (icke-mono) - anvands BARA for Android-export
+        // (mono-editorn blockerar den headless). Explicit vag, inte glob:
+        // mono-exen matchar ocksa "Godot_v*".
+        "godot-standard" => FirstExisting(
+            [Path.Combine(ToolsRoot, "Godot_v4.3-stable_win64", "Godot_v4.3-stable_win64.exe")],
+            []),
+        // v1.90: Android SDK - "exen" ar sdkmanager.bat; SDK-ROTEN (det Godot
+        // behover i editor settings) ar tva niaver upp (cmdline-tools\bin\..\..).
+        "android-sdk" => FirstExisting(
+            [Path.Combine(ToolsRoot, "android-sdk", "cmdline-tools", "bin", "sdkmanager.bat")],
+            [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Android", "Sdk", "cmdline-tools", "latest", "bin", "sdkmanager.bat")]),
         _ => null
     };
+
+    /// <summary>Android-SDK-roten (mappen Godots editor settings pekar pa),
+    /// harledd fran sdkmanager-vagen. Null nar SDK:t inte ar provisionerat.</summary>
+    public static string? AndroidSdkRoot() =>
+        Find("android-sdk") is { } mgr
+            ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mgr)!, "..", ".."))
+            : null;
 
     /// <summary>The command string build/verify should use: an absolute
     /// quoted path when a known install exists, otherwise the bare command so

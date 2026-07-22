@@ -383,8 +383,15 @@ public static class WorkerRole
             Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCmd =
                 (cmd, dir, rcCt) =>
                 {
+                    // /c "{cmd}" (wrappad), INTE /c {cmd}: cmd.exe:s citatregel
+                    // strippar första+sista citatet när kommandot har FLER än
+                    // två citattecken - `"godot" --export-release "Windows
+                    // Desktop" "ut.exe"` (6 citat) blev "filename syntax
+                    // incorrect" INNAN godot ens startade. Upptäckt live vid
+                    // v1.90:s APK-verifiering; wrap-formen är cmd:s
+                    // dokumenterade sätt att bevara inre citat exakt.
                     var psi = OperatingSystem.IsWindows()
-                        ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c {cmd}")
+                        ? new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{cmd}\"")
                         : new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{cmd.Replace("\"", "\\\"")}\"");
                     psi.WorkingDirectory = Directory.Exists(dir) ? dir : Environment.CurrentDirectory;
                     psi.RedirectStandardOutput = true;
@@ -1355,6 +1362,44 @@ public static class WorkerRole
             var pkg = new PackageService(httpFactory);
             var r = await pkg.PackageAsync(dir, "auto", Path.GetFileName(dir), Path.Combine(dir, "dist"), ct);
             return Results.Text(JsonSerializer.Serialize(new { r.Success, r.Output, r.PackagePath }), "application/json");
+        });
+
+        // v1.90: Android-APK fran projektvyn. Sjalvprovisionerande kedja
+        // (provision("android-sdk") hamtar SDK + standard-godot + mallar);
+        // utan kedjan svarar vagen med den arliga guiden i Output.
+        app.MapPost("/api/projects/build-android", async (ProjectActionRequest req, NodeSettings settings, CancellationToken ct) =>
+        {
+            if (ResolveProjectDir(settings, req.Rel) is not { } dir)
+                return Results.Problem(detail: "okänt projekt", statusCode: StatusCodes.Status404NotFound);
+            Func<string, string, CancellationToken, Task<(int, string)>> run = (cmd, wd, rct) =>
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{cmd}\"")
+                {
+                    WorkingDirectory = Directory.Exists(wd) ? wd : Environment.CurrentDirectory,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = new System.Diagnostics.Process { StartInfo = psi };
+                var so = new System.Text.StringBuilder();
+                var se = new System.Text.StringBuilder();
+                proc.OutputDataReceived += (_, e) => { if (e.Data is not null) so.AppendLine(e.Data); };
+                proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) se.AppendLine(e.Data); };
+                proc.Start();
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
+                // Event-lasning + WaitForExit(processen, inte piparna): exporten
+                // startar adb-servern som arver handtagen och lever kvar (v1.90).
+                if (!proc.WaitForExit((int)TimeSpan.FromMinutes(10).TotalMilliseconds))
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch { /* redan död */ }
+                    return Task.FromResult((-1, $"tidsgräns\n{so}\n{se}"));
+                }
+                return Task.FromResult((proc.ExitCode, $"{so}\n{se}"));
+            };
+            var r = await new GameBuilder().BuildAndroidAsync(dir, run, ct);
+            return Results.Text(JsonSerializer.Serialize(new { r.Success, r.Output, r.ApkPath }), "application/json");
         });
 
         app.MapPost("/api/projects/open-folder", (ProjectActionRequest req, NodeSettings settings) =>

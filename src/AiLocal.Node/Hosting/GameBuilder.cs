@@ -123,38 +123,318 @@ public sealed class GameBuilder
         return (true, $"Webbexport klar: {outHtml} - oppna i en webblasare eller hosta build/web/.", outHtml);
     }
 
-    /// <summary>C9: Android APK-export av ett Godot-projekt (BEST-EFFORT, som
-    /// Unity). Kräver - utöver godot-templates - Android-SDK + JDK + ett
-    /// debug-keystore konfigurerat i Godot OCH en "Android"-preset i
-    /// export_presets.cfg. Den setupen äger ägaren; utan den GUIDAR den här
-    /// vägen (ärlig instruktion) i stället för att tyst misslyckas. När den
-    /// finns bygger den APK:n via samma kommandoform som webb/desktop.</summary>
+    /// <summary>C9/v1.90: Android APK-export av ett Godot-projekt. Hela kedjan
+    /// kan numera SJÄLVPROVISIONERAS (provision("android-sdk") laddar ner
+    /// cmdline-tools, godkänner licenser, installerar platform-tools/
+    /// build-tools och genererar debug-keystore) - så när SDK:t finns pekas
+    /// Godots editor settings + Android-preset ut automatiskt här och APK:n
+    /// byggs debug-signerad (release-signering kräver ägarens egen nyckel).
+    /// Utan SDK guidar vägen ärligt till provisioneringen.</summary>
     public async Task<(bool Success, string Output, string? ApkPath)> BuildAndroidAsync(
         string root,
         Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
-        CancellationToken ct, Func<string?>? godotFinder = null)
+        CancellationToken ct, Func<string?>? godotFinder = null,
+        Func<string?>? sdkRootFinder = null, Func<string?>? javaFinder = null,
+        string? godotConfigDir = null)
     {
-        var godot = (godotFinder ?? FindGodot)();
+        // Standard-Godot (icke-mono) KRÄVS för Android: mono-editorn blockerar
+        // exporten headless ("Exporting to Android when using C#/.NET is
+        // experimental" är ett blockerande konfigurationsfel - upptäckt live
+        // v1.90). Kiten är ren GDScript sedan v1.85, så standardbygget
+        // exporterar dem felfritt. provision("android-sdk") hämtar den.
+        var godot = (godotFinder ?? (() => AiLocal.Core.Agent.ToolLocator.Find("godot-standard")))();
         if (godot is null)
-            return (false, "Godot är inte installerat på denna maskin - Android-export kräver Godot 4.3.", null);
+            return (false,
+                "Standard-Godot (icke-mono) saknas - Android-exporten kräver den (mono-editorn blockerar " +
+                "Android headless). Kör provision(\"android-sdk\") så hämtas hela kedjan inklusive den.", null);
         if (!File.Exists(Path.Combine(root, "project.godot")))
             return (false, "Ingen Godot-projektfil (project.godot) - Android-export gäller bara Godot-spel.", null);
-        if (!ExportPresetExists(root, "Android"))
+
+        var sdkRoot = (sdkRootFinder ?? AiLocal.Core.Agent.ToolLocator.AndroidSdkRoot)();
+        if (sdkRoot is null)
             return (false,
-                "Android-APK-export är best-effort och kräver setup som ägaren gör en gång: konfigurera Android-SDK + " +
-                "JDK + ett debug-keystore i Godot (Editor > Editor Settings > Export > Android) och lägg till en " +
-                "Android-preset (Project > Export > Add > Android). När presetet \"Android\" finns i export_presets.cfg " +
-                "bygger den här vägen APK:n åt dig.", null);
+                "Android-SDK saknas på maskinen. Kör provision(\"android-sdk\") EN gång - den laddar ner " +
+                "command-line tools från Googles CDN, godkänner SDK-licenserna, installerar platform-tools/" +
+                "build-tools och genererar debug-keystore. Därefter bygger den här vägen APK:n åt dig.", null);
+        var java = (javaFinder ?? (() => AiLocal.Core.Agent.ToolLocator.Find("java")))();
+        if (java is null)
+            return (false, "JDK saknas - kör provision(\"java\") (Android-exporten behöver Java för signeringen).", null);
+        var javaHome = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(java)!, ".."));
+        var keystore = Path.Combine(sdkRoot, "debug.keystore");
+        if (!File.Exists(keystore))
+            return (false, $"debug-keystore saknas ({keystore}) - kör provision(\"android-sdk\") igen så genereras den.", null);
+
+        // Det Godot annars kräver att man klickar ihop i editorn en gång per
+        // maskin görs deterministiskt här: editor settings + Android-preset +
+        // etc2/astc-projektinställningen (vars avsaknad fäller exporten med
+        // ett TOMT felmeddelande - verifierat mot 4.3-källkoden, v1.90).
+        EnsureAndroidEditorSettings(sdkRoot, javaHome, keystore, godotConfigDir);
+        EnsureAndroidPreset(root);
+        EnsureEtc2AstcImport(root);
 
         var outApk = Path.Combine(root, "build", "android", Path.GetFileName(Path.GetFullPath(root)) + ".apk");
         Directory.CreateDirectory(Path.GetDirectoryName(outApk)!);
-        var cmd = MakeGodotCommand(godot, "Android", outApk);
+
+        // Godots align-steg kan falla med "Could not unzip temporary unaligned
+        // APK" fast den o-alignade APK:n är en KOMPLETT, giltig zip (verifierat
+        // live: Godots egen ZIPReader läser filen felfritt i en frisk process -
+        // uppströmsegenhet i exportens processtillstånd). Reservkedjan tar då
+        // vid med SDK:ts officiella verktyg: zipalign + apksigner. Rensa gamla
+        // tmp-filer FÖRE körningen så reserven vet vilken fil som är vår.
+        var godotCache = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Godot");
+        try
+        {
+            if (Directory.Exists(godotCache))
+                foreach (var stale in Directory.GetFiles(godotCache, "tmpexport-*"))
+                    File.Delete(stale);
+        }
+        catch { /* städning - reserven kontrollerar antalet själv */ }
+
+        // --export-debug: signeras med debug-keystoren. Release-signering
+        // kräver en riktig release-nyckel som bara ägaren kan äga.
+        var cmd = MakeGodotDebugCommand(godot, "Android", outApk);
         var (exit, output) = await runCommand(cmd, root, ct);
-        if (exit != 0)
-            return (false, $"godot Android-export misslyckades (exit {exit}) - Android-SDK/keystore konfigurerat i Godot?\n{output}", null);
-        if (!File.Exists(outApk))
-            return (false, $"godot avslutade utan fel men APK:n saknas: {outApk}\n{output}", null);
-        return (true, $"Android-APK klar: {outApk}", outApk);
+        if (File.Exists(outApk))
+            return (true, $"Android-APK klar (debug-signerad): {outApk}", outApk);
+
+        // Reservkedjan: exakt EN kvarlämnad unaligned = vår.
+        var unaligned = Directory.Exists(godotCache)
+            ? Directory.GetFiles(godotCache, "tmpexport-unaligned.*.apk")
+            : [];
+        if (unaligned.Length == 1)
+        {
+            var (ok, reserveOut) = await AlignAndSignAsync(
+                unaligned[0], outApk, sdkRoot, javaHome, keystore, runCommand, root, ct);
+            try { File.Delete(unaligned[0]); } catch { /* städning */ }
+            if (ok && File.Exists(outApk))
+                return (true,
+                    $"Android-APK klar (debug-signerad): {outApk}\n" +
+                    "(Godots eget align-steg föll - reservkedjan alignade och signerade med SDK:ts zipalign/apksigner.)",
+                    outApk);
+            return (false, $"godot Android-export misslyckades (exit {exit}) och reservkedjan likaså:\n{reserveOut}\n{output}", null);
+        }
+
+        return (false, $"godot Android-export misslyckades (exit {exit}):\n{output}", null);
+    }
+
+    /// <summary>Reservkedjan när Godots align-steg faller: SDK:ts zipalign
+    /// (4-byte) + apksigner (debug-keystoren) på den o-alignade APK:n Godot
+    /// redan skrivit komplett. Samma två steg Godot själv hade gjort.</summary>
+    internal static async Task<(bool Success, string Output)> AlignAndSignAsync(
+        string unalignedApk, string outApk, string sdkRoot, string javaHome, string keystore,
+        Func<string, string, CancellationToken, Task<(int ExitCode, string Output)>> runCommand,
+        string workdir, CancellationToken ct)
+    {
+        var buildTools = Directory.Exists(Path.Combine(sdkRoot, "build-tools"))
+            ? Directory.GetDirectories(Path.Combine(sdkRoot, "build-tools")).OrderByDescending(d => d).FirstOrDefault()
+            : null;
+        if (buildTools is null)
+            return (false, "build-tools saknas i SDK:t - kör provision(\"android-sdk\").");
+        var zipalign = Path.Combine(buildTools, "zipalign.exe");
+        var apksigner = Path.Combine(buildTools, "apksigner.bat");
+        if (!File.Exists(zipalign) || !File.Exists(apksigner))
+            return (false, $"zipalign/apksigner saknas i {buildTools}.");
+
+        // Dubblett-vakt: Godot force-adderar projektikonen en extra gang -
+        // apksigner vagrar signera en zip med dubblerade namn. Skriv om zipen
+        // utan dubbletter (forsta vinner) innan align/sign.
+        DedupeZipEntries(unalignedApk);
+
+        var (alignExit, alignOut) = await runCommand(
+            $"\"{zipalign}\" -f 4 \"{unalignedApk}\" \"{outApk}\"", workdir, ct);
+        if (alignExit != 0 || !File.Exists(outApk))
+            return (false, $"zipalign misslyckades (exit {alignExit}): {alignOut}");
+
+        // apksigner.bat behöver java - JAVA_HOME sätts i samma cmd-rad.
+        var (signExit, signOut) = await runCommand(
+            $"set \"JAVA_HOME={javaHome}\" && \"{apksigner}\" sign --ks \"{keystore}\" " +
+            "--ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android " +
+            $"\"{outApk}\"", workdir, ct);
+        if (signExit != 0)
+            return (false, $"apksigner misslyckades (exit {signExit}): {signOut}");
+        return (true, "zipalign + apksigner klara.");
+    }
+
+    /// <summary>Nästa lediga [preset.N]-index i en export_presets.cfg-text.</summary>
+    internal static int NextPresetIndex(string cfgText)
+    {
+        var max = -1;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                     cfgText, @"^\[preset\.(\d+)\]", System.Text.RegularExpressions.RegexOptions.Multiline))
+            max = Math.Max(max, int.Parse(m.Groups[1].Value));
+        return max + 1;
+    }
+
+    /// <summary>Lägger till en Android-preset (icke-gradle, arm64, debug-
+    /// signerad via editor settings-keystoren) om den saknas. Idempotent -
+    /// befintliga presets (Windows/Web) behåller sina index.</summary>
+    internal static void EnsureAndroidPreset(string root)
+    {
+        if (ExportPresetExists(root, "Android")) return;
+        var cfg = Path.Combine(root, "export_presets.cfg");
+        var existing = File.Exists(cfg) ? File.ReadAllText(cfg) : "";
+        var n = NextPresetIndex(existing);
+        var preset =
+            (existing.Length > 0 && !existing.EndsWith('\n') ? "\n" : "") +
+            $"\n[preset.{n}]\n" +
+            "name=\"Android\"\n" +
+            "platform=\"Android\"\n" +
+            "runnable=true\n" +
+            "advanced_options=false\n" +
+            "dedicated_server=false\n" +
+            "custom_features=\"\"\n" +
+            "export_filter=\"all_resources\"\n" +
+            "include_filter=\"\"\n" +
+            // icon.ico exkluderas MEDVETET: Godot force-adderar projektikonen
+            // en extra gang i varje export -> dubblettpost i APK-zipen ->
+            // apksigner vagrar ("Multiple ZIP entries with the same name").
+            // Exkluderingen tar bort resurspassets kopia; force-addens blir kvar.
+            // build/* haller gamla byggen utanfor APK:n.
+            "exclude_filter=\"icon.ico,build/*\"\n" +
+            "export_path=\"build/android/spel.apk\"\n" +
+            "patches=\"\"\n" +
+            "encryption_include_filters=\"\"\n" +
+            "encryption_exclude_filters=\"\"\n" +
+            "seed=0\n" +
+            "encrypt_pck=false\n" +
+            "encrypt_directory=false\n" +
+            $"\n[preset.{n}.options]\n" +
+            "custom_template/debug=\"\"\n" +
+            "custom_template/release=\"\"\n" +
+            "gradle_build/use_gradle_build=false\n" +
+            "gradle_build/export_format=0\n" +
+            "gradle_build/min_sdk=\"\"\n" +
+            "gradle_build/target_sdk=\"\"\n" +
+            "architectures/armeabi-v7a=false\n" +
+            "architectures/arm64-v8a=true\n" +
+            "architectures/x86=false\n" +
+            "architectures/x86_64=false\n" +
+            "version/code=1\n" +
+            "version/name=\"\"\n" +
+            // Explicit sanerat namn, INTE $genname: projektnamn med mellanslag
+            // ("Pixel Rush") gav en blockerande paketnamnsvarning headless.
+            $"package/unique_name=\"org.ailocal.{SanitizePackageSegment(Path.GetFileName(Path.GetFullPath(root)))}\"\n" +
+            "package/name=\"\"\n" +
+            "package/signed=true\n" +
+            "package/app_category=2\n" +
+            "screen/immersive_mode=true\n" +
+            "package/exclude_from_recents=false\n" +
+            "package/show_in_android_tv=false\n" +
+            "package/show_in_app_library=true\n" +
+            "package/show_as_launcher_app=false\n";
+        File.AppendAllText(cfg, preset);
+    }
+
+    /// <summary>Skriver/patchar Godots editor settings (per maskin) så
+    /// Android-exporten hittar SDK, JDK och debug-keystoren - det man annars
+    /// klickar ihop i editorn en gång. Regler (upptäckta LIVE på dev-maskinen):
+    /// editorn skriver nycklarna med TOMMA värden som default, så "nyckeln
+    /// finns" räcker inte - ett tomt värde fylls i, ett riktigt värde
+    /// respekteras (ägarens setup vinner), och en keystore-väg som pekar på en
+    /// fil som INTE finns ersätts (trasig default hjälper ingen). Basdir
+    /// injicerbar för tester.</summary>
+    internal static string EnsureAndroidEditorSettings(
+        string sdkRoot, string javaHome, string keystorePath, string? godotConfigDir = null)
+    {
+        var dir = godotConfigDir ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Godot");
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "editor_settings-4.3.tres");
+        var text = File.Exists(file)
+            ? File.ReadAllText(file)
+            : "[gd_resource type=\"EditorSettings\" format=3]\n\n[resource]\n";
+        static string Fwd(string p) => p.Replace('\\', '/');
+        var wanted = new (string Key, string Value, bool ReplaceBrokenFile)[]
+        {
+            ("export/android/android_sdk_path", Fwd(sdkRoot), false),
+            ("export/android/java_sdk_path", Fwd(javaHome), false),
+            ("export/android/debug_keystore", Fwd(keystorePath), true),
+            ("export/android/debug_keystore_user", "androiddebugkey", false),
+            ("export/android/debug_keystore_pass", "android", false),
+        };
+        foreach (var (key, value, replaceBrokenFile) in wanted)
+        {
+            var rx = new System.Text.RegularExpressions.Regex(
+                "^" + System.Text.RegularExpressions.Regex.Escape(key) + " = \"(.*)\"\\r?$",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+            var m = rx.Match(text);
+            if (!m.Success)
+            {
+                text = text.Replace("[resource]\n", "[resource]\n" + key + " = \"" + value + "\"\n");
+                continue;
+            }
+            var current = m.Groups[1].Value;
+            var broken = replaceBrokenFile && current.Length > 0 && !File.Exists(current);
+            if (current.Length == 0 || broken)
+                text = rx.Replace(text, key + " = \"" + value + "\"", 1);
+            // annars: ägarens riktiga värde vinner - rör det aldrig.
+        }
+        File.WriteAllText(file, text);
+        return file;
+    }
+
+    /// <summary>Som MakeGodotCommand men --export-debug - Android signeras med
+    /// debug-keystoren (release kräver ägarens egen nyckel).</summary>
+    internal static string MakeGodotDebugCommand(string godotPath, string preset, string outFile)
+        => $"\"{godotPath}\" --headless --export-debug \"{preset}\" \"{outFile}\"";
+
+    /// <summary>Skriver om en zip utan dubblerade postnamn (första vinner).
+    /// apksigner:s strikta parser vägrar signera dubbletter, och Godots
+    /// export kan producera dem (force-adderad projektikon).</summary>
+    internal static void DedupeZipEntries(string zipPath)
+    {
+        try
+        {
+            using (var read = System.IO.Compression.ZipFile.OpenRead(zipPath))
+                if (read.Entries.GroupBy(e => e.FullName).All(g => g.Count() == 1))
+                    return;   // inga dubbletter - rör inte filen
+            var tmp = zipPath + ".dedupe";
+            using (var read = System.IO.Compression.ZipFile.OpenRead(zipPath))
+            using (var write = new System.IO.Compression.ZipArchive(
+                File.Create(tmp), System.IO.Compression.ZipArchiveMode.Create))
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var entry in read.Entries)
+                {
+                    if (!seen.Add(entry.FullName)) continue;
+                    var target = write.CreateEntry(entry.FullName, System.IO.Compression.CompressionLevel.Optimal);
+                    using var src = entry.Open();
+                    using var dst = target.Open();
+                    src.CopyTo(dst);
+                }
+            }
+            File.Move(tmp, zipPath, overwrite: true);
+        }
+        catch { /* reserven för reserven: align/sign får avgöra */ }
+    }
+
+    /// <summary>Android-exporten kräver projektinställningen
+    /// rendering/textures/vram_compression/import_etc2_astc=true - annars
+    /// fäller Godots validering exporten med ett TOMT felmeddelande (4.3-
+    /// källkoden: should_import_etc2_astc -> valid=false utan text). Patchar
+    /// project.godot idempotent; befintlig [rendering]-sektion återanvänds.</summary>
+    internal static void EnsureEtc2AstcImport(string root)
+    {
+        var file = Path.Combine(root, "project.godot");
+        if (!File.Exists(file)) return;
+        var text = File.ReadAllText(file);
+        if (text.Contains("import_etc2_astc", StringComparison.Ordinal)) return;
+        text = text.Contains("[rendering]", StringComparison.Ordinal)
+            ? text.Replace("[rendering]\n", "[rendering]\ntextures/vram_compression/import_etc2_astc=true\n")
+            : text + (text.EndsWith('\n') ? "" : "\n") + "[rendering]\ntextures/vram_compression/import_etc2_astc=true\n";
+        File.WriteAllText(file, text);
+    }
+
+    /// <summary>Ett giltigt java-paketsegment ur ett mappnamn: gemener a-z0-9,
+    /// aldrig tomt, aldrig sifferinlett ("2048" -> "g2048").</summary>
+    internal static string SanitizePackageSegment(string name)
+    {
+        var chars = (name ?? "").ToLowerInvariant().Where(c => c is >= 'a' and <= 'z' or >= '0' and <= '9').ToArray();
+        var s = new string(chars);
+        if (s.Length == 0) s = "spel";
+        if (char.IsDigit(s[0])) s = "g" + s;
+        return s;
     }
 
     /// <summary>True om export_presets.cfg innehåller en preset med det namnet.</summary>

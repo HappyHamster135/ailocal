@@ -731,7 +731,10 @@ public sealed class AgentToolExecutor
         // Full stays unrestricted, this only fixes what a RELATIVE path/the
         // omitted-argument default means (see RunCommandAsync above).
         var psi = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new ProcessStartInfo("cmd.exe", $"/c {command}")
+            // Wrappad /c "{cmd}": cmd.exe strippar första+sista citatet när
+            // kommandot har >2 citattecken - agentens run_command med citerad
+            // exe-väg OCH citerade argument gick sönder före körning (v1.90).
+            ? new ProcessStartInfo("cmd.exe", $"/c \"{command}\"")
             : new ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"");
         // A Full-mode executor's _workspaceRoot is never auto-created (see the
         // constructor) - Process.Start throws on a working directory that

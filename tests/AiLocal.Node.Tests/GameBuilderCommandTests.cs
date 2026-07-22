@@ -32,40 +32,140 @@ public class GameBuilderCommandTests
     }
 
     [Fact]
-    public void MakeGodotCommand_Android_HarRattPreset()
+    public void MakeGodotDebugCommand_Android_ExportDebug()
     {
-        // C9: samma kommandoform som desktop/webb, fast Android-preset -> APK.
-        var cmd = GameBuilder.MakeGodotCommand("C:/Godot/godot.exe", "Android", "C:/g/build/android/spel.apk");
-        Assert.Contains("--export-release", cmd);
+        // v1.90: Android exporteras --export-debug (debug-keystoren signerar;
+        // release kraver agarens egen nyckel) - annars samma kommandoform.
+        var cmd = GameBuilder.MakeGodotDebugCommand("C:/Godot/godot.exe", "Android", "C:/g/build/android/spel.apk");
+        Assert.Contains("--export-debug", cmd);
         Assert.Contains("\"Android\"", cmd);
         Assert.Contains("spel.apk", cmd);
         Assert.DoesNotContain("--quit", cmd);
     }
 
     [Fact]
-    public async Task BuildAndroidAsync_UtanAndroidPreset_GuidarArligtUtanAttKoraGodot()
+    public async Task BuildAndroidAsync_UtanSdk_GuidarTillProvisionering_UtanAttKoraGodot()
     {
-        // C9 best-effort: utan en Android-preset ska den GUIDA agaren till
-        // setupen (SDK/keystore/preset) i stallet for att tyst misslyckas -
-        // och godot far aldrig koras (guarden slar till forst).
+        // v1.90: utan Android-SDK ska vagen GUIDA till provision("android-sdk")
+        // (sjalvprovisionering finns nu) - och godot far aldrig koras.
         var dir = Path.Combine(Path.GetTempPath(), "ailocal-android-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
             await File.WriteAllTextAsync(Path.Combine(dir, "project.godot"), "; godot\nconfig_version=5\n");
-            await File.WriteAllTextAsync(Path.Combine(dir, "export_presets.cfg"), "[preset.0]\nname=\"Windows Desktop\"\n");
             var runCalled = false;
 
             var (success, output, apk) = await new GameBuilder().BuildAndroidAsync(
                 dir,
                 (_, _, _) => { runCalled = true; return Task.FromResult((0, "")); },
                 CancellationToken.None,
-                godotFinder: () => "C:/Godot/godot.exe");
+                godotFinder: () => "C:/Godot/godot.exe",
+                sdkRootFinder: () => null);
 
             Assert.False(success);
             Assert.Null(apk);
-            Assert.Contains("Android-preset", output);
+            Assert.Contains("provision(\"android-sdk\")", output);
             Assert.False(runCalled);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { /* städning */ } }
+    }
+
+    [Fact]
+    public async Task BuildAndroidAsync_MedSdk_SakerstallerPresetOchSettings_OchExporterarDebug()
+    {
+        // v1.90 huvudvagen: med SDK+JDK+keystore pa plats ska vagen sjalv
+        // (1) skriva editor settings (SDK/JDK/keystore, forward slashes),
+        // (2) lagga till Android-preseten med NASTA index utan att rora
+        // befintliga, och (3) kora --export-debug "Android".
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-android-" + Guid.NewGuid().ToString("N"));
+        var sdk = Path.Combine(dir, "sdk");
+        var jdkBin = Path.Combine(dir, "jdk", "bin");
+        var cfgDir = Path.Combine(dir, "godot-config");
+        Directory.CreateDirectory(dir);
+        Directory.CreateDirectory(sdk);
+        Directory.CreateDirectory(jdkBin);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "project.godot"), "; godot\nconfig_version=5\n");
+            await File.WriteAllTextAsync(Path.Combine(dir, "export_presets.cfg"), "[preset.0]\nname=\"Windows Desktop\"\n");
+            await File.WriteAllTextAsync(Path.Combine(sdk, "debug.keystore"), "fejk-keystore");
+            await File.WriteAllTextAsync(Path.Combine(jdkBin, "java.exe"), "fejk-java");
+
+            string? seenCmd = null;
+            var (success, output, apk) = await new GameBuilder().BuildAndroidAsync(
+                dir,
+                (cmd, _, _) =>
+                {
+                    seenCmd = cmd;
+                    // "godot" skapar APK:n - exporten lyckas bara om filen finns.
+                    var outApk = Path.Combine(dir, "build", "android", Path.GetFileName(dir) + ".apk");
+                    Directory.CreateDirectory(Path.GetDirectoryName(outApk)!);
+                    File.WriteAllText(outApk, "PK-fejk");
+                    return Task.FromResult((0, "export ok"));
+                },
+                CancellationToken.None,
+                godotFinder: () => "C:/Godot/godot.exe",
+                sdkRootFinder: () => sdk,
+                javaFinder: () => Path.Combine(jdkBin, "java.exe"),
+                godotConfigDir: cfgDir);
+
+            Assert.True(success, output);
+            Assert.NotNull(apk);
+            Assert.Contains("--export-debug", seenCmd);
+            Assert.Contains("\"Android\"", seenCmd);
+            // Preseten lades till med nasta index; befintlig preset ororad.
+            var presets = await File.ReadAllTextAsync(Path.Combine(dir, "export_presets.cfg"));
+            Assert.Contains("name=\"Windows Desktop\"", presets);
+            Assert.Contains("[preset.1]", presets);
+            Assert.Contains("name=\"Android\"", presets);
+            Assert.Contains("gradle_build/use_gradle_build=false", presets);
+            // Editor settings skrevs med forward slashes och keystore-varden.
+            var settings = await File.ReadAllTextAsync(Path.Combine(cfgDir, "editor_settings-4.3.tres"));
+            Assert.Contains("export/android/android_sdk_path = \"" + sdk.Replace('\\', '/') + "\"", settings);
+            Assert.Contains("export/android/debug_keystore_user = \"androiddebugkey\"", settings);
+            Assert.DoesNotContain("\\", settings.Split('\n').First(l => l.Contains("android_sdk_path")));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { /* städning */ } }
+    }
+
+    [Theory]
+    [InlineData("", 0)]
+    [InlineData("[preset.0]\nname=\"W\"\n", 1)]
+    [InlineData("[preset.0]\nname=\"W\"\n[preset.1]\nname=\"Web\"\n", 2)]
+    public void NextPresetIndex_RaknarRatt(string cfg, int expected)
+        => Assert.Equal(expected, GameBuilder.NextPresetIndex(cfg));
+
+    [Theory]
+    [InlineData("Pixel Rush", "pixelrush")]      // mellanslag + versaler bort
+    [InlineData("2048-spelet", "g2048spelet")]   // sifferinlett prefixas
+    [InlineData("!!!", "spel")]                  // aldrig tomt
+    public void SanitizePackageSegment_GerGiltigaJavaSegment(string input, string expected)
+        => Assert.Equal(expected, GameBuilder.SanitizePackageSegment(input));
+
+    [Fact]
+    public void EnsureAndroidEditorSettings_TommaVardenFylls_RiktigaRespekteras_TrasigKeystoreErsatts()
+    {
+        // LIVE-upptackt pa dev-maskinen: Godot-editorn skriver nycklarna med
+        // TOMMA varden som default - "nyckeln finns" racker inte som koll.
+        // Och editorns default-keystore-vag kan peka pa en fil som inte finns.
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-godotcfg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "editor_settings-4.3.tres"),
+                "[gd_resource type=\"EditorSettings\" format=3]\n\n[resource]\n" +
+                "export/android/android_sdk_path = \"D:/agarens/egen/sdk\"\n" +      // riktigt varde
+                "export/android/java_sdk_path = \"\"\n" +                            // tomt (editor-default)
+                "export/android/debug_keystore = \"C:/finns/inte/debug.keystore\"\n"); // trasig vag
+
+            GameBuilder.EnsureAndroidEditorSettings("C:/ny/sdk", "C:/jdk", "C:/ny/sdk/debug.keystore", dir);
+
+            var text = File.ReadAllText(Path.Combine(dir, "editor_settings-4.3.tres"));
+            Assert.Contains("android_sdk_path = \"D:/agarens/egen/sdk\"", text);   // agarens varde vinner
+            Assert.DoesNotContain("android_sdk_path = \"C:/ny/sdk\"", text);
+            Assert.Contains("java_sdk_path = \"C:/jdk\"", text);                    // tomt fylldes i
+            Assert.Contains("debug_keystore = \"C:/ny/sdk/debug.keystore\"", text); // trasig vag ersatt
+            Assert.Contains("debug_keystore_user = \"androiddebugkey\"", text);     // saknad nyckel infogad
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { /* städning */ } }
     }

@@ -5716,6 +5716,7 @@ internal static class Dashboard
                 ${p.Playable ? `<a class="mini-btn" href="/api/preview/${p.Rel === '.' ? '' : esc(p.Rel) + '/'}index.html" target="_blank" rel="noopener">Spela</a>` : ''}
                 <button class="mini-btn" data-proj-iterate="${esc(p.Rel)}">Vidareutveckla</button>
                 <button class="mini-btn" data-proj-package="${esc(p.Rel)}">Packa</button>
+                ${p.Engine === 'godot' ? `<button class="mini-btn" data-proj-apk="${esc(p.Rel)}">Bygg APK</button>` : ''}
                 <button class="mini-btn" data-proj-folder="${esc(p.Rel)}">Mapp</button>
                 ${p.Snapshots ? `<button class="mini-btn" data-proj-versions="${esc(p.Rel)}">Versioner</button>` : ''}
                 ${p.Rel !== '.' ? `<button class="mini-btn" data-proj-delete="${esc(p.Rel)}">Radera</button>` : ''}
@@ -5785,6 +5786,21 @@ internal static class Dashboard
               showProjectsNotice(r.Success ? `Paketerat: ${r.PackagePath || r.Output}` : r.Output, !r.Success);
             } catch (error) { showProjectsNotice(error.message, true); }
             finally { btn.disabled = false; }
+          });
+          // v1.90: Android-APK (debug-signerad) - självprovisionerande kedja;
+          // utan SDK visar svaret den ärliga guiden (provision android-sdk).
+          document.querySelectorAll('[data-proj-apk]').forEach(btn => btn.onclick = async () => {
+            btn.disabled = true;
+            const orig = btn.textContent;
+            btn.textContent = 'Bygger APK…';
+            try {
+              const r = await fetchJson('/api/projects/build-android', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ rel: btn.dataset.projApk })
+              });
+              showProjectsNotice(r.Success ? `Android-APK klar: ${r.ApkPath}` : r.Output, !r.Success);
+            } catch (error) { showProjectsNotice(error.message, true); }
+            finally { btn.disabled = false; btn.textContent = orig; }
           });
           document.querySelectorAll('[data-proj-folder]').forEach(btn => btn.onclick = async () => {
             try {

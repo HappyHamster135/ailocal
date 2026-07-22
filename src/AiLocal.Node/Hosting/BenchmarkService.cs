@@ -172,7 +172,8 @@ public sealed class BenchmarkService
 
     private static Task<(int ExitCode, string Output)> RunCommandAsync(string cmd, string dir, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("cmd.exe", $"/c {cmd}")
+        // Wrappad /c "{cmd}" - cmd.exe:s citatstrippning (v1.90).
+        var psi = new ProcessStartInfo("cmd.exe", $"/c \"{cmd}\"")
         {
             WorkingDirectory = Directory.Exists(dir) ? dir : Environment.CurrentDirectory,
             RedirectStandardOutput = true,

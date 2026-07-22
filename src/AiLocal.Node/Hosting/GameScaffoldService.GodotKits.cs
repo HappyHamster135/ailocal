@@ -996,7 +996,13 @@ func _save_best(v: int) -> void:
         "config/features=PackedStringArray(\"4.3\")\n" +
         "[display]\n" +
         "window/size/viewport_width=1152\n" +
-        "window/size/viewport_height=648\n";
+        "window/size/viewport_height=648\n" +
+        // Android-export KRAVER etc2/astc-import - utan den faller Godots
+        // projektvalidering med ett HELT TOMT felmeddelande (v1.90, verifierat
+        // mot 4.3-kallkoden: should_import_etc2_astc -> valid=false utan text).
+        // Ofarligt for desktop/webb - bara ett extra texturformat vid import.
+        "[rendering]\n" +
+        "textures/vram_compression/import_etc2_astc=true\n";
 
     static string GodotKitMainScene(string rootType) =>
         "[gd_scene load_steps=2 format=3 uid=\"uid://ailocalkitmain\"]\n\n" +
