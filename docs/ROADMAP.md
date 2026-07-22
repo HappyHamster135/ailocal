@@ -183,8 +183,17 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > ÄRLIGT FYND från testet: kitet är tangentbordsstyrt - på en riktig telefon
 > utan tangentbord behövs TOUCHKONTROLLER (virtuella knappar) innan spelet är
 > mobilspelbart; layouten är också desktop-formad (1152x648 utan stretch).
-> Kvar därefter: touchkontroller i kiten, riktig fysisk enhet, release-
-> signerad butiks-APK (ägarens nyckel), prissatt bildgenerering.
+>
+> **v1.93.0: TOUCHKONTROLLER LEVERERADE (ägarens princip: dator är baslinjen).**
+> Runtime-gatade (is_touchscreen_available = existerar inte på dator; sonderna
+> bevisar noll skillnad) i alla fem action-kit via TouchScreenButton.action →
+> samma ui_-actions spelen redan läser (noll logikändringar utom plattformarens
+> hopp-flagga); stretch canvas_items/keep (1:1 på dator, skalar på mobil).
+> EMULATORVERIFIERAT med granskade skärmdumpar: kontroller syns, "<"/">"
+> flyttar spelaren, HOPP ger luftdump MED hoppdamm-partiklarna; produktions-
+> ribban fick Mobile-raden. Bonusfynd från skarpt speltest: one_way_collision
+> på plattformarna (huvuddunk-fixen, klassisk plattformare). Kvar: riktig
+> fysisk enhet, release-signerad butiks-APK, prissatt bildgenerering.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
