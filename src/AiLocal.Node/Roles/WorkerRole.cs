@@ -945,18 +945,20 @@ public static class WorkerRole
             }
 
             const int maxFixRounds = 2;
+            const int maxMilestoneRounds = 4;  // C5: längre bygge mot milstolpen medan framsteg görs
+            var prevUnmet = int.MaxValue;
             for (var round = 0; result.Success; round++)
             {
                 await EmitStep("tool_call", "kvalitetskontroll (nodens egen verify + playtest)");
                 findings = await InspectAsync();
                 await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
 
-                // Regissörens uppföljning: EN modelltur (bara första rundan,
-                // bara när tekniken är grön) som granskar leveransen mot
-                // kontraktet - ouppfyllda punkter blir mjuka fynd som får en
-                // egen fixrunda. Grinden garanterade FUNGERANDE; det här är
-                // den som kräver INTRESSANT.
-                if (round == 0 && findings.Clean && contractCriteria.Count > 0)
+                var contractUnmet = -1;  // -1 = ingen kontraktsgranskning (teknisk miss)
+                // C5: kontraktet (MILSTOLPEN) granskas VARJE runda medan tekniken
+                // är grön - inte bara runda 0 - så framstegen kan följas och bygget
+                // fortsätter mot resten så länge ouppfyllda punkter minskar.
+                // Grinden garanterade FUNGERANDE; det här kräver INTRESSANT.
+                if (findings.Clean && contractCriteria.Count > 0)
                 {
                     // Cross-modell-granskning: granskaren kör på den STARKA
                     // tiern - en ANNAN modell än byggaren (modelHint) i det
@@ -970,6 +972,7 @@ public static class WorkerRole
                     var unmet = await DirectorPass.ReviewAsync(
                         contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct,
                         reviewModelHint: reviewHint);
+                    contractUnmet = unmet.Count;
                     await EmitStep("contract_status",
                         JsonSerializer.Serialize(new { criteria = contractCriteria, unmet }));
                     if (unmet.Count > 0)
@@ -987,10 +990,28 @@ public static class WorkerRole
                     }
                 }
 
-                // B5: kostnadsgränsen hoppar över fler betalda åtgärdsrundor -
-                // AgentLoop-taket stoppar redan mitt i, det här sparar en extra
-                // rundas modellanrop.
-                if (findings.Clean || round >= maxFixRounds || (maxCostUsd > 0m && spentUsd >= maxCostUsd)) break;
+                if (findings.Clean) break;
+                // B5: kostnadstaket hoppar över fler betalda rundor (AgentLoop-taket
+                // stoppar redan mitt i; det här sparar en extra rundas modellanrop).
+                if (maxCostUsd > 0m && spentUsd >= maxCostUsd) break;
+                // C5: milstolpe-driven förlängning - en ren TEKNISK miss behåller det
+                // snäva taket (maxFixRounds); en KONTRAKTS-miss får fortsätta upp till
+                // maxMilestoneRounds så länge ouppfyllda punkter MINSKAR (framsteg),
+                // annars stannar den av - bygget konvergerar alltid, aldrig runaway.
+                if (!AssignmentQualityGate.ShouldContinueFixing(round, contractUnmet, prevUnmet, maxFixRounds, maxMilestoneRounds))
+                {
+                    if (contractUnmet > 0)
+                        await EmitStep("thinking",
+                            contractUnmet >= prevUnmet
+                                ? $"Milstolpen står stilla ({contractUnmet} punkter kvar, inget framsteg senaste rundan) - levererar det som är gjort."
+                                : $"Nådde rundtaket ({maxMilestoneRounds}) med {contractUnmet} kontraktspunkter kvar - levererar det som är gjort.");
+                    break;
+                }
+                if (contractUnmet > 0)
+                {
+                    prevUnmet = contractUnmet;
+                    await EmitStep("thinking", $"Milstolpe: {contractCriteria.Count - contractUnmet}/{contractCriteria.Count} kontraktspunkter klara - fortsätter mot resten (runda {round + 1} av {maxMilestoneRounds}).");
+                }
                 result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, modelHint,
                     onStep: emitAgentStep, ct, history: result.Messages, system: system);
             }

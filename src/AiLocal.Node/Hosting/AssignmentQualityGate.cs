@@ -166,6 +166,19 @@ public static class AssignmentQualityGate
               "att det kompilerar. Ändra VÄRDEN i den befintliga koden och speltesta igen."
             : "");
 
+    /// <summary>C5 (milstolpe-drivet bygge): ska grinden köra EN fixrunda till?
+    /// En ren TEKNISK miss (contractUnmet &lt; 0) har det snäva taket
+    /// (maxFixRounds). En KONTRAKTS-/milstolpe-miss (contractUnmet &gt; 0) får
+    /// fortsätta upp till maxMilestoneRounds SÅ LÄNGE antalet ouppfyllda punkter
+    /// MINSKAR (framsteg mot milstolpen) - stannar av när det står stilla, så
+    /// bygget alltid konvergerar och aldrig blir en runaway.</summary>
+    public static bool ShouldContinueFixing(int round, int contractUnmet, int prevUnmet, int maxFixRounds, int maxMilestoneRounds)
+    {
+        if (contractUnmet > 0)
+            return round < maxMilestoneRounds && contractUnmet < prevUnmet;
+        return round < maxFixRounds;
+    }
+
     private static string FirstLine(string text)
     {
         var i = text.IndexOf('\n');
