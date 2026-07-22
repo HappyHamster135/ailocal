@@ -125,3 +125,78 @@ I fallande ordning efter bedömt värde för produktmålet:
 8. **Långtidsminne över projekt** — ProjectMemoryEnabled är per arbetsyta;
    en studiogemensam lärdomsbank ("förra fotbollsspelet fick kritik för X")
    som regissören läser. Störst osäkerhet, prototypa smått.
+
+> **STATUS: HELA Del B levererad** (v1.64.0–v1.70.0). B1/B7/B8 var redan klara.
+> Del A likaså. Se statusrutan högst upp. Nästa arbete tas från Del C nedan.
+
+## C. Produktionsstudio-horisonter (skiss v1.70.0)
+
+Golvet är stabilt: svag prompt → fungerande, polerat spel. Gapet till
+PRODUKTIONSNIVÅ + RIKTIG STUDIO ligger i fem saker; punkterna är grupperade
+efter vilket gap de stänger (S/M/L = grov storlek).
+
+### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
+- **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
+  hit-stop, easing - LEVERERAT och VERIFIERAT (sonden mäter rörelse/partikel-
+  aktivitet mellan bildrutor). Själva prototyp→produktion-skillnaden.
+- **C2 Testad balans** (M): en agent SPELAR på flera skicklighetsnivåer via
+  sonden och flaggar ovinnbart/trivialt/trasig svårighetskurva.
+- **C3 Prestanda-koll** (S): sonden mäter FPS, underkänner hackiga byggen.
+
+### C-gap 2. Studion beter sig som en riktig studio (störst ambition)
+- **C4 Producent + riktiga överlämningar** (L): producent planerar milstolpar;
+  design→konst→kod→ljud→QA lämnar över arbete, producenten koordinerar och
+  itererar på speltest-feedback. Rollerna GRANSKAR idag - detta gör dem till en
+  pipeline. Se multi-modell-noten nedan - ägarens idé skärper just den här.
+- **C5 Längre checkpoint-byggen** (L): överlever kostnads-/iterationstak,
+  återupptar mot en milstolpe, synlig framdrift.
+- **C6 Regressionsskydd vid iteration** (S): kör om gamla speltest-kriterier
+  efter "vidareutveckla" så en ändring inte tyst bryter befintliga features.
+
+### C-gap 3. Utdatan är en PRODUKT, inte bara ett bygge
+- **C7 Trailer + butikssida från reprisen** (M): sy ihop repriser + titelkort +
+  musik till en kort trailer; autogenererad butiksbeskrivning + skärmdumpar.
+  Återanvänder allt repris-arbete (v1.65/v1.70).
+- **C8 Spelbar länk** (M): paketera webbygget för hosting. OBS utåtriktat -
+  bygg paketeringen, ÄGAREN publicerar (aldrig autopublicering).
+- **C9 Mobilexport (Android APK)** (M): Godot kan exportera Android, mallarna
+  finns.
+
+### C-gap 4. Konst- & innehållsdjup
+- **C10 Art-bibel / sammanhållen konstriktning** (M): palett/stil/stämning
+  bestäms FÖRST; varje asset (sprites, TILESETS, BAKGRUNDER, UI) följer den -
+  inte bara karaktärssprites som idag (AssetStyle).
+- **C11 Procedurellt innehållsdjup** (M): fler banor/fiender/föremål för
+  replayvärde, inte en skärm.
+
+### C-gap 5. Räckvidd & finish
+- **C12 Tillgänglighet + lokalisering** (M): ombindbara kontroller, färgblind-
+  säkra paletter, extraherade strängar för översättning.
+- **C13 In-game tutorial/onboarding** (S): produktionsspel lär spelaren spela.
+
+**Rekommenderad start:** C1 (störst upplevt golv-lyft, verifierbart), sedan C7
+(snabb visuell vinst som återanvänder repriserna), sedan det stora C4. ÄRLIGT:
+C2 (fun/balans) har högst tak men är svårast - mät det som GÅR (vinnbarhet,
+svårighetsspridning), lova ingen "fun-detektor".
+
+### Multi-modell-samarbete på EN maskin (ägarens idé 2026-07-22)
+Flera API-agenter (OLIKA modeller) som jobbar mot samma mål på samma dator.
+FUNGERAR - och infran finns delvis: team-läget (TeamBuild) kör redan parallella
+agenter på en maskin via git-worktrees + sekventiell merge. API-agenter är
+I/O-bundna på API:et (inte lokal GPU), så en maskin kan köra flera samtidigt
+billigt - "en dator per uppdrag"-regeln handlade om DELADE FILER + lokala
+modeller, inte om compute.
+- BÄTTRE när: (a) SPECIALISERING (stark modell som arkitekt/regissör/granskare +
+  billig som byggare - delvis gjort via tier-eskaleringen), (b) KVALITET via
+  korsgranskning (två OLIKA modeller fångar fler fel än en modell som granskar
+  sig själv - olika felmoder).
+- SÄMRE/risk: tätt kopplad spelkod → parallellt samma-mål ger merge-konflikter
+  och agenter som ångrar varann; koordinationskostnad; ~2x kostnad för de
+  samarbetande delarna. "Två identiska agenter som slåss om samma filer" är
+  sämre än en fokuserad agent.
+- SLUTSATS: sweet spot = ROLL-baserat samarbete med olika modeller (senior/
+  junior, byggare/kritiker), inte en kapplöpning. Det är i praktiken C4 +
+  per-roll-modellval. SAKNAS idag: (1) tilldela OLIKA modeller per team-spår/
+  roll (arkitekten kör Complex men dev-spåren delar samma modelHint), (2) ett
+  KOLLABORATIVT läge (inte bara dela-och-merga) där agenter korsgranskar
+  varandras arbete cross-modell.
