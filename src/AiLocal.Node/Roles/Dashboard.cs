@@ -1439,6 +1439,9 @@ internal static class Dashboard
         a.mini-btn { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); transition: background .15s ease, border-color .15s ease; }
         a.mini-btn:hover { background: var(--surface-2); border-color: var(--accent); }
         .msg-preview { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .msg-replay { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+        .replay-cap { color: var(--muted); }
+        .replay-img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
         .node-version-stale { color: var(--bad); font-weight: 600; }
         .contract-card {
           border: 1px solid var(--line); border-radius: 10px;
@@ -6016,6 +6019,11 @@ internal static class Dashboard
           const preview = (!running && (playLink || artifactLink))
             ? `<div class="msg-preview">${playLink}${artifactLink}</div>`
             : '';
+          // B3: kort speltest-repris (animerad PNG - animeras av sig sjalv i
+          // <img>). Visas bara nar sonden faktiskt spelade in en.
+          const replay = (!running && m.replayPath)
+            ? `<div class="msg-replay"><div class="small replay-cap">Repris - så här ser spelet ut när det spelas:</div><img class="replay-img" src="${esc(m.replayPath)}" alt="Speltest-repris" loading="lazy"></div>`
+            : '';
 
           const milestone = (running && m.milestone && m.milestone.id)
             ? `<div class="milestone-card">
@@ -6043,6 +6051,7 @@ internal static class Dashboard
             ${milestone}
             ${answer}
             ${preview}
+            ${replay}
             ${!running && m.content ? msgActionsHtml : ''}
           </article>`;
         }
@@ -6230,6 +6239,7 @@ internal static class Dashboard
                   // proxy (/api/nodes/{id}/...), så länkarna fungerar överallt.
                   stepMsg.previewPath = payload.previewPath || null;
                   stepMsg.artifactPath = payload.artifactPath || null;
+                  stepMsg.replayPath = payload.replayPath || null;
                   stepMsg.state = success ? 'Completed' : 'Failed';
                   // The final answer lives in content; the running step-log
                   // stays in steps[]. If the run produced no steps at all

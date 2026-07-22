@@ -50,6 +50,24 @@ public class ClusterDeliveryTests
         Assert.Equal("/api/nodes/a%20b%2Fc/preview/index.html", preview);
     }
 
+    [Fact]
+    public void RewriteFinalFrame_ReplayPath_SkrivsOmAvenUtanPreview()
+    {
+        // Motorspel har ingen index.html (previewPath=null) men kan ha en
+        // repris (B3). Den måste ändå gå via Host-proxyn - annars pekar
+        // reprisen på fel nod i klustret. Reprisen ensam ska räknas som
+        // "behövdes rewrite" (annars skippas hela framen).
+        var frame = """{"final":{"Success":true},"previewPath":null,"artifactPath":null,"replayPath":"/api/preview/spel/screenshots/replay.png"}""";
+
+        var (json, preview, artifact) = ClusterDelivery.RewriteFinalFrame(frame, "w1");
+
+        Assert.NotNull(json);
+        Assert.Null(preview);
+        Assert.Null(artifact);
+        Assert.Contains("/api/nodes/w1/preview/spel/screenshots/replay.png", json);
+        Assert.DoesNotContain("\"replayPath\":\"/api/preview/", json);
+    }
+
     // ---- Artefaktupplösningen ----------------------------------------------
 
     [Fact]

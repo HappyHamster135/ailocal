@@ -109,6 +109,14 @@ public class WindowProbeAndFeelTests
             Assert.NotNull(result.TitleScreenshotPath);
             Assert.True(File.Exists(result.TitleScreenshotPath), "titeldumpen saknas");
             Assert.True(new FileInfo(result.TitleScreenshotPath!).Length > 1000, "titeldumpen misstänkt liten");
+            // v1.65.0 (B3): reprisen (animerad PNG) spelas in bredvid dumpen -
+            // giltig PNG-signatur + acTL-chunk = faktisk APNG-animation.
+            Assert.NotNull(result.ReplayPath);
+            Assert.True(File.Exists(result.ReplayPath), "reprisen saknas: " + result.Notes);
+            var replayBytes = await File.ReadAllBytesAsync(result.ReplayPath!);
+            Assert.True(replayBytes.Length > 1000, "reprisen misstänkt liten");
+            Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, replayBytes[..8]);
+            Assert.Contains("acTL", System.Text.Encoding.ASCII.GetString(replayBytes));
             // Responded/ContinuouslyAnimating asserteras inte - titelskärmen
             // är statisk och knappstyrd, så ett ärligt "reagerar inte på
             // piltangenter" är ett giltigt utfall här. Kedjan (fönster, input

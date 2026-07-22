@@ -34,7 +34,12 @@ public static class ClusterDelivery
 
             var preview = RewritePath(node, "previewPath", workerId);
             var artifact = RewritePath(node, "artifactPath", workerId);
-            if (preview is null && artifact is null)
+            // replayPath (B3) är också en /api/preview-väg och måste gå via
+            // Host-proxyn - annars pekar reprisen på fel nod i klustret. En
+            // godot-repris kan finnas även när previewPath är null (motorspel
+            // har ingen index.html), så den räknas med i "behövdes rewrite".
+            var replay = RewritePath(node, "replayPath", workerId);
+            if (preview is null && artifact is null && replay is null)
                 return (null, null, null);
             return (node.ToJsonString(), preview, artifact);
         }

@@ -1025,19 +1025,28 @@ public static class WorkerRole
             // (/api/nodes/{id}/preview/...) så Spela-knappen fungerar från
             // vilken dashboard som helst, inte bara på noden som byggde.
             string? previewPath = null;
+            string? replayPath = null;
             if (result.Success)
             {
                 var projectRoot = findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot);
                 var entry = projectRoot is null ? null : Path.Combine(projectRoot, "index.html");
                 if (entry is not null && File.Exists(entry))
                     previewPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, entry).Replace('\\', '/');
+
+                // B3: kort speltest-repris (APNG) som fönstersonden spelade in i
+                // screenshots/replay.png - visas i uppdragsresultatet ("så här
+                // ser ditt spel ut när det spelas"). Bara när sonden faktiskt
+                // producerade en; samma /api/preview-väg som Spela-länken.
+                var replay = projectRoot is null ? null : Path.Combine(projectRoot, "screenshots", "replay.png");
+                if (replay is not null && File.Exists(replay))
+                    replayPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, replay).Replace('\\', '/');
             }
 
             assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath);
             logCompleted = true;
 
             await WriteFrameAsync(
-                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath })}\n\n", ct);
+                $"data: {JsonSerializer.Serialize(new { final = result, previewPath, artifactPath, replayPath })}\n\n", ct);
             return Results.Empty;
             }
             finally

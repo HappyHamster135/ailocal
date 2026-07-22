@@ -8,7 +8,8 @@ public sealed record WindowProbeResult(
     bool ContinuouslyAnimating,
     string Notes,
     string? ScreenshotPath,
-    string? TitleScreenshotPath = null);
+    string? TitleScreenshotPath = null,
+    string? ReplayPath = null);
 
 /// <summary>
 /// Interactive QA for ENGINE games - the window-level counterpart of the
@@ -70,10 +71,11 @@ public static class GodotWindowProbe
                 await Task.Delay(1200, ct);
                 var (final, _, _) = WindowCapturer.TryCaptureRgba(hwnd);
                 SavePng(screenshotPath, final ?? idle, width, height);
+                var animReplay = await CaptureReplayAsync(hwnd, screenshotPath, ct);
                 return new(true, true, true,
                     $"Spelet animerar kontinuerligt ({idleDiff:P1} av pixlarna ändras utan input) - " +
                     "inputrespons kan inte isoleras via pixeljämförelse; ärligt benefit of the doubt.",
-                    screenshotPath, titlePath);
+                    screenshotPath, titlePath, animReplay);
             }
 
             await SendGameplayKeysAsync(hwnd, ct);
@@ -85,6 +87,7 @@ public static class GodotWindowProbe
                 return new(true, false, false, "Dumpen efter tangenttrycken misslyckades.", screenshotPath, titlePath);
             }
             SavePng(screenshotPath, after, width, height);
+            var replay = await CaptureReplayAsync(hwnd, screenshotPath, ct);
 
             var inputDiff = PixelDiffRatio(idle, after);
             var responded = inputDiff > ResponseThreshold;
@@ -93,7 +96,7 @@ public static class GodotWindowProbe
                     ? $"Spelet reagerar på tangenttryck ({inputDiff:P1} av pixlarna ändrades)."
                     : "Fönstret är oförändrat efter tangenttryck (piltangenter/WASD/Enter/Space) - " +
                       "spelet verkar inte reagera på spelarens input.",
-                screenshotPath, titlePath);
+                screenshotPath, titlePath, replay);
         }
         catch (OperationCanceledException)
         {
@@ -113,6 +116,73 @@ public static class GodotWindowProbe
             File.WriteAllBytes(path, AssetGenerator.EncodePng(width, height, rgba));
         }
         catch { /* dumpen är underlag, aldrig ett krav */ }
+    }
+
+    /// <summary>B3 (speltest-repris): fångar ~9 rutor medan input drivs och
+    /// skriver dem som en animerad PNG bredvid dumpen (replay.png). Uppdrags-
+    /// resultatet visar den som "så här ser ditt spel ut när det spelas" utan
+    /// att öppna något. Rent additivt och bäst-möjligt: en misslyckad repris
+    /// får aldrig fälla speltestet, så allt fångas i en try. Returnerar
+    /// sökvägen till repriser, annars null.</summary>
+    private static async Task<string?> CaptureReplayAsync(IntPtr hwnd, string screenshotPath, CancellationToken ct)
+    {
+        const int frameCount = 9, targetWidth = 360, frameDelayMs = 160;
+        int[] keys = { 0x27, 0x44, 0x20, 0x25, 0x26, 0x0D, 0x57, 0x28, 0x27 }; // RIGHT,D,SPACE,LEFT,UP,ENTER,W,DOWN,RIGHT
+        try
+        {
+            var frames = new List<byte[]>();
+            int w = 0, h = 0;
+            for (var i = 0; i < frameCount; i++)
+            {
+                var (frame, fw, fh) = WindowCapturer.TryCaptureRgba(hwnd);
+                if (frame is not null)
+                {
+                    if (w == 0) { w = fw; h = fh; }
+                    if (fw == w && fh == h) frames.Add(frame); // hoppa ev. storleksskiften
+                }
+                PostKey(hwnd, keys[i % keys.Length], down: true);
+                await Task.Delay(frameDelayMs, ct);
+                PostKey(hwnd, keys[i % keys.Length], down: false);
+                await Task.Delay(frameDelayMs, ct);
+            }
+            if (frames.Count < 2 || w == 0) return null; // en enda ruta är ingen repris
+
+            // Skala ner så reprisen blir några hundra kB, inte flera MB.
+            var outW = Math.Min(w, targetWidth);
+            var outH = w > targetWidth ? Math.Max(1, (int)((long)h * targetWidth / w)) : h;
+            var scaled = w > targetWidth
+                ? frames.Select(f => Downscale(f, w, h, outW, outH)).ToList()
+                : frames;
+
+            var apng = AssetGenerator.EncodeApng(outW, outH, scaled, frameDelayMs);
+            var replayPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(screenshotPath))!, "replay.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(replayPath)!);
+            await File.WriteAllBytesAsync(replayPath, apng, ct);
+            return replayPath;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Enkel nearest-neighbor-nedskalning av en RGBA-buffert (repris-
+    /// rutor behöver bara vara igenkännbara, inte perfekta).</summary>
+    private static byte[] Downscale(byte[] rgba, int w, int h, int targetW, int targetH)
+    {
+        var outRgba = new byte[targetW * targetH * 4];
+        for (var y = 0; y < targetH; y++)
+        {
+            var srcY = (int)((long)y * h / targetH);
+            for (var x = 0; x < targetW; x++)
+            {
+                var srcX = (int)((long)x * w / targetW);
+                var si = (srcY * w + srcX) * 4;
+                var di = (y * targetW + x) * 4;
+                outRgba[di] = rgba[si];
+                outRgba[di + 1] = rgba[si + 1];
+                outRgba[di + 2] = rgba[si + 2];
+                outRgba[di + 3] = rgba[si + 3];
+            }
+        }
+        return outRgba;
     }
 
     /// <summary>Andel provtagna pixlar som skiljer sig märkbart (kanalsumma

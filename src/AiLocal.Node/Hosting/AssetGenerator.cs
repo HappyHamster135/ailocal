@@ -810,6 +810,95 @@ public sealed class AssetGenerator
     }
 
     /// <summary>
+    /// Encodes RGBA frames as an animated PNG (APNG) - reuses the exact
+    /// truecolor PNG pipeline above (deflate + real Adler-32 + CRC) so it needs
+    /// no palette or LZW like a GIF would. Browsers animate it inline in an
+    /// &lt;img&gt;; non-APNG viewers just see the first frame. All frames must
+    /// share width x height. A single frame degrades to a plain PNG.
+    /// </summary>
+    internal static byte[] EncodeApng(int width, int height, IReadOnlyList<byte[]> framesRgba, int frameDelayMs)
+    {
+        if (framesRgba is null || framesRgba.Count == 0)
+            throw new ArgumentException("minst en bildruta krävs", nameof(framesRgba));
+        if (framesRgba.Count == 1)
+            return EncodePng(width, height, framesRgba[0]);
+
+        using var ms = new MemoryStream();
+        ms.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, 0, 8);
+
+        WriteChunk(ms, "IHDR", () =>
+        {
+            WriteBigEndian(ms, width);
+            WriteBigEndian(ms, height);
+            ms.WriteByte(8);   // bit depth
+            ms.WriteByte(6);   // color type: RGBA
+            ms.WriteByte(0);   // compression
+            ms.WriteByte(0);   // filter
+            ms.WriteByte(0);   // interlace
+        });
+
+        // acTL MÅSTE ligga före första IDAT: antal rutor + antal spelningar
+        // (0 = oändlig loop).
+        WriteChunk(ms, "acTL", () =>
+        {
+            WriteBigEndian(ms, framesRgba.Count);
+            WriteBigEndian(ms, 0u);
+        });
+
+        var delayNum = (ushort)Math.Clamp(frameDelayMs, 1, 65535);
+        uint seq = 0;
+
+        for (var i = 0; i < framesRgba.Count; i++)
+        {
+            var fcTlSeq = seq++;
+            WriteChunk(ms, "fcTL", () =>
+            {
+                WriteBigEndian(ms, fcTlSeq);
+                WriteBigEndian(ms, width);
+                WriteBigEndian(ms, height);
+                WriteBigEndian(ms, 0);   // x_offset
+                WriteBigEndian(ms, 0);   // y_offset
+                ms.WriteByte((byte)(delayNum >> 8)); ms.WriteByte((byte)delayNum);  // delay_num
+                ms.WriteByte(0x03); ms.WriteByte(0xE8);   // delay_den = 1000 -> num/1000 s
+                ms.WriteByte(0);   // dispose_op = NONE
+                ms.WriteByte(0);   // blend_op = SOURCE (rutan ersätter helt)
+            });
+
+            var compressed = CompressScanlines(width, height, framesRgba[i]);
+            if (i == 0)
+            {
+                WriteChunk(ms, "IDAT", () => ms.Write(compressed, 0, compressed.Length));
+            }
+            else
+            {
+                var fdatSeq = seq++;
+                WriteChunk(ms, "fdAT", () =>
+                {
+                    WriteBigEndian(ms, fdatSeq);
+                    ms.Write(compressed, 0, compressed.Length);
+                });
+            }
+        }
+
+        WriteChunk(ms, "IEND", () => { });
+        return ms.ToArray();
+    }
+
+    /// <summary>Filter-prefixar (None) och deflate-komprimerar en RGBA-ruta -
+    /// samma bytes som IDAT/fdAT vill ha.</summary>
+    private static byte[] CompressScanlines(int width, int height, byte[] rgba)
+    {
+        var stride = width * 4;
+        var filtered = new byte[height * (stride + 1)];
+        for (var y = 0; y < height; y++)
+        {
+            filtered[y * (stride + 1)] = 0; // filter: None
+            Buffer.BlockCopy(rgba, y * stride, filtered, y * (stride + 1) + 1, stride);
+        }
+        return DeflateCompress(filtered);
+    }
+
+    /// <summary>
     /// Compresses data using Deflate (zlib wrapper).
     /// </summary>
     private static byte[] DeflateCompress(byte[] data)
