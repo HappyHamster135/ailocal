@@ -71,9 +71,10 @@ public static class DirectorPass
     }
 
     /// <summary>Standing production criteria for engine games (godot/unity):
-    /// sound on actions, visible feedback, screen transitions, and difficulty
-    /// levels that actually differ. Only criteria whose topic the contract
-    /// does not already cover are added - the director's own wording wins.</summary>
+    /// sound on actions, visible feedback, screen transitions, difficulty levels
+    /// that actually differ, and game-feel/juice (screenshake, particles,
+    /// tweening) - C1. Only criteria whose topic the contract does not already
+    /// cover are added - the director's own wording wins.</summary>
     internal static IReadOnlyList<string> EnsureEngineFeelCriteria(IReadOnlyList<string> criteria, string? engine)
     {
         if (engine is not ("godot" or "unity"))
@@ -89,6 +90,10 @@ public static class DirectorPass
                 "Mjuka övergångar mellan skärmarna (titel/spel/resultat) - inga hårda klipp"),
             (["svårighet", "svarighet", "difficulty"],
                 "Svårighetsgraderna ska kännas mätbart olika i spel (olika startvärden/fiendefart), inte bara heta olika"),
+            // C1 (game-feel/juice): den konkreta grejen som skiljer en prototyp
+            // från ett produktionsspel. Mer specifik än "synlig feedback" ovan.
+            (["juice", "partik", "particle", "screenshake", "skärmskak", "skarmskak", "tween", "hit-stop", "hitstop", "easing"],
+                "Game-feel/juice: screenshake vid träffar/kollisioner, partiklar vid poäng/träffar/explosioner, och tweenad rörelse med easing i stället för hårda hopp - spelet ska KÄNNAS, inte bara fungera"),
         ];
 
         var result = new List<string>(criteria);
