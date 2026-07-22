@@ -171,6 +171,51 @@ public sealed class ToolProvisioner
             return new(false, "Du får bara skicka ett verktygsnamn (t.ex. 'godot'), inte en URL.");
         }
 
+        // v1.96: samtidighetslås per verktyg + redan-installerad-kortslutning.
+        // Live provisionerade TVÅ teamspår godot PARALLELLT: dubbla ~100 MB-
+        // nedladdningar till samma katalog och en extraktionsrace som kan
+        // korrumpera verktygskedjan. Låset serialiserar; den som väntat klart
+        // hittar verktyget installerat och laddar aldrig ner igen.
+        var gate = ProvisionLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (AlreadyProvisioned(key) is { } existing)
+                return new(true, $"{spec.Display} fanns redan ({existing}) - ingen nedladdning behövdes.");
+            return await DownloadAndInstallAsync(key, spec, destinationDir, ct);
+        }
+        finally { gate.Release(); }
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> ProvisionLocks =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Snabbkoll före nedladdning: en beskrivande sträng när verktyget
+    /// redan finns på plats, annars null. Exportmallarna kollas på sin enda
+    /// giltiga plats; övriga via ToolLocator.</summary>
+    private static string? AlreadyProvisioned(string key)
+    {
+        if (key.Equals("godot-templates", StringComparison.OrdinalIgnoreCase))
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Godot", "export_templates", "4.3.stable.mono");
+            return File.Exists(Path.Combine(dir, "version.txt")) ? dir : null;
+        }
+        if (key.Equals("godot-templates-standard", StringComparison.OrdinalIgnoreCase))
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Godot", "export_templates", "4.3.stable");
+            return File.Exists(Path.Combine(dir, "version.txt")) ? dir : null;
+        }
+        // android-sdk kortsluts INTE - dess eftersteg (paket/keystore/standard-
+        // godot) är idempotenta och fyller på det som saknas.
+        if (key.Equals("android-sdk", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return ToolLocator.Find(key);
+    }
+
+    private async Task<ProvisionResult> DownloadAndInstallAsync(string key, Spec spec, string destinationDir, CancellationToken ct)
+    {
         var dest = string.IsNullOrWhiteSpace(destinationDir)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiLocal", "tools")
             : destinationDir;

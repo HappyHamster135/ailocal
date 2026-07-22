@@ -316,6 +316,18 @@ public static class SessionApi
                 }
                 catch { /* planning is best-effort; never block the build on it */ }
 
+                // v1.96: byggintention i en SESSION får ett ärligt tips - hela
+                // kvalitetskedjan (regissör, grind, speltest, kontrakts-
+                // granskning) bor i uppdragsvägen; sessionen är verktygslabbet.
+                // Live byggdes ett trasigt spel här utan att något sa det.
+                if (HostRole.IsBuildRequest(req.Message))
+                {
+                    var tip = new AgentStep("thinking",
+                        "Tips: för hela spel-/appbyggen med regissör, kvalitetsgrind och speltest - kör \"Delegera till kluster\" med Agentläge. Sessionen bygger utan grinden.");
+                    await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { step = tip })}\n\n", linked.Token);
+                    await ctx.Response.Body.FlushAsync(linked.Token);
+                }
+
                 var loop = new AgentLoop(provider.CompleteAsync, executor);
 
                 // v1.94: sessioner utan uttrycklig modell fick förr INGEN hint

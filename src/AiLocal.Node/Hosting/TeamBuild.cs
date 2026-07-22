@@ -131,10 +131,32 @@ public static class TeamBuild
             var trackModel = ModelFor(run.Track);
             await trackEmit(new AgentStep("thinking",
                 $"svårighet {run.Track.Difficulty} - modell {(string.IsNullOrWhiteSpace(trackModel) ? "auto" : trackModel)}"));
+            var windowStart = DateTime.UtcNow;
             var result = await loop.RunAsync(
                 TrackPrompt(assignment, run.Track, tracks.Count), accessLevel, trackModel,
                 onStep: trackEmit, ct, system: system);
             AddUsage(result);
+            // v1.96: samma iterationstak-fortsättning som ensamagenten (v1.32) -
+            // live dog två av fyra spår på 50-taket MITT i riktigt arbete och
+            // kasserades. Tak + filframsteg i senaste fönstret = fortsätt med
+            // historiken kvar, upp till 4 fönster; utan framsteg = runaway-stopp.
+            for (var round = 2; result.HitIterationCap && round <= 4; round++)
+            {
+                if (ProjectRootDetector.NewestWriteUtc(run.Iso!.WorktreePath) < windowStart)
+                {
+                    await trackEmit(new AgentStep("tool_error",
+                        "iterationstaket nåddes utan filändringar i senaste rundan - spåret stannar här (runaway-skydd)."));
+                    break;
+                }
+                await trackEmit(new AgentStep("thinking",
+                    $"iterationstaket nått men spåret gör framsteg - fortsätter där det slutade (runda {round} av 4)."));
+                windowStart = DateTime.UtcNow;
+                result = await loop.RunAsync(
+                    "Du nådde iterationstaket men ditt spår är inte klart än. Fortsätt EXAKT där du slutade - " +
+                    "slutför återstoden av spåret, kör verify, och avsluta när allt är på plats.",
+                    accessLevel, trackModel, onStep: trackEmit, ct, history: result.Messages, system: system);
+                AddUsage(result);
+            }
 
             // Plan-i-stället-för-utförande per spår (samma vakt som huvud-
             // flödets, v1.39.0): "Here is my plan... Let me know" räknas
@@ -436,6 +458,7 @@ public static class TeamBuild
         "- ARBETA ENBART GENOM VERKTYGEN (write_file/edit_file/verify). Ett svar utan verktygsanrop kastas bort - ingen människa läser det.\n" +
         "- Håll dig till ditt spår - andra utvecklare arbetar parallellt med sina.\n" +
         "- Använd RELATIVA vägar (t.ex. \"Main.gd\"). Din arbetsmapp är en ISOLERAD git-worktree - absoluta vägar utanför den avvisas; huvudprojektet mergas efteråt.\n" +
+        "- Redigera ALDRIG filer via powershell/python-enradare (har setts korrumpera filer) - använd edit_file/write_file.\n" +
         "- Lägg ny kod i EGNA filer när det går, och koppla in dem med små edit_file-ändringar. Skriv ALDRIG om hela filer som andra spår också rör.\n" +
         "- Kör verify innan du avslutar.";
 

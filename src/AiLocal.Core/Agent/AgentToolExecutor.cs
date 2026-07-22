@@ -468,8 +468,8 @@ public sealed class AgentToolExecutor
 
         var verifyNote = await AutoVerifyIfFullAsync(ct);
         return new ToolResult(call.Id, call.Name,
-            (append ? $"appended {content.Length} characters to {path} (file is now {newContent.Length} characters)"
-                    : $"wrote {content.Length} characters to {path}")
+            (append ? $"appended {content.Length} characters to {ToRel(path)} (file is now {newContent.Length} characters)"
+                    : $"wrote {content.Length} characters to {ToRel(path)}")
             + (truncationNote is null ? "" : $"\n\n{truncationNote}")
             + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
     }
@@ -560,7 +560,7 @@ public sealed class AgentToolExecutor
         await File.WriteAllTextAsync(path, updated, ct);
         var verifyNote = await AutoVerifyIfFullAsync(ct);
         return new ToolResult(call.Id, call.Name,
-            $"edited {path}: replaced {occurrences} occurrence(s) of {oldText.Length} chars with {newText.Length} chars."
+            $"edited {ToRel(path)}: replaced {occurrences} occurrence(s) of {oldText.Length} chars with {newText.Length} chars."
             + (verifyNote is null ? "" : $"\n\n{verifyNote}"));
     }
 
@@ -767,9 +767,51 @@ public sealed class AgentToolExecutor
             : ".";
         var workingDirectory = Path.GetFullPath(requestedDirectory, _workspaceRoot);
 
+        // v1.96: worktree-inhägnade spår (team) - kommandon som pekar in i
+        // HUVUDPROJEKTET (worktreens förälder eller syskonworktrees) blockeras;
+        // det var exakt så två spår korrumperade huvudrotens Main.gd med
+        // powershell-enradare trots filverktygens inhägnad. Vägar utanför
+        // huvudprojektet (verktyg, temp, python) är fortsatt fria.
+        if (ConfineToRoot && ForbiddenMainRootFor(_workspaceRoot) is { } mainRoot
+            && CommandTouchesForbiddenRoot(command, mainRoot, _workspaceRoot))
+            return Error(call,
+                "kommandot refererar huvudprojektet utanför din worktree - ditt spår arbetar ISOLERAT. " +
+                "Använd RELATIVA vägar, och gör filändringar med edit_file/write_file " +
+                "(redigera ALDRIG filer via powershell/python-enradare - det har setts korrumpera filer).");
+
         var (exitCode, output) = await RunCommandCoreAsync(command, workingDirectory, ct);
         var warn = screen is not null ? screen + "\n" : "";
-        return new ToolResult(call.Id, call.Name, warn + output, IsError: exitCode != 0);
+        // v1.96: relativisera arbetsytans prefix i utdatan (kompilatorfel m.m.)
+        // så leverantörsmaskningen inte får något att tugga på.
+        return new ToolResult(call.Id, call.Name, warn + StripRootPrefix(output), IsError: exitCode != 0);
+    }
+
+    /// <summary>v1.96: huvudprojektets rot när arbetsytan är en team-worktree
+    /// (".../huvudrot/.worktrees/id"), annars null. Testbar ren funktion.</summary>
+    public static string? ForbiddenMainRootFor(string workspaceRoot)
+    {
+        var marker = Path.DirectorySeparatorChar + ".worktrees" + Path.DirectorySeparatorChar;
+        var idx = workspaceRoot.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return idx > 0 ? workspaceRoot[..idx] : null;
+    }
+
+    /// <summary>True när kommandotexten refererar huvudroten (eller en
+    /// syskonworktree) i stället för den EGNA worktreen - blockeras i
+    /// inhägnade spår. Egna worktree-vägar är tillåtna.</summary>
+    public static bool CommandTouchesForbiddenRoot(string command, string mainRoot, string ownWorktree)
+    {
+        var cmp = StringComparison.OrdinalIgnoreCase;
+        var norm = command.Replace('/', '\\');
+        var root = mainRoot.Replace('/', '\\').TrimEnd('\\');
+        var own = ownWorktree.Replace('/', '\\').TrimEnd('\\');
+        var i = 0;
+        while ((i = norm.IndexOf(root, i, cmp)) >= 0)
+        {
+            // Träff som är EGNA worktreen (ligger under huvudroten) är ok.
+            if (!norm[i..].StartsWith(own, cmp)) return true;
+            i += own.Length;
+        }
+        return false;
     }
 
     /// <summary>Runs a shell command in <paramref name="workingDirectory"/>
@@ -843,7 +885,9 @@ public sealed class AgentToolExecutor
         var verifier = new ProjectVerifier();
         var result = await verifier.VerifyAsync(requested,
             (cmd, dir, c) => RunCommandCoreAsync(cmd, dir, c), ct);
-        return new ToolResult(call.Id, call.Name, result.Report, IsError: !result.Success);
+        // v1.96: relativisera vägar i rapporten (kompilatorfel bär absoluta
+        // vägar -> leverantörsmaskning i det modellen läser).
+        return new ToolResult(call.Id, call.Name, StripRootPrefix(result.Report), IsError: !result.Success);
     }
 
     /// <summary>Returns the first provider-redaction placeholder found in
@@ -1094,6 +1138,34 @@ public sealed class AgentToolExecutor
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         catch { /* best effort */ }
+    }
+
+    /// <summary>v1.96: verktygsresultat skriver ARBETSYTERELATIVA vägar. AI-
+    /// leverantörernas integritetsfilter maskar Windows-användarvägar
+    /// ("C:\Users\...") i det modellen SER - våra egna absoluta ekon var
+    /// råmaterialet bakom hela [ADDRESS]-kaoset (modeller jagade/materialiserade
+    /// maskningen). Relativa vägar ger filtret inget att maska.</summary>
+    private string ToRel(string absolute)
+    {
+        try
+        {
+            var rel = Path.GetRelativePath(_workspaceRoot, absolute);
+            return rel.StartsWith("..") || Path.IsPathRooted(rel) ? absolute : rel;
+        }
+        catch { return absolute; }
+    }
+
+    /// <summary>Stryker arbetsytans absoluta prefix ur fri text (kommando-/
+    /// verify-utdata) så kompilatorfel m.m. blir relativa i stället för att
+    /// trigga leverantörsmaskningen i det modellen läser.</summary>
+    private string StripRootPrefix(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        var root = _workspaceRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return text
+            .Replace(root + "\\", "", StringComparison.OrdinalIgnoreCase)
+            .Replace(root + "/", "", StringComparison.OrdinalIgnoreCase)
+            .Replace(root, ".", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Vägar som uppenbart är exempel-platshållare ur verktygs-

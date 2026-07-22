@@ -390,9 +390,16 @@ public static class WorkerRole
             // redovisningen och Max$-taket (granskningen v1.83 hittade att
             // team-läget och regissörsanropen gick förbi: Max$ bet inte på
             // spåren och operatören visades en kostnad som saknade merparten).
+            // v1.96: löpande förbrukningsnot i stegflödet - kostnaden syntes
+            // förr först när bygget var KLART (500kr-lärdomen: synlighet under
+            // resans gång, inte bara taket). costEmitter kopplas in när steg-
+            // sänkan finns (deklareras senare i metoden).
+            var accountedCalls = 0;
+            Func<AgentStep, Task>? costEmitter = null;
             Func<ChatRequest, CancellationToken, Task<ProviderResponse>> completeAccounted = async (r, c) =>
             {
                 var resp = await provider.CompleteAsync(r, c);
+                string? note = null;
                 if (resp.IsSuccess && resp.Response is { IsLocal: false } chat && !string.IsNullOrWhiteSpace(chat.Model))
                     lock (usageLock)
                     {
@@ -402,7 +409,18 @@ public static class WorkerRole
                             spentUsd += AssignmentCost.Price(
                                 new Dictionary<string, (long In, long Out)> { [chat.Model] = (chat.Usage.InputTokens, chat.Usage.OutputTokens) },
                                 capCatalog).Total;
+                        accountedCalls++;
+                        if (accountedCalls % 25 == 0)
+                        {
+                            var inTok = usageByModel.Values.Sum(u => u.In);
+                            var outTok = usageByModel.Values.Sum(u => u.Out);
+                            note = $"Förbrukning hittills: {inTok / 1000}k tokens in / {outTok / 1000}k ut"
+                                + (maxCostUsd > 0m ? $" (~${spentUsd:0.00} av max ${maxCostUsd:0.00})" : "")
+                                + $" - {accountedCalls} modellanrop.";
+                        }
                     }
+                if (note is not null && costEmitter is not null)
+                    await costEmitter(new AgentStep("thinking", note));
                 return resp;
             };
             decimal? capLimit = maxCostUsd > 0m ? maxCostUsd : null;
@@ -597,6 +615,9 @@ public static class WorkerRole
                 await WriteFrameAsync($"data: {JsonSerializer.Serialize(new { step })}\n\n", ct);
             };
             Task EmitStep(string kind, string detail) => emitAgentStep(new AgentStep(kind, detail));
+            // v1.96: nu finns stegsänkan - koppla in den löpande förbruknings-
+            // noten (var 25:e modellanrop) som completeAccounted komponerar.
+            costEmitter = emitAgentStep;
 
             // SSE-keepalive: långa tysta faser (kövantan, godot-import på
             // 10+ minuter, kvalitetsgrind) fick mellanliggande proxies och

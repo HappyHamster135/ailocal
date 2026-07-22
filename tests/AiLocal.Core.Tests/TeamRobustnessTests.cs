@@ -124,4 +124,62 @@ public class TeamRobustnessTests : IDisposable
         Assert.False(approved);
         Assert.Contains("dikt", reason);
     }
+
+    // ---- v1.96: relativa vägar i verktygsresultaten ------------------------
+
+    [Fact]
+    public async Task WriteFile_ResultatEkarRelativVag_InteAbsolut()
+    {
+        // Leverantörsmaskningen slår på "C:\Users\..."-mönster i det modellen
+        // LÄSER - våra egna absoluta ekon var råmaterialet till [ADDRESS]-kaoset.
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _dir);
+        var result = await executor.ExecuteAsync(new ToolCall("1", "write_file",
+            """{"path":"spel/Main.gd","content":"extends Node\nfunc _ready() -> void:\n\tpass\n"}"""),
+            CancellationToken.None);
+        Assert.False(result.IsError, result.Output);
+        Assert.Contains("spel", result.Output);
+        Assert.DoesNotContain(":\\", result.Output);   // ingen absolut Windows-väg i ekot
+    }
+
+    // ---- v1.96: run_command-inhägnaden -------------------------------------
+
+    [Fact]
+    public void ForbiddenMainRootFor_WorktreeVag_GerHuvudroten()
+    {
+        var root = AgentToolExecutor.ForbiddenMainRootFor(@"C:\ws\projekt\.worktrees\abc123");
+        Assert.Equal(@"C:\ws\projekt", root);
+        Assert.Null(AgentToolExecutor.ForbiddenMainRootFor(@"C:\ws\projekt"));   // vanlig rot = ingen inhägnad
+    }
+
+    [Theory]
+    [InlineData(@"powershell -Command ""(Get-Content 'C:\ws\projekt\Main.gd' -Raw) -replace 'x','y'""", true)]   // huvudroten = blockeras
+    [InlineData(@"type C:\ws\projekt\.worktrees\ANNAT\Main.gd", true)]                                            // syskonworktree = blockeras
+    [InlineData(@"type C:\ws\projekt\.worktrees\abc123\Main.gd", false)]                                          // egna worktreen = ok
+    [InlineData(@"""C:\Users\x\AppData\Local\AiLocal\tools\Godot.exe"" --headless", false)]                       // verktyg utanför = ok
+    [InlineData("godot --headless --path . --quit", false)]                                                        // relativt = ok
+    public void CommandTouchesForbiddenRoot_BlockerarBaraHuvudprojektet(string command, bool expected)
+    {
+        Assert.Equal(expected, AgentToolExecutor.CommandTouchesForbiddenRoot(
+            command, @"C:\ws\projekt", @"C:\ws\projekt\.worktrees\abc123"));
+    }
+
+    // ---- v1.96: provisioneringslåset ---------------------------------------
+
+    [Fact]
+    public async Task Provision_TvaSamtidiga_LaddarAldrigNerNarVerktygetFinns()
+    {
+        // Gated på befintlig godot (dev-maskinen har den): två parallella
+        // anrop ska BÅDA kortslutas på redan-installerad - live laddade två
+        // teamspår ner godot samtidigt till samma katalog (race).
+        if (ToolLocator.Find("godot") is null) return;
+        var p = new ToolProvisioner();
+        var results = await Task.WhenAll(
+            p.ProvisionAsync("godot", "", CancellationToken.None),
+            p.ProvisionAsync("godot", "", CancellationToken.None));
+        Assert.All(results, r =>
+        {
+            Assert.True(r.Success, r.Output);
+            Assert.Contains("fanns redan", r.Output);
+        });
+    }
 }

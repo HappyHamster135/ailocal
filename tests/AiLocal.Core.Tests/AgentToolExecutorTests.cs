@@ -184,7 +184,10 @@ public class AgentToolExecutorTests : IDisposable
         var result = await executor.ExecuteAsync(Call("run_command", new { command }), CancellationToken.None);
 
         Assert.False(result.IsError);
-        Assert.Contains(_workspace, result.Output, StringComparison.OrdinalIgnoreCase);
+        // v1.96: arbetsytans absoluta prefix RELATIVISERAS i utdatan (blir ".")
+        // så leverantörsmaskningen inte triggas - cwd:t bevisas av punkten.
+        Assert.Contains(".", result.Output);
+        Assert.DoesNotContain(_workspace, result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -198,7 +201,9 @@ public class AgentToolExecutorTests : IDisposable
             Call("run_command", new { command, workingDirectory = "subfolder" }), CancellationToken.None);
 
         Assert.False(result.IsError);
-        Assert.Contains(Path.Combine(_workspace, "subfolder"), result.Output, StringComparison.OrdinalIgnoreCase);
+        // v1.96: roten strippas ur utdatan -> cwd syns som "subfolder" relativt.
+        Assert.Contains("subfolder", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_workspace + Path.DirectorySeparatorChar, result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Regression: a relative read/write/list path in Full mode used
