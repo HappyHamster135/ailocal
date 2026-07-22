@@ -95,6 +95,56 @@ public partial class GameScaffoldService
         return [.. files];
     }
 
+    /// <summary>Plattformaren (Pixel Rush) i ren GDScript - porterad fran det
+    /// gamla C#/mono-kittet (v1.85) sa den kan headless-verifieras och fa
+    /// juice-passet som de andra kiten: gravitation + coyotetid + hoppbuffert,
+    /// 3 nivaer, mynt, patrullerande fiender med stamp, mal-flagga, HP,
+    /// svarighetsgrader, highscore, screenshake och partiklar.</summary>
+    internal static string[] ScaffoldGodotPlatformer(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Pixel Rush"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node2D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotPlatformerMain);
+        files.Add("Main.gd");
+        // click.wav ar hoppljudet (sfxr-kategorin "jump") - samma filnamn som
+        // ovriga kit sa kvalitetskontrakten (click/coin/hurt/win) haller.
+        foreach (var (name, category) in new[] { ("click.wav", "jump"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        var playerSheet = PixelAnimator.Build(prompt);
+        Write(root, "player.png", playerSheet.Png);
+        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", playerSheet));
+        files.Add("player.png"); files.Add("player_frames.tres");
+        var enemySheet = PixelAnimator.Build(prompt + " fiende monster");
+        Write(root, "enemy.png", enemySheet.Png);
+        Write(root, "enemy_frames.tres", GodotSpriteFrames.Build("enemy.png", enemySheet));
+        files.Add("enemy.png"); files.Add("enemy_frames.tres");
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotPlatformerDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Pixel Rush - 2D Platformer (Godot 4, GDScript)\n\n" +
+            "Komplett spelbar plattformare: 3 nivaer, mynt, patrullerande fiender\n" +
+            "(hoppa pa dem!), mal-flagga, HP, tre svarighetsgrader, paus och highscore.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n" +
+            "Webb (spela i webblasaren): `godot --headless --export-release \"Web\" build/web/index.html`\n\n" +
+            "Styrning: Pilar/A-D for rorelse, Space/W/Upp for att hoppa, Esc for paus,\n" +
+            "R for omstart efter vinst/forlust.\n\n" +
+            "Sprites genereras i kod (inga externa bilder) - byt tema via\n" +
+            "farger/former i Main.gd.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
     /// <summary>Racing: top-down varvracer med bilfysik, oval bana, checkpoints
     /// i ordning, varv, varvtimer och basta tid. Fyller genreluckan dar racing-
     /// prompts tidigare fick plattformaren.</summary>
@@ -1518,6 +1568,459 @@ func show_title() -> void:
 	state = "title"
 	queue_redraw()
 	show_overlay("GLANTAN", "Overlev %d vagor. WASD/pilar for att rora dig.\nRekord: %d" % [FINAL_WAVE, load_highscore()], true)
+
+func show_overlay(title: String, message: String, with_buttons: bool) -> void:
+	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas
+	shake = 0.0
+	close_overlay()
+	overlay = Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud.add_child(overlay)
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.65)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(bg)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.add_theme_constant_override("separation", 12)
+	overlay.add_child(box)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_font_size_override("font_size", 42)
+	box.add_child(t)
+	var m := Label.new()
+	m.text = message
+	m.add_theme_font_size_override("font_size", 16)
+	box.add_child(m)
+	if with_buttons:
+		for entry in [["Latt", 0], ["Medel", 1], ["Svar", 2]]:
+			var b := Button.new()
+			b.text = "Starta: " + str(entry[0])
+			var diff: int = entry[1]
+			b.pressed.connect(func():
+				play_sound("click")
+				new_game(diff))
+			box.add_child(b)
+
+func close_overlay() -> void:
+	if overlay:
+		overlay.queue_free()
+		overlay = null
+""";
+
+    static string GodotPlatformerDesignDoc(string prompt) =>
+        "# 2D Plattformare (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nHoppa, stampa och samla dig genom 3 nivaer till mal-flaggan.\n\n" +
+        "## Mekanik\n- **Rorelse:** vanster/hoger + hopp med gravitation, coyotetid och hoppbuffert (tight kansla)\n" +
+        "- **Variabelt hopp:** slapp knappen tidigt = kort hopp\n" +
+        "- **Fiender:** patrullerar; kontakt kostar HP (ododlighetsfonster efterat) - hoppa PA dem for att stampa (+20, studs)\n" +
+        "- **Mynt:** +10; **Mal-flaggan:** klarar nivan (+50)\n- **Fall:** utanfor skarmen kostar HP och ateruppstar vid nivastart\n" +
+        "- **Nivaer:** 3 st med okande layoutsvarighet och fiendefart (niva 2 har ett dodligt gap)\n" +
+        "- **Svarighetsgrader:** Latt/Medel/Svar paverkar HP och fiendefart\n- **Vinst:** klara niva 3; **Forlust:** 0 HP\n\n" +
+        "## Produktion\n- Titelskarm med svarighetsval, paus (Esc), vinst/forlust-overlay med omstart (R), highscore (user://)\n" +
+        "- Juice: screenshake, partikelskurar (hopp/landning/mynt/stamp/traff/mal), traff-blink och i-frames\n" +
+        "- Ljud: hopp, mynt, traff, seger (sfxr-wav, inga externa filer)\n- Sprites genereras i kod - inga externa bilder\n\n" +
+        "## Extension (tema-exempel)\n- Fler nivaer, rorliga plattformar, power-ups (dubbelhopp), boss pa niva 3, scrollande varld med Camera2D\n";
+
+    // ---- Main.gd: plattformare (Pixel Rush) --------------------------------
+    const string GodotPlatformerMain = """
+extends Node2D
+# Pixel Rush - komplett plattformargrund i ren GDScript: 3 nivaer, mynt,
+# patrullerande fiender (stampbara), mal-flagga, HP, highscore och juice.
+# BYT TEMA: farger/former i make_texture-anropen + texterna + nivadatan.
+
+const SAVE_PATH := "user://pixelrush_highscore.save"
+const FINAL_LEVEL := 3
+const GRAVITY := 1400.0
+const MOVE_SPEED := 300.0
+const JUMP_VELOCITY := -620.0
+
+var difficulty := 1
+var state := "title" # title | playing | paused | over
+var player: CharacterBody2D
+var enemies: Array = []   # [{body, min_x, max_x, dir}]
+var coins: Array = []
+var platforms: Array = []
+var goal: Sprite2D
+var level := 0
+var hp := 3
+var score := 0
+var invulnerable := 0.0
+var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
+var coyote := 0.0
+var jump_buffer := 0.0
+var jump_was_down := false
+var was_on_floor := false
+var spawn_point := Vector2(60, 540)
+var sky := Color(0.35, 0.55, 0.85)
+var hud: CanvasLayer
+var hud_label: Label
+var overlay: Control
+var snd := {}
+
+func _ready() -> void:
+	randomize()
+	for key in ["click","coin","hurt","win"]:
+		# Nullsakert fore forsta importen - se management-kitets kommentar.
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	hud = CanvasLayer.new()
+	add_child(hud)
+	hud_label = Label.new()
+	hud_label.position = Vector2(20, 14)
+	hud_label.add_theme_font_size_override("font_size", 18)
+	hud.add_child(hud_label)
+	show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+# C1 juice: en engangs-partikelskur. HUD/overlay ligger pa en CanvasLayer och
+# paverkas inte av att varldens Node2D (self) skakas.
+func spawn_burst(pos: Vector2, col: Color, count: int) -> void:
+	var p := CPUParticles2D.new()
+	p.position = pos
+	p.amount = count
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.lifetime = 0.5
+	p.spread = 180.0
+	p.initial_velocity_min = 70.0
+	p.initial_velocity_max = 180.0
+	p.gravity = Vector2(0, 300)
+	p.scale_amount_min = 2.0
+	p.scale_amount_max = 4.0
+	p.color = col
+	# C1: utan textur blir partiklarna en 1x1-quad och nastan osynliga.
+	p.texture = make_texture(6, Color(1, 1, 1), Color(1, 1, 1))
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+
+func make_texture(size: int, base: Color, accent: Color) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(base)
+	for x in range(size):
+		for y in range(size):
+			if x == 0 or y == 0 or x == size - 1 or y == size - 1:
+				img.set_pixel(x, y, accent)
+	return ImageTexture.create_from_image(img)
+
+func make_player() -> CharacterBody2D:
+	var body := CharacterBody2D.new()
+	var spr := AnimatedSprite2D.new()
+	spr.name = "Anim"
+	spr.sprite_frames = load("res://player_frames.tres")
+	spr.scale = Vector2(2, 2)
+	spr.play("idle")
+	body.add_child(spr)
+	var shape := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = Vector2(24, 24)
+	shape.shape = rect
+	body.add_child(shape)
+	return body
+
+# Fiender ar rena Node2D (ingen fysikkropp) - de blockerar aldrig spelaren;
+# all interaktion (traff/stamp) gors med avstandskontroller i loopen.
+func make_enemy() -> Node2D:
+	var n := Node2D.new()
+	var spr := AnimatedSprite2D.new()
+	spr.name = "Anim"
+	spr.sprite_frames = load("res://enemy_frames.tres")
+	spr.scale = Vector2(2, 2)
+	spr.play("walk")
+	n.add_child(spr)
+	return n
+
+func make_platform(r: Rect2) -> StaticBody2D:
+	var body := StaticBody2D.new()
+	body.position = r.get_center()
+	var shape := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = r.size
+	shape.shape = rect
+	body.add_child(shape)
+	var spr := Sprite2D.new()
+	spr.texture = make_texture(8, Color(0.35, 0.25, 0.2), Color(0.5, 0.8, 0.3))
+	spr.scale = Vector2(r.size.x / 8.0, r.size.y / 8.0)
+	body.add_child(spr)
+	add_child(body)
+	return body
+
+# ---------- nivadata ----------
+# Hopphojden ar ~137 px (v^2/2g) - alla plattformssteg ligger pa <= 120 px
+# sa varje niva ar bevisat klarbar. BYT TEMA/BANOR har.
+func level_data(n: int) -> Dictionary:
+	if n == 1:
+		return {
+			"plats": [Rect2(0, 600, 1152, 48), Rect2(150, 480, 220, 24), Rect2(450, 380, 200, 24), Rect2(760, 300, 200, 24), Rect2(950, 460, 180, 24)],
+			"coins": [Vector2(220, 444), Vector2(540, 344), Vector2(850, 264), Vector2(1030, 424), Vector2(640, 564)],
+			"enemies": [[Vector2(520, 576), 400.0, 720.0]],
+			"goal": Vector2(1090, 560),
+			"spawn": Vector2(60, 540),
+			"sky": Color(0.35, 0.55, 0.85)
+		}
+	if n == 2:
+		return {
+			"plats": [Rect2(0, 600, 400, 48), Rect2(752, 600, 400, 48), Rect2(430, 520, 140, 24), Rect2(600, 440, 140, 24), Rect2(430, 360, 140, 24), Rect2(600, 280, 140, 24), Rect2(850, 220, 200, 24)],
+			"coins": [Vector2(490, 484), Vector2(660, 404), Vector2(490, 324), Vector2(660, 244), Vector2(200, 564), Vector2(940, 564), Vector2(900, 184)],
+			"enemies": [[Vector2(200, 576), 60.0, 340.0], [Vector2(900, 576), 800.0, 1090.0]],
+			"goal": Vector2(1010, 180),
+			"spawn": Vector2(60, 540),
+			"sky": Color(0.85, 0.6, 0.4)
+		}
+	return {
+		"plats": [Rect2(0, 600, 1152, 48), Rect2(200, 490, 150, 24), Rect2(430, 490, 150, 24), Rect2(660, 490, 150, 24), Rect2(890, 490, 150, 24), Rect2(320, 380, 150, 24), Rect2(550, 380, 150, 24), Rect2(780, 380, 150, 24), Rect2(500, 270, 180, 24)],
+		"coins": [Vector2(270, 454), Vector2(500, 454), Vector2(730, 454), Vector2(960, 454), Vector2(390, 344), Vector2(620, 344), Vector2(850, 344), Vector2(590, 234)],
+		"enemies": [[Vector2(300, 576), 100.0, 500.0], [Vector2(800, 576), 600.0, 1050.0], [Vector2(620, 356), 560.0, 690.0]],
+		"goal": Vector2(580, 234),
+		"spawn": Vector2(60, 540),
+		"sky": Color(0.3, 0.3, 0.5)
+	}
+
+# ---------- flode ----------
+func new_game(diff: int) -> void:
+	difficulty = diff
+	hp = [5, 3, 2][diff]
+	score = 0
+	level = 0
+	state = "playing"
+	close_overlay()
+	next_level()
+
+func clear_entities() -> void:
+	for e in enemies:
+		e["body"].queue_free()
+	for c in coins:
+		c.queue_free()
+	for p in platforms:
+		p.queue_free()
+	if goal:
+		goal.queue_free()
+		goal = null
+	enemies = []
+	coins = []
+	platforms = []
+
+func next_level() -> void:
+	level += 1
+	if level > FINAL_LEVEL:
+		finish(true)
+		return
+	clear_entities()
+	var data := level_data(level)
+	sky = data["sky"]
+	queue_redraw()
+	for r in data["plats"]:
+		platforms.append(make_platform(r))
+	for cpos in data["coins"]:
+		var c := Sprite2D.new()
+		c.texture = make_texture(7, Color(0.95, 0.8, 0.2), Color(1, 1, 0.7))
+		c.scale = Vector2(2, 2)
+		c.position = cpos
+		add_child(c)
+		coins.append(c)
+	for def in data["enemies"]:
+		var body := make_enemy()
+		var pos: Vector2 = def[0]
+		body.position = pos
+		add_child(body)
+		enemies.append({"body": body, "min_x": def[1], "max_x": def[2], "dir": 1.0})
+	goal = Sprite2D.new()
+	goal.texture = make_texture(8, Color(0.2, 0.85, 0.4), Color(0.9, 1, 0.9))
+	goal.scale = Vector2(3, 5)
+	goal.position = data["goal"]
+	add_child(goal)
+	spawn_point = data["spawn"]
+	if player == null:
+		player = make_player()
+		add_child(player)
+	player.position = spawn_point
+	player.velocity = Vector2.ZERO
+	invulnerable = 0.0
+	var panim := player.get_node("Anim") as AnimatedSprite2D
+	if panim:
+		panim.visible = true
+		panim.modulate = Color.WHITE
+
+func finish(won: bool) -> void:
+	state = "over"
+	if won:
+		play_sound("win")
+	var best := load_highscore()
+	if score > best:
+		save_highscore(score)
+		best = score
+	show_overlay("DU VANN!" if won else "SLUTET", "Poang: %d   Rekord: %d\nR: spela igen" % [score, best], true)
+
+# ---------- highscore ----------
+func load_highscore() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func save_highscore(value: int) -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(value))
+
+# ---------- loop ----------
+func _physics_process(delta: float) -> void:
+	if state != "playing" or player == null:
+		return
+	# C1 juice: screenshake genom att flytta varldens Node2D en liten slump-
+	# forskjutning som avtar. Snapper tillbaka till noll nar den slocknat.
+	if shake > 0.0:
+		shake = move_toward(shake, 0.0, 32.0 * delta)
+		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+	elif position != Vector2.ZERO:
+		position = Vector2.ZERO
+	# ---- spelarfysik: gravitation, coyotetid, hoppbuffert, variabelt hopp ----
+	var ax := Input.get_axis("ui_left", "ui_right")
+	if ax == 0.0:
+		if Input.is_physical_key_pressed(KEY_A):
+			ax = -1.0
+		elif Input.is_physical_key_pressed(KEY_D):
+			ax = 1.0
+	player.velocity.x = ax * MOVE_SPEED
+	player.velocity.y = minf(player.velocity.y + GRAVITY * delta, 980.0)
+	var jump_down := Input.is_physical_key_pressed(KEY_SPACE) \
+		or Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)
+	if jump_down and not jump_was_down:
+		jump_buffer = 0.12
+	if not jump_down and jump_was_down and player.velocity.y < -220.0:
+		player.velocity.y = -220.0  # C1: slappt tidigt = kort hopp (variabel hojd)
+	jump_was_down = jump_down
+	coyote = 0.14 if player.is_on_floor() else maxf(coyote - delta, 0.0)
+	jump_buffer = maxf(jump_buffer - delta, 0.0)
+	if jump_buffer > 0.0 and coyote > 0.0:
+		player.velocity.y = JUMP_VELOCITY
+		jump_buffer = 0.0
+		coyote = 0.0
+		play_sound("click")
+		spawn_burst(player.position + Vector2(0, 20), Color(0.9, 0.9, 0.85), 6)  # C1: hoppdamm
+	player.move_and_slide()
+	var on_floor := player.is_on_floor()
+	if on_floor and not was_on_floor:
+		spawn_burst(player.position + Vector2(0, 20), Color(0.8, 0.75, 0.7), 8)  # C1: landningsdamm
+		shake = maxf(shake, 2.0)
+	was_on_floor = on_floor
+	var anim := player.get_node("Anim") as AnimatedSprite2D
+	if anim:
+		if absf(player.velocity.x) > 10.0:
+			anim.play("walk")
+			anim.flip_h = player.velocity.x < 0.0
+		else:
+			anim.play("idle")
+	if invulnerable > 0.0:
+		invulnerable -= delta
+		# C1 juice: spelaren blinkar + tonar tillbaka fran rott medan
+		# ododlighetsfonstret varar - visar ocksa att i-frames ar aktiva.
+		if anim:
+			anim.visible = fmod(invulnerable, 0.2) < 0.12
+			anim.modulate = anim.modulate.lerp(Color.WHITE, 6.0 * delta)
+			if invulnerable <= 0.0:
+				anim.visible = true
+				anim.modulate = Color.WHITE
+	# ---- fiender: patrull + stamp/traff ----
+	var speed := 46.0 + level * 10.0 + difficulty * 14.0
+	var alive: Array = []
+	for e in enemies:
+		var body: Node2D = e["body"]
+		body.position.x += e["dir"] * speed * delta
+		if body.position.x < e["min_x"]:
+			e["dir"] = 1.0
+		elif body.position.x > e["max_x"]:
+			e["dir"] = -1.0
+		var ea := body.get_node("Anim") as AnimatedSprite2D
+		if ea:
+			ea.flip_h = e["dir"] < 0.0
+		var to_player := player.position - body.position
+		var stomped := false
+		if absf(to_player.x) < 26.0 and absf(to_player.y) < 32.0:
+			if player.velocity.y > 120.0 and to_player.y < -8.0:
+				stomped = true  # spelaren faller ovanifran -> stamp
+				score += 20
+				player.velocity.y = -430.0  # studsen ar belonningen
+				play_sound("coin")
+				shake = maxf(shake, 5.0)  # C1 juice
+				spawn_burst(body.position, Color(0.9, 0.5, 0.9), 14)
+				body.queue_free()
+			elif invulnerable <= 0.0:
+				damage()
+				if state != "playing":
+					return
+		if not stomped:
+			alive.append(e)
+	enemies = alive
+	# ---- mynt ----
+	var remaining: Array = []
+	for c in coins:
+		if c.position.distance_to(player.position) < 30.0:
+			score += 10
+			play_sound("coin")
+			spawn_burst(c.position, Color(1, 0.9, 0.3), 12)  # C1 juice
+			shake = maxf(shake, 3.0)
+			c.queue_free()
+		else:
+			remaining.append(c)
+	coins = remaining
+	# ---- mal-flaggan ----
+	if goal and player.position.distance_to(goal.position) < 40.0:
+		score += 50
+		play_sound("coin")
+		shake = maxf(shake, 6.0)
+		spawn_burst(goal.position, Color(0.4, 1, 0.6), 20)  # C1 juice
+		next_level()
+		return
+	# ---- fall utanfor skarmen ----
+	if player.position.y > 720.0:
+		damage()
+		if state != "playing":
+			return
+		player.position = spawn_point
+		player.velocity = Vector2.ZERO
+	hud_label.text = "HP: %d   Poang: %d   Niva: %d/%d" % [hp, score, mini(level, FINAL_LEVEL), FINAL_LEVEL]
+
+func damage() -> void:
+	hp -= 1
+	invulnerable = 1.2
+	play_sound("hurt")
+	shake = 9.0  # C1 juice: kannbar traff
+	spawn_burst(player.position, Color(1, 0.3, 0.3), 18)
+	var anim := player.get_node("Anim") as AnimatedSprite2D
+	if anim:
+		anim.modulate = Color(1, 0.35, 0.35)  # C1 juice: spelaren blinkar rott
+	if hp <= 0:
+		finish(false)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		if state == "playing":
+			state = "paused"
+			show_overlay("PAUS", "Esc: fortsatt", false)
+		elif state == "paused":
+			state = "playing"
+			close_overlay()
+	if event is InputEventKey and event.pressed and event.keycode == KEY_R and state == "over":
+		new_game(difficulty)
+
+func _draw() -> void:
+	draw_rect(Rect2(0, 0, 1152, 648), sky)
+	draw_circle(Vector2(1010, 90), 42.0, Color(1, 0.92, 0.6))
+
+# ---------- overlays ----------
+func show_title() -> void:
+	state = "title"
+	queue_redraw()
+	show_overlay("PIXEL RUSH", "Na flaggan pa %d nivaer. Pilar/A-D: rorelse, Space/W: hopp.\nHoppa PA fiender for att stampa dem. Rekord: %d" % [FINAL_LEVEL, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas

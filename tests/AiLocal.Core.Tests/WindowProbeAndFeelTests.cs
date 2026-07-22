@@ -172,4 +172,42 @@ public class WindowProbeAndFeelTests
             try { Directory.Delete(parent, recursive: true); } catch { /* städning */ }
         }
     }
+
+    [Fact]
+    public async Task PlayAsync_PlattformarkitMotRiktigGodot_StartarOchSpelas()
+    {
+        // v1.85: plattformaren porterades fran C#/mono till GDScript - detta
+        // ar runtime-beviset att den STARTAR och gar att kora (samma
+        // regressionsskydd som 3D-kitet fick efter boot-radsbuggen: ett
+        // logikfel i _ready syns inte i headless-parsen).
+        var godot = ToolLocator.Find("godot");
+        if (godot is null || !File.Exists(godot) || !OperatingSystem.IsWindows()) return;
+
+        var parent = Path.Combine(Path.GetTempPath(), "ailocal-probe-plat-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(parent);
+        var scaffold = new GameScaffoldService().Scaffold("godot", "bygg ett 2d plattformsspel i godot", parent);
+        Assert.True(scaffold.Success, scaffold.Output);
+        var screenshot = Path.Combine(parent, "probe.png");
+
+        var psi = new ProcessStartInfo(godot)
+        {
+            Arguments = $"--path \"{scaffold.Path}\"",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        };
+        using var proc = Process.Start(psi)!;
+        try
+        {
+            var result = await GodotWindowProbe.PlayAsync(proc, screenshot, CancellationToken.None);
+            Assert.True(result.Ran, result.Notes); // startar, visar fonster, kraschar inte
+            Assert.True(File.Exists(screenshot), "plattformarkitet lamnade ingen dump: " + result.Notes);
+            Assert.True(new FileInfo(screenshot).Length > 1000, "dumpen misstänkt liten");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(); } catch { /* redan död */ }
+            await Task.Delay(300);
+            try { Directory.Delete(parent, recursive: true); } catch { /* städning */ }
+        }
+    }
 }

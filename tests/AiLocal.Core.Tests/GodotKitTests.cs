@@ -95,12 +95,29 @@ public class GodotKitTests
     }
 
     [Fact]
-    public void PlattformareIGodot_BehallerPixelRush()
+    public void PlattformareIGodot_FarPixelRushKitetIGdscript()
     {
+        // v1.85: plattformaren ar GDScript som de andra kiten (C#/mono-kittet
+        // kunde aldrig headless-verifieras och fick aldrig juice-passet).
         var (root, _) = ScaffoldTo("bygg ett plattformsspel i godot");
         try
         {
             Assert.Contains("Pixel Rush", File.ReadAllText(Path.Combine(root, "README.md")));
+            Assert.Contains("Plattformare", File.ReadAllText(Path.Combine(root, "DESIGN.md")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            // Produktionsribban: riktig plattformsfysik, stamp, 3 nivaer, highscore.
+            Assert.Contains("JUMP_VELOCITY", script);
+            Assert.Contains("coyote", script);
+            Assert.Contains("FINAL_LEVEL", script);
+            Assert.Contains("move_and_slide", script);
+            Assert.Contains("load_highscore", script);
+            // C1 (game-feel/juice): screenshake + partiklar inbakat i golvet.
+            Assert.Contains("CPUParticles2D", script);
+            Assert.Contains("spawn_burst", script);
+            Assert.Contains("shake", script);
+            // Inga C#-filer kvar - mono-beroendet ar borta.
+            Assert.Empty(Directory.GetFiles(root, "*.cs"));
+            AssertKitComplete(root);
         }
         finally { Cleanup(root); }
     }
@@ -175,7 +192,8 @@ public class GodotKitTests
             "bygg ett fotbolls management spel i godot",
             "top-down äventyr i godot där man överlever vågor",
             "bygg ett racingspel i godot med bilar och tre varv",   // C1 juice: Varvet
-            "bygg ett 3d samlarspel i godot"                          // C1 juice: Kuben (CPUParticles3D)
+            "bygg ett 3d samlarspel i godot",                         // C1 juice: Kuben (CPUParticles3D)
+            "bygg ett 2d plattformsspel i godot"                      // v1.85: Pixel Rush i GDScript
         })
         {
             var (root, _) = ScaffoldTo(prompt);

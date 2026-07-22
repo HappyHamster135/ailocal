@@ -20,19 +20,20 @@ public class GameScaffoldCompleteTests
             var (ok, _, _, files, output) = new GameScaffoldService().Scaffold("godot", "2d platformer", dir);
             Assert.True(ok, output);
             Assert.Contains("project.godot", files);
-            Assert.Contains("Game.cs", files);
-            Assert.Contains("Player.cs", files);
-            Assert.Contains("Enemy.cs", files);
-            Assert.Contains("Coin.cs", files);
-            Assert.Contains("Game.tscn", files);
-            Assert.Contains("Player.tscn", files);
-            Assert.Contains("Enemy.tscn", files);
-            Assert.Contains("Coin.tscn", files);
+            // v1.85: ren GDScript som de andra kiten - inga C#-filer (mono-
+            // beroendet borta; kittet kan nu headless-verifieras + har juice).
+            Assert.Contains("Main.gd", files);
+            Assert.Contains("Main.tscn", files);
+            Assert.Contains("DESIGN.md", files);
+            Assert.DoesNotContain(files, f => f.EndsWith(".cs"));
             // Procedural sound effects (zero downloads).
-            Assert.True(File.Exists(Path.Combine(dir, "jump.wav")));
+            Assert.True(File.Exists(Path.Combine(dir, "click.wav")));
             Assert.True(File.Exists(Path.Combine(dir, "coin.wav")));
             Assert.True(File.Exists(Path.Combine(dir, "hurt.wav")));
             Assert.True(File.Exists(Path.Combine(dir, "win.wav")));
+            // Animerade sprites (PixelAnimator -> SpriteFrames) refereras och finns.
+            Assert.True(File.Exists(Path.Combine(dir, "player_frames.tres")));
+            Assert.True(File.Exists(Path.Combine(dir, "enemy_frames.tres")));
             // App icon + it is wired into project.godot.
             Assert.True(File.Exists(Path.Combine(dir, "icon.ico")));
             AssertValidIco(Path.Combine(dir, "icon.ico"));
@@ -43,13 +44,8 @@ public class GameScaffoldCompleteTests
             Assert.Contains("[preset.0]", preset);
             Assert.Contains("name=\"Windows Desktop\"", preset);
             Assert.Contains("application/icon=\"res://icon.ico\"", preset);
-            // The C# scripts must be syntactically valid.
-            AssertCSharpValid(Path.Combine(dir, "Game.cs"));
-            AssertCSharpValid(Path.Combine(dir, "Player.cs"));
-            AssertCSharpValid(Path.Combine(dir, "Enemy.cs"));
-            AssertCSharpValid(Path.Combine(dir, "Coin.cs"));
-            // project.godot wires the icon via config/icon (preset lives in export_presets.cfg).
-            Assert.Contains("config/icon=\"res://icon.ico\"", File.ReadAllText(Path.Combine(dir, "project.godot")));
+            // GDScript-syntaxen verifieras av riktig godot i GodotKitTests
+            // (gated headless) - har lases filstrukturen och produktionsbiten.
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
