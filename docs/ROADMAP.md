@@ -171,9 +171,20 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > usageByModel + Max$; usage-lösa räknas kvar i fotnoten; bildGENERERING
 > fortsatt oprissatt - ärligt). v1.92 auto-återupptagning som OPT-IN-inställning
 > (default AV; ETT bygge, bara omstartsdödade, 48h-tak, kedjnings-skydd, alla
-> 8 kopplingspunkter). Kvar därefter: APK testad på riktig enhet/emulator
-> (ingen enhet på dev-maskinen), release-signerad butiks-APK (ägarens nyckel),
-> prissatt bildgenerering.
+> 8 kopplingspunkter).
+>
+> **APK:n EMULATORTESTAD (2026-07-22):** Android 34-emulator provisionerades
+> via samma SDK (sdkmanager emulator + system-image; AVD-configens
+> image.sysdir behövde rättas - avdmanager i icke-kanonisk layout skriver
+> dubblad väg). x86_64-APK:n installerades, startades och VERIFIERADES med
+> skärmdumpar: titelskärm (namn/instruktioner/svårighetsknappar/Rekord: 0),
+> tryck på "Starta: Lätt" → nivå 1 renderar exakt per nivådatan med HUD
+> "HP: 5" (rätt svårighet), spelaren SVARAR på input och fienden patrullerar.
+> ÄRLIGT FYND från testet: kitet är tangentbordsstyrt - på en riktig telefon
+> utan tangentbord behövs TOUCHKONTROLLER (virtuella knappar) innan spelet är
+> mobilspelbart; layouten är också desktop-formad (1152x648 utan stretch).
+> Kvar därefter: touchkontroller i kiten, riktig fysisk enhet, release-
+> signerad butiks-APK (ägarens nyckel), prissatt bildgenerering.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
