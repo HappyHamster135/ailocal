@@ -238,6 +238,42 @@ public static class OverseerRole
             IHttpClientFactory hf, CancellationToken ct) =>
             ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/cluster/projects", null, ct));
 
+        // Operatörspanelerna bor på Hosten: kontorsvyn, notiser, mål-backlog,
+        // statistik, kön och rollerna. Utan proxy visades de FALSKT TOMMA här
+        // ("Inga workers anslutna" trots full flotta) - panelernas best-effort-
+        // catch svalde 404:orna tyst. Samma regel som alltid: varje Host-
+        // endpoint dashboarden anropar MÅSTE proxas i Overseer.
+        app.MapGet("/api/office", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/office", null, ct));
+        app.MapGet("/api/notices", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/notices", null, ct));
+        app.MapDelete("/api/notices", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Delete, "/api/notices", null, ct));
+        app.MapGet("/api/backlog", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/backlog", null, ct));
+        app.MapPost("/api/backlog/{id}/start", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, $"/api/backlog/{Esc(id)}/start", null, ct));
+        app.MapDelete("/api/backlog/{id}", (string id, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Delete, $"/api/backlog/{Esc(id)}", null, ct));
+        app.MapGet("/api/stats", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/stats", null, ct));
+        app.MapGet("/api/queue", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/queue", null, ct));
+        app.MapGet("/api/roles", (HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Get, "/api/roles", null, ct));
+        app.MapPost("/api/roles", (System.Text.Json.JsonElement roles, HostLocator locator, HostRegistry hosts,
+            IHttpClientFactory hf, CancellationToken ct) =>
+            ProxyPrimary(locator, hosts, hf, HttpMethod.Post, "/api/roles", roles, ct));
+
         // Sessioner på Host-datorn: hela /api/sessions-ytan proxas till
         // primära Hosten (buffrat för CRUD, strömmande för /run) så operatören
         // kan skapa och köra sessioner i mappar PÅ HOST-MASKINEN från sitt

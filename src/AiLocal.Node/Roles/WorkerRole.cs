@@ -488,7 +488,13 @@ public static class WorkerRole
                 catch { /* prissättning faller tillbaka på Anthropic-listan */ }
             var spentUsd = 0m;
 
-            var loop = new AgentLoop(async (r, c) =>
+            // Uppdragets ENDA väg till modellen: ensam agent, team-spår,
+            // producent-roller, regissör och fixrundor ska ALLA gå genom denna
+            // delegat - anrop utanför den hamnar utanför både kostnads-
+            // redovisningen och Max$-taket (granskningen v1.83 hittade att
+            // team-läget och regissörsanropen gick förbi: Max$ bet inte på
+            // spåren och operatören visades en kostnad som saknade merparten).
+            Func<ChatRequest, CancellationToken, Task<ProviderResponse>> completeAccounted = async (r, c) =>
             {
                 var resp = await provider.CompleteAsync(r, c);
                 if (resp.IsSuccess && resp.Response is { IsLocal: false } chat && !string.IsNullOrWhiteSpace(chat.Model))
@@ -502,9 +508,10 @@ public static class WorkerRole
                                 capCatalog).Total;
                     }
                 return resp;
-            }, executor,
-                maxCostUsd > 0m ? maxCostUsd : null,
-                maxCostUsd > 0m ? () => { lock (usageLock) return spentUsd; } : null);
+            };
+            decimal? capLimit = maxCostUsd > 0m ? maxCostUsd : null;
+            Func<decimal>? capSpent = maxCostUsd > 0m ? () => { lock (usageLock) return spentUsd; } : null;
+            var loop = new AgentLoop(completeAccounted, executor, capLimit, capSpent);
 
             // Deterministic floor: a BUILD assignment on an EMPTY workspace
             // gets its scaffold created by the node itself, up-front - weak
@@ -712,7 +719,7 @@ public static class WorkerRole
                             "Studiominne (" + directorGenre + "): " + string.Join(" · ", pastLessons));
                     await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
                     var contract = await DirectorPass.RunAsync(
-                        req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, provider.CompleteAsync, ct,
+                        req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, completeAccounted, ct,
                         engine: GameBuilder.DetectEngine(directorRoot),
                         inspirationSeeds: ideaSeeds, pastLessons: pastLessons);
                     contractCriteria = contract.Criteria;
@@ -887,9 +894,10 @@ public static class WorkerRole
                 }
                 var teamResult = await TeamBuild.RunAsync(
                     assignmentText, req.TeamSize.Value, workspaceRoot, accessLevel, teamHint,
-                    system, provider.CompleteAsync, BuildExecutor, teamEmit,
+                    system, completeAccounted, BuildExecutor, teamEmit,
                     gitService, new GitIsolationService(gitService), ct,
                     architectHint: settings.Worker.ModelTiers.Complex,
+                    maxCostUsd: capLimit, spentSoFar: capSpent,
                     // Multi-modell: hårda spår får den starka tiern, enkla den
                     // billiga - olika modeller jobbar mot samma mål på EN maskin.
                     modelForTrack: difficulty => difficulty switch
@@ -998,7 +1006,7 @@ public static class WorkerRole
                         (isIteration ? "oberoende REGRESSIONSgranskning (håller befintliga kontraktspunkter)" : "oberoende granskning (kontrakt + uppenbara fel)")
                         + (reviewHint is null ? "" : $" - modell {reviewHint}"));
                     var unmet = await DirectorPass.ReviewAsync(
-                        contractCriteria, findings.ProjectRoot ?? workspaceRoot, provider.CompleteAsync, ct,
+                        contractCriteria, findings.ProjectRoot ?? workspaceRoot, completeAccounted, ct,
                         reviewModelHint: reviewHint);
                     contractUnmet = unmet.Count;
                     await EmitStep("contract_status",

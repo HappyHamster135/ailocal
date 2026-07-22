@@ -47,7 +47,12 @@ public static class TeamBuild
         GitIsolationService isolation,
         CancellationToken ct,
         string? architectHint = null,
-        Func<string, string?>? modelForTrack = null)
+        Func<string, string?>? modelForTrack = null,
+        // Max$-taket (B5): spårens och redo-rundornas looppar måste få samma
+        // tak som huvudflödets loop - annars är taket dött för hela team-
+        // bygget (granskningen v1.83). Null = ingen gräns, som förr.
+        decimal? maxCostUsd = null,
+        Func<decimal>? spentSoFar = null)
     {
         teamSize = Math.Clamp(teamSize, 2, MaxTeamSize);
         // Per-spår-modell: hårda spår får den starka modellen, enkla en billig -
@@ -115,7 +120,7 @@ public static class TeamBuild
 
         await Task.WhenAll(runs.Where(r => r.Iso is not null).Select(async run =>
         {
-            var loop = new AgentLoop(complete, executorFor(run.Iso!.WorktreePath));
+            var loop = new AgentLoop(complete, executorFor(run.Iso!.WorktreePath), maxCostUsd, spentSoFar);
             Func<AgentStep, Task> trackEmit = step =>
                 emit(new AgentStep(step.Kind, $"[{run.Track.Title}] {step.Detail}"));
             var trackModel = ModelFor(run.Track);
@@ -212,7 +217,7 @@ public static class TeamBuild
         {
             if (ct.IsCancellationRequested) break;
             await emit(new AgentStep("tool_call", $"gör om spåret \"{track.Title}\" ovanpå det mergade projektet"));
-            var loop = new AgentLoop(complete, executorFor(workspaceRoot));
+            var loop = new AgentLoop(complete, executorFor(workspaceRoot), maxCostUsd, spentSoFar);
             var redoModel = ModelFor(track);
             var result = await loop.RunAsync(
                 RedoPrompt(assignment, track), accessLevel, redoModel,
