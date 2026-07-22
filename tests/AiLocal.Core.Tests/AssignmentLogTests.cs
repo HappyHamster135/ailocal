@@ -23,6 +23,50 @@ public class AssignmentLogTests : IDisposable
     }
 
     [Fact]
+    public void AterupptagningsData_OverleverNodomstart()
+    {
+        // v1.87 (C5+): kärnfallet - noden dör MITT i bygget. Projektmappen
+        // sattes så fort den var känd (SetProject), så omstartsmarkeringen
+        // (Running -> Failed) behåller den och Återuppta-knappen kan visas.
+        var log = new AssignmentLog(LogPath);
+        var entry = log.Begin("bygg ett plattformsspel", "NOD-A");
+        log.SetProject(entry, "pixel-rush");
+        // ingen Complete - noden "dör" här; ny instans = omstart
+
+        var reloaded = new AssignmentLog(LogPath);
+        var e = Assert.Single(reloaded.Snapshot());
+        Assert.Equal("Failed", e.State);            // ärlig omstartsmarkering
+        Assert.Equal("pixel-rush", e.ProjectRel);   // återupptagningsdatan kvar
+    }
+
+    [Fact]
+    public void Complete_MedProjectRel_SkriverOchSnapshotBevarar()
+    {
+        var log = new AssignmentLog(LogPath);
+        var entry = log.Begin("bygg ett spel", "NOD-A");
+        log.Complete(entry, success: false, "grinden underkände", null, projectRel: "spelet");
+        Assert.Equal("spelet", Assert.Single(log.Snapshot()).ProjectRel);
+    }
+
+    [Theory]
+    [InlineData("sub/spel", "sub/spel")]     // undermapp -> rel
+    [InlineData(".", ".")]                   // projektet I roten
+    [InlineData(null, null)]                 // okänd rot -> null
+    public void SafeProjectRel_InomArbetsytan(string? sub, string? expected)
+    {
+        var root = _dir;
+        var project = sub is null ? null : Path.GetFullPath(Path.Combine(root, sub));
+        Assert.Equal(expected, AiLocal.Node.Roles.WorkerRole.SafeProjectRel(root, project));
+    }
+
+    [Fact]
+    public void SafeProjectRel_UtanforArbetsytan_GerNull()
+    {
+        // En logg-post får aldrig peka utåt - traversal-vakten.
+        Assert.Null(AiLocal.Node.Roles.WorkerRole.SafeProjectRel(_dir, Path.GetTempPath()));
+    }
+
+    [Fact]
     public void BeginStepComplete_RoundTrips_NewestFirst()
     {
         var log = new AssignmentLog(LogPath);

@@ -716,6 +716,10 @@ public static class WorkerRole
             if (buildIntent)
             {
                 var directorRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
+                // v1.87 (C5+): logga projektmappen SÅ FORT den är känd - ett
+                // avbrutet bygge (nodomstart/krasch) kan då återupptas mot
+                // samma projekt via Återuppta-knappen i historiken.
+                assignmentLog.SetProject(logEntry, SafeProjectRel(workspaceRoot, directorRoot));
                 if (!DirectorPass.AlreadyContracted(directorRoot))
                 {
                     // Idéverkstaden: 2-3 slumpade genrefrön per körning gör
@@ -1186,7 +1190,8 @@ public static class WorkerRole
                     replayPath = "/api/preview/" + Path.GetRelativePath(workspaceRoot, replay).Replace('\\', '/');
             }
 
-            assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath);
+            assignmentLog.Complete(logEntry, result.Success, result.FinalAnswer, previewPath, artifactPath,
+                projectRel: SafeProjectRel(workspaceRoot, findings?.ProjectRoot ?? ProjectRootDetector.Detect(workspaceRoot)));
             logCompleted = true;
 
             // B5: uppskatta uppdragets kostnad (Anthropic + OpenRouter-pris) och
@@ -1430,6 +1435,20 @@ public static class WorkerRole
                 latest?.Clean,
                 latest?.Label);
         }).OrderByDescending(p => p.LastModified).ToList();
+    }
+
+    /// <summary>v1.87: projektmappens relativa väg för uppdragsloggen (så ett
+    /// avbrutet bygge kan återupptas). Null om roten är okänd eller ligger
+    /// UTANFÖR arbetsytan - en logg-post får aldrig peka utåt.</summary>
+    internal static string? SafeProjectRel(string workspaceRoot, string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return null;
+        try
+        {
+            var rel = Path.GetRelativePath(workspaceRoot, projectRoot).Replace('\\', '/');
+            return rel.StartsWith("..") || Path.IsPathRooted(rel) ? null : rel;
+        }
+        catch { return null; }
     }
 
     /// <summary>Resolves a project's rel path against the workspace with a

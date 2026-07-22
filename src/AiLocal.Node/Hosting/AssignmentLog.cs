@@ -20,6 +20,10 @@ public sealed class AssignmentLogEntry
     public string? FinalAnswer { get; set; }
     public string? PreviewPath { get; set; }
     public string? ArtifactPath { get; set; }
+    /// <summary>v1.87 (C5+): projektmappen (relativ arbetsytan) körningen
+    /// jobbade i - sätts så fort projektroten är känd, så ett AVBRUTET bygge
+    /// (nodomstart/krasch) kan återupptas mot samma projekt och kontrakt.</summary>
+    public string? ProjectRel { get; set; }
 }
 
 /// <summary>
@@ -95,7 +99,20 @@ public sealed class AssignmentLog
         }
     }
 
-    public void Complete(AssignmentLogEntry entry, bool success, string? finalAnswer, string? previewPath, string? artifactPath = null)
+    /// <summary>Sätts så fort projektroten är känd (INTE först vid Complete) -
+    /// annars saknar just de avbrutna körningarna, de som behöver återupptas,
+    /// sin projektmapp.</summary>
+    public void SetProject(AssignmentLogEntry entry, string? projectRel)
+    {
+        if (string.IsNullOrWhiteSpace(projectRel)) return;
+        lock (_lock)
+        {
+            entry.ProjectRel = projectRel;
+            Save();
+        }
+    }
+
+    public void Complete(AssignmentLogEntry entry, bool success, string? finalAnswer, string? previewPath, string? artifactPath = null, string? projectRel = null)
     {
         lock (_lock)
         {
@@ -104,6 +121,7 @@ public sealed class AssignmentLog
             entry.FinalAnswer = finalAnswer;
             entry.PreviewPath = previewPath;
             entry.ArtifactPath = artifactPath;
+            if (!string.IsNullOrWhiteSpace(projectRel)) entry.ProjectRel = projectRel;
             Save();
         }
     }
@@ -128,7 +146,8 @@ public sealed class AssignmentLog
                     Steps = [.. e.Steps],
                     FinalAnswer = e.FinalAnswer,
                     PreviewPath = e.PreviewPath,
-                    ArtifactPath = e.ArtifactPath
+                    ArtifactPath = e.ArtifactPath,
+                    ProjectRel = e.ProjectRel
                 })
                 .ToList();
         }

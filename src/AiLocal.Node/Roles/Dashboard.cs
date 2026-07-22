@@ -5613,6 +5613,8 @@ internal static class Dashboard
               content: e.FinalAnswer || '',
               previewPath: e.PreviewPath || null,
               artifactPath: e.ArtifactPath || null,
+              projectRel: e.ProjectRel || null,
+              prompt: e.Prompt || '',
               startedAt: e.State === 'Running' && e.StartedAt ? new Date(e.StartedAt).getTime() : null
             });
           });
@@ -6083,6 +6085,12 @@ internal static class Dashboard
           const preview = (!running && (playLink || artifactLink))
             ? `<div class="msg-preview">${playLink}${artifactLink}</div>`
             : '';
+          // v1.87 (C5+): ett avbrutet/misslyckat bygge med känd projektmapp kan
+          // ÅTERUPPTAS - ny körning mot SAMMA projekt; kontinuitetsbriefen och
+          // DESIGN.md-kontraktet gör att den fortsätter i stället för börjar om.
+          const resume = (!running && m.state === 'Failed' && m.fromLog && m.projectRel)
+            ? `<div class="msg-preview"><button class="mini-btn" data-resume-rel="${esc(m.projectRel)}" data-resume-prompt="${esc(trunc(m.prompt || '', 600))}">Återuppta bygget</button></div>`
+            : '';
           // B3: kort speltest-repris (animerad PNG - animeras av sig sjalv i
           // <img>). Visas bara nar sonden faktiskt spelade in en.
           const replay = (!running && m.replayPath)
@@ -6124,6 +6132,7 @@ internal static class Dashboard
             ${milestone}
             ${answer}
             ${preview}
+            ${resume}
             ${replay}
             ${cost}
             ${!running && m.content ? msgActionsHtml : ''}
@@ -6705,6 +6714,21 @@ internal static class Dashboard
         if (projScopeLocal) projScopeLocal.onclick = () => setProjectScope('local');
         const projScopeCluster = $('projScopeCluster');
         if (projScopeCluster) projScopeCluster.onclick = () => setProjectScope('cluster');
+
+        // Återuppta-knappen (v1.87): nytt uppdrag mot SAMMA projektmapp med en
+        // resume-prompt - kontinuitetsbriefen + DESIGN.md-kontraktet tar vid.
+        // Eventdelegering (knappen byggs om vid varje render, som milstolparna).
+        document.addEventListener('click', e => {
+          const resumeBtn = e.target.closest('[data-resume-rel]');
+          if (!resumeBtn) return;
+          const orig = resumeBtn.dataset.resumePrompt || '';
+          const text = 'Återuppta det avbrutna bygget i den här projektmappen: läs DESIGN.md '
+            + '(leveranskontraktet) och den befintliga koden, kör verify, och slutför det som '
+            + 'återstår mot kontraktet - börja INTE om från noll.'
+            + (orig ? '\n\nUrsprungligt uppdrag: ' + orig : '');
+          switchView('delegate');
+          runPlanSubtask({ title: 'Återuppta bygget' }, text, $('workerSelect')?.value || null, null, resumeBtn.dataset.resumeRel);
+        });
 
         // Milstolpsknapparna byggs om vid varje render - eventdelegering på
         // dokumentet i stället för omkoppling per render.
