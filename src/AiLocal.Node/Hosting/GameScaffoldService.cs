@@ -158,6 +158,8 @@ public sealed partial class GameScaffoldService
             return ScaffoldGodotRacing(root, prompt);
         if (genre == "puzzle")
             return ScaffoldGodotPuzzle(root, prompt);
+        if (genre == "artillery")
+            return ScaffoldGodotArtillery(root, prompt);
 
         // Plattformaren (Pixel Rush) - sedan v1.85 ren GDScript som de andra
         // kiten, sa den headless-verifieras och har juice-passet. Det gamla

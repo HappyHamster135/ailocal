@@ -194,6 +194,21 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > ribban fick Mobile-raden. Bonusfynd från skarpt speltest: one_way_collision
 > på plattformarna (huvuddunk-fixen, klassisk plattformare). Kvar: riktig
 > fysisk enhet, release-signerad butiks-APK, prissatt bildgenerering.
+>
+> **v1.94–v1.98 (alla KLARA):** v1.94 KOSTNADSSTYRNING - inget kodspår får
+> auto-välja Anthropic/dyra modeller (billig-först-prioritet, healade lagrade
+> rutter, openrouter-fallback); STÅENDE REGEL. v1.95 teamläget robust (worktree-
+> stängsel även för run_command, capped-spår med commits mergas, [ADDRESS]-
+> vakter). v1.96 sex luckor (relativa vägar dödar maskering vid källan, session-
+> tips → delegera, GdScript-lint, placeholder-vakt, provisioneringslås, Bygg
+> APK-knapp). v1.97 kreativ regissör 2.0 (genretänk + förebilder + kreativ
+> vinkel per körning + genre-formad fallback). v1.98 KANONADEN - artillerikit
+> (ShellShock Live/Worms-klassen): turbaserad duell mot AI-stege (Rekryten/
+> Kaptenen/Generalen med minne + provskjutning), FÖRSTÖRBAR pixelterräng med
+> kratrar, vind per tur, 3 vapen, fallskada, segersvit-highscore, touch. Första
+> versus-kittet - stänger formgapet "alla kit var ensam progression". Visuellt
+> verifierat i skarp körning: krater vid träff, AI träffar tillbaka, vind
+> växlar. 7 Godot-kit totalt.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

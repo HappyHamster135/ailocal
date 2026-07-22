@@ -316,6 +316,8 @@ public static class DirectorPass
                 "Minst 5 brädor/nivåer med stigande svårighet där nya moment introduceras",
             "rpg" or "roguelike" or "shooter" =>
                 "Minst 3 vågor/zoner med stigande svårighet och nya fiendetyper per steg",
+            "artillery" =>
+                "En motståndarstege med minst 3 namngivna motståndare med stigande träffsäkerhet/HP och egen personlighet",
             _ =>
                 "Minst 3 handbyggda banor/nivåer med stigande svårighetsgrad och egen karaktär",
         };

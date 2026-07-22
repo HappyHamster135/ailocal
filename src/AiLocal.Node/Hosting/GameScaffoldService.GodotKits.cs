@@ -145,6 +145,46 @@ public partial class GameScaffoldService
         return [.. files];
     }
 
+    /// <summary>Artilleri/duell (v1.98, ShellShock Live/Worms-klassen): tur-
+    /// baserad ballistik mot AI-motstandare pa FORSTORBAR terrang - vind,
+    /// kratrar, tre vapen, motstandarstege med stigande traffsakerhet.
+    /// Fyller den storsta formluckan: alla tidigare kit var ensamspelare-
+    /// progression; detta ar versus-golvet.</summary>
+    internal static string[] ScaffoldGodotArtillery(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Kanonaden"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node2D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotArtilleryMain);
+        files.Add("Main.gd");
+        foreach (var (name, category) in new[] { ("click.wav", "shoot"), ("coin.wav", "powerup"), ("hurt.wav", "explosion"), ("win.wav", "win") })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed: 7));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotArtilleryDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Kanonaden - Artilleriduell (Godot 4, GDScript)\n\n" +
+            "Komplett spelbar artilleriduell i ShellShock Live/Worms-klassen:\n" +
+            "turbaserad ballistik mot AI, FORSTORBAR terrang med kratrar, vind,\n" +
+            "tre vapen med ammunition, motstandarstege med stigande traffsakerhet,\n" +
+            "fallskada, highscore (segersvit), paus och omstart.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Styrning: Vanster/Hoger vinkel, Upp/Ned kraft, Space eldar,\n" +
+            "1-3 byter vapen, Esc pausar. Grafiken ritas i kod - byt tema via\n" +
+            "farger/varden i Main.gd.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
     /// <summary>Racing: top-down varvracer med bilfysik, oval bana, checkpoints
     /// i ordning, varv, varvtimer och basta tid. Fyller genreluckan dar racing-
     /// prompts tidigare fick plattformaren.</summary>
@@ -2242,6 +2282,593 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 				play_sound("click")
 				new_game(diff))
 			box.add_child(b)
+
+func close_overlay() -> void:
+	if overlay:
+		overlay.queue_free()
+		overlay = null
+""";
+
+    static string GodotArtilleryDesignDoc(string prompt) =>
+        "# Artilleriduell (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nTurbaserad artilleriduell i ShellShock Live/Worms-klassen: sikta med vinkel+kraft,\n" +
+        "kompensera for vinden, sprang kratrar i den FORSTORBARA terrangen och besegra\n" +
+        "en stege av allt traffsakrare AI-motstandare.\n\n" +
+        "## Mekanik\n- **Turordning:** du skjuter, sedan AI:n - vinden slumpas om varje tur och visas i HUD:en\n" +
+        "- **Ballistik:** projektiler med gravitation + vindavdrift; siktlinje visar de forsta metrarna\n" +
+        "- **Forstorbar terrang:** varje traff spranger en krater (pixelbaserad terrang); tankar faller nar marken forsvinner (fallskada!)\n" +
+        "- **Tre vapen:** Granat (standard), Storbomb (storre krater, begransad ammo), Trippel (tre spridda skott) - byt med 1-3\n" +
+        "- **Motstandarstege:** Rekryten -> Kaptenen -> Generalen, stigande traffsakerhet och HP; besegra alla tre for att vinna\n" +
+        "- **AI:** provskjuter kandidater mot din position och lar sig mellan skotten; siktfel krymper per niva\n" +
+        "- **Vinst/forlust:** motstandarens HP 0 = nasta duell; din HP 0 = game over; highscore = langsta segersvit (user://)\n\n" +
+        "## Produktion\n- Titelskarm med instruktioner, paus (Esc), game over med omstart (R), segersvit sparad\n" +
+        "- Juice: screenshake skalad efter smallen, kraterpartiklar, mynningsflamma, rekyl, projektilspar, HP-blink\n" +
+        "- Ljud: skott, explosion, vapenbyte, seger (sfxr-wav)\n- Touchkontroller (runtime-gatade): vinkel/kraft/ELD/VAPEN\n- All grafik ritas i kod - inga externa bilder\n\n" +
+        "## Extension (tema-exempel)\n- Upplasbara vapen mellan dueller, terrang-teman per motstandare, skoldar,\n  bransle for att flytta tanken, 2 spelare hotseat, rikoschett-vapen\n";
+
+    // ---- Main.gd: artilleri (Kanonaden) ------------------------------------
+    const string GodotArtilleryMain = """
+extends Node2D
+# Kanonaden - turbaserad artilleriduell pa forstorbar terrang (ShellShock
+# Live/Worms-klassen). BYT TEMA: farger, terranggenerering och vapenlistan.
+
+const SAVE_PATH := "user://kanonaden_svit.save"
+const W := 1152
+const H := 648
+const GRAVITY := 240.0
+const WIND_DRIFT := 0.55
+
+var state := "title" # title | aim | fly | over
+var terrain_img: Image
+var terrain_tex: ImageTexture
+var terrain_sprite: Sprite2D
+var wind := 0.0
+var opponent_index := 0
+var streak := 0
+var shake := 0.0
+
+# Tank-data: [x, y, hp, max_hp]-ordbocker - ritas i _draw, ingen fysikkropp.
+var player := {}
+var enemy := {}
+var player_turn := true
+var aim_angle := 45.0
+var aim_power := 62.0
+var player_aim := Vector2(45.0, 62.0)
+var aim_grace := 0.0
+var recoil := 0.0
+
+# Projektil under flygning (tom = ingen). Trippel skjuter en kedja.
+var shots_queue: Array = []
+var proj := {}
+var trail: Array = []
+
+var weapons: Array = [
+	{"namn": "Granat", "radie": 26.0, "dmg": 45.0, "ammo": -1},
+	{"namn": "Storbomb", "radie": 44.0, "dmg": 62.0, "ammo": 2},
+	{"namn": "Trippel", "radie": 18.0, "dmg": 26.0, "ammo": 3},
+]
+var weapon_index := 0
+var touch_fire := false
+var next_duel_pending := false
+
+# AI-minne: basta (vinkel, kraft) hittills mot spelaren, per duell.
+var ai_best := Vector2(135.0, 60.0)
+const OPPONENTS: Array = [
+	{"namn": "Rekryten", "hp": 100.0, "fel": 14.0},
+	{"namn": "Kaptenen", "hp": 120.0, "fel": 7.0},
+	{"namn": "Generalen", "hp": 140.0, "fel": 3.0},
+]
+
+var hud: CanvasLayer
+var hud_label: Label
+var overlay: Control
+var snd := {}
+
+func _ready() -> void:
+	randomize()
+	for key in ["click", "coin", "hurt", "win"]:
+		# Nullsakert fore forsta importen - se management-kitets kommentar.
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	terrain_sprite = Sprite2D.new()
+	terrain_sprite.centered = false
+	add_child(terrain_sprite)
+	hud = CanvasLayer.new()
+	add_child(hud)
+	hud_label = Label.new()
+	hud_label.position = Vector2(16, 10)
+	hud_label.add_theme_font_size_override("font_size", 17)
+	hud.add_child(hud_label)
+	_setup_touch()
+	show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+# ---------- terrang (pixelbaserad, forstorbar) ----------
+func generate_terrain() -> void:
+	terrain_img = Image.create(W, H, false, Image.FORMAT_RGBA8)
+	terrain_img.fill(Color(0, 0, 0, 0))
+	var base := randf_range(400.0, 470.0)
+	var a1 := randf_range(30.0, 70.0)
+	var a2 := randf_range(12.0, 30.0)
+	var f1 := randf_range(0.004, 0.008)
+	var f2 := randf_range(0.015, 0.03)
+	var ph1 := randf() * 6.28
+	var ph2 := randf() * 6.28
+	for x in range(W):
+		var h := base + sin(x * f1 + ph1) * a1 + sin(x * f2 + ph2) * a2
+		var top := clampi(int(h), 120, H - 40)
+		terrain_img.fill_rect(Rect2i(x, top, 1, H - top), Color(0.42, 0.30, 0.20))
+		terrain_img.fill_rect(Rect2i(x, top, 1, 6), Color(0.35, 0.62, 0.30))
+	terrain_tex = ImageTexture.create_from_image(terrain_img)
+	terrain_sprite.texture = terrain_tex
+
+func solid(x: int, y: int) -> bool:
+	if x < 0 or x >= W or y < 0 or y >= H:
+		return false
+	return terrain_img.get_pixel(x, y).a > 0.5
+
+# from_y: skanna nedat fran tankens hojd - annars teleporterar ett krater-
+# overhang OVANFOR tanken upp den (Worms-fallan).
+func ground_y(x: int, from_y: int = 0) -> int:
+	for y in range(maxi(0, from_y), H):
+		if solid(x, y):
+			return y
+	return H - 1
+
+func crater(pos: Vector2, radius: float) -> void:
+	var r := int(radius)
+	var cx := int(pos.x)
+	var cy := int(pos.y)
+	for dx in range(-r, r + 1):
+		for dy in range(-r, r + 1):
+			if dx * dx + dy * dy <= r * r:
+				var px := cx + dx
+				var py := cy + dy
+				if px >= 0 and px < W and py >= 0 and py < H:
+					terrain_img.set_pixel(px, py, Color(0, 0, 0, 0))
+	terrain_tex.update(terrain_img)
+
+# ---------- flode ----------
+func new_game() -> void:
+	streak = 0
+	opponent_index = 0
+	next_duel_pending = false
+	start_duel()
+
+func start_duel() -> void:
+	generate_terrain()
+	var opp: Dictionary = OPPONENTS[opponent_index]
+	player = {"x": 150.0, "y": 0.0, "hp": 100.0, "max_hp": 100.0}
+	enemy = {"x": 1000.0, "y": 0.0, "hp": opp["hp"], "max_hp": opp["hp"]}
+	settle_tank(player)
+	settle_tank(enemy)
+	for w in weapons:
+		if w["namn"] == "Storbomb":
+			w["ammo"] = 2
+		elif w["namn"] == "Trippel":
+			w["ammo"] = 3
+	weapon_index = 0
+	ai_best = Vector2(135.0, 60.0)
+	player_turn = true
+	aim_angle = 45.0
+	aim_power = 62.0
+	player_aim = Vector2(45.0, 62.0)
+	# Titelns Enter/Space ar SAMMA ui_accept som eldar - utan fristen
+	# avfyrades forsta skottet i samma tryck som startade duellen.
+	aim_grace = 0.3
+	new_wind()
+	state = "aim"
+	close_overlay()
+	queue_redraw()
+
+func settle_tank(t: Dictionary) -> void:
+	var gy := ground_y(int(float(t["x"])), int(float(t["y"])) - 6)
+	t["y"] = float(gy)
+
+func new_wind() -> void:
+	wind = randf_range(-42.0, 42.0)
+
+func fire() -> void:
+	var w: Dictionary = weapons[weapon_index]
+	if int(w["ammo"]) == 0:
+		play_sound("coin")
+		return
+	if int(w["ammo"]) > 0:
+		w["ammo"] = int(w["ammo"]) - 1
+	if player_turn:
+		player_aim = Vector2(aim_angle, aim_power)
+	play_sound("click")
+	recoil = 7.0
+	shake = maxf(shake, 2.5)
+	var shooter := player if player_turn else enemy
+	var muzzle := Vector2(float(shooter["x"]), float(shooter["y"]) - 14.0)
+	spawn_burst(muzzle, Color(1.0, 0.85, 0.4), 8)
+	shots_queue = []
+	var count := 3 if w["namn"] == "Trippel" else 1
+	for i in range(count):
+		var spread := float(i - 1) * 4.0 if count == 3 else 0.0
+		shots_queue.append({"angle": aim_angle + spread, "power": aim_power, "radie": w["radie"], "dmg": w["dmg"]})
+	launch_next()
+	state = "fly"
+
+func launch_next() -> void:
+	var s: Dictionary = shots_queue.pop_front()
+	var shooter := player if player_turn else enemy
+	var rad: float = deg_to_rad(float(s["angle"]))
+	var dir := Vector2(cos(rad), -sin(rad))
+	proj = {
+		"pos": Vector2(float(shooter["x"]), float(shooter["y"]) - 16.0) + dir * 20.0,
+		"vel": dir * (float(s["power"]) * 7.2),
+		"radie": s["radie"],
+		"dmg": s["dmg"],
+	}
+	trail = []
+
+func explode(at: Vector2, radius: float, dmg: float) -> void:
+	play_sound("hurt")
+	shake = maxf(shake, 4.0 + radius * 0.22)
+	spawn_burst(at, Color(0.55, 0.4, 0.25), int(radius))
+	spawn_burst(at, Color(1.0, 0.6, 0.2), 12)
+	crater(at, radius)
+	for t in [player, enemy]:
+		var d := at.distance_to(Vector2(float(t["x"]), float(t["y"]) - 8.0))
+		if d < radius + 14.0:
+			var hit := maxf(6.0, dmg * (1.0 - d / (radius + 14.0)))
+			t["hp"] = float(t["hp"]) - hit
+	# Marken kan ha forsvunnit - tankar faller, langa fall gor ont.
+	for t in [player, enemy]:
+		var before := float(t["y"])
+		settle_tank(t)
+		var fall := float(t["y"]) - before
+		if fall > 60.0:
+			t["hp"] = float(t["hp"]) - fall * 0.12
+			spawn_burst(Vector2(float(t["x"]), float(t["y"])), Color(0.8, 0.75, 0.7), 8)
+
+func end_of_shot() -> void:
+	proj = {}
+	if float(enemy["hp"]) <= 0.0:
+		streak += 1
+		play_sound("win")
+		if opponent_index >= OPPONENTS.size() - 1:
+			finish(true)
+		else:
+			opponent_index += 1
+			next_duel_pending = true
+			show_overlay("SEGER!", "%s besegrad. Nasta: %s\nSegersvit: %d" % [
+				str(OPPONENTS[opponent_index - 1]["namn"]), str(OPPONENTS[opponent_index]["namn"]), streak], ["Nasta duell"])
+			state = "over"
+		return
+	if float(player["hp"]) <= 0.0:
+		finish(false)
+		return
+	if not shots_queue.is_empty():
+		launch_next()
+		return
+	player_turn = not player_turn
+	new_wind()
+	state = "aim"
+	if player_turn:
+		# Aterstall spelarens EGET sikte - aim_angle bar nyss AI:ns varden.
+		aim_angle = player_aim.x
+		aim_power = player_aim.y
+		aim_grace = 0.2
+	else:
+		ai_take_aim()
+
+# ---------- AI ----------
+func simulate_shot(angle: float, power: float, from: Vector2) -> Vector2:
+	var rad := deg_to_rad(angle)
+	var pos := from + Vector2(cos(rad), -sin(rad)) * 20.0
+	var vel := Vector2(cos(rad), -sin(rad)) * (power * 7.2)
+	for i in range(900):
+		var dt := 1.0 / 60.0
+		vel.y += GRAVITY * dt
+		vel.x += wind * WIND_DRIFT * dt
+		pos += vel * dt
+		if pos.x < -50.0 or pos.x > W + 50.0 or pos.y > H:
+			return pos
+		if solid(int(pos.x), int(pos.y)):
+			return pos
+	return pos
+
+func ai_take_aim() -> void:
+	var opp: Dictionary = OPPONENTS[opponent_index]
+	var from := Vector2(float(enemy["x"]), float(enemy["y"]) - 16.0)
+	var target := Vector2(float(player["x"]), float(player["y"]))
+	var best := ai_best
+	var best_d := simulate_shot(best.x, best.y, from).distance_to(target)
+	for i in range(14):
+		var cand := Vector2(
+			clampf(best.x + randf_range(-22.0, 22.0), 95.0, 175.0),
+			clampf(best.y + randf_range(-18.0, 18.0), 25.0, 100.0))
+		var d := simulate_shot(cand.x, cand.y, from).distance_to(target)
+		if d < best_d:
+			best_d = d
+			best = cand
+	ai_best = best
+	var err: float = opp["fel"]
+	aim_angle = clampf(best.x + randf_range(-err, err), 95.0, 175.0)
+	aim_power = clampf(best.y + randf_range(-err, err), 25.0, 100.0)
+	weapon_index = 0
+	# Kort paus sa spelaren hinner se AI:ns sikte - sedan eld.
+	get_tree().create_timer(0.9).timeout.connect(func():
+		if state == "aim" and not player_turn:
+			fire())
+
+func finish(won: bool) -> void:
+	state = "over"
+	if won:
+		play_sound("win")
+	var best := load_streak()
+	if streak > best:
+		save_streak(streak)
+		best = streak
+	show_overlay("DU VANN KANONADEN!" if won else "BESEGRAD",
+		"Segersvit: %d   Rekord: %d\nR: spela igen" % [streak, best], ["Spela igen"])
+
+# ---------- highscore ----------
+func load_streak() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func save_streak(value: int) -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(value))
+
+# ---------- loop ----------
+func _physics_process(delta: float) -> void:
+	if state == "title" or state == "over":
+		return
+	if shake > 0.0:
+		shake = move_toward(shake, 0.0, 30.0 * delta)
+		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+	elif position != Vector2.ZERO:
+		position = Vector2.ZERO
+	recoil = move_toward(recoil, 0.0, 24.0 * delta)
+
+	if state == "aim" and player_turn:
+		var da := Input.get_axis("ui_left", "ui_right")
+		var dp := Input.get_axis("ui_down", "ui_up")
+		aim_angle = clampf(aim_angle + da * 40.0 * delta, 5.0, 175.0)
+		aim_power = clampf(aim_power + dp * 30.0 * delta, 10.0, 100.0)
+		aim_grace = maxf(0.0, aim_grace - delta)
+		# just_pressed - hallen Space far inte autoskjuta nasta tur.
+		if aim_grace <= 0.0 and (Input.is_action_just_pressed("ui_accept") or touch_fire):
+			touch_fire = false
+			fire()
+	elif state == "fly" and not proj.is_empty():
+		var dt := delta
+		var vel: Vector2 = proj["vel"]
+		var pos: Vector2 = proj["pos"]
+		vel.y += GRAVITY * dt
+		vel.x += wind * WIND_DRIFT * dt
+		pos += vel * dt
+		proj["vel"] = vel
+		proj["pos"] = pos
+		trail.append(pos)
+		if trail.size() > 40:
+			trail.pop_front()
+		var hit_tank := false
+		for t in [player, enemy]:
+			if pos.distance_to(Vector2(float(t["x"]), float(t["y"]) - 8.0)) < 16.0:
+				hit_tank = true
+		if hit_tank or solid(int(pos.x), int(pos.y)):
+			explode(pos, float(proj["radie"]), float(proj["dmg"]))
+			end_of_shot()
+		elif pos.x < -60.0 or pos.x > W + 60.0 or pos.y > H + 40.0:
+			end_of_shot()
+
+	var opp: Dictionary = OPPONENTS[opponent_index]
+	var wind_txt := (">> %d" % int(absf(wind))) if wind >= 0.0 else ("<< %d" % int(absf(wind)))
+	var w: Dictionary = weapons[weapon_index]
+	var ammo_txt := "" if int(w["ammo"]) < 0 else " x%d" % int(w["ammo"])
+	hud_label.text = "Du: %d HP   %s: %d HP   Vind: %s   Vinkel: %d   Kraft: %d   Vapen: %s%s [1-3]" % [
+		int(maxf(0.0, float(player["hp"]))), str(opp["namn"]), int(maxf(0.0, float(enemy["hp"]))),
+		wind_txt, int(aim_angle), int(aim_power), str(w["namn"]), ammo_txt]
+	queue_redraw()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		if state == "aim":
+			state = "paused"
+			show_overlay("PAUS", "Esc: fortsatt", [])
+		elif state == "paused":
+			state = "aim"
+			close_overlay()
+			# Pausades AI:ns siktepaus bort? Ge den en ny - annars softlock.
+			if not player_turn and proj.is_empty() and shots_queue.is_empty():
+				ai_take_aim()
+		return
+	if event is InputEventKey and event.pressed:
+		if state == "over" and event.keycode == KEY_R:
+			new_game()
+		elif state == "title" and (event.keycode == KEY_ENTER or event.keycode == KEY_SPACE):
+			new_game()
+		elif state == "aim" and player_turn:
+			if event.keycode == KEY_1:
+				weapon_index = 0
+				play_sound("coin")
+			elif event.keycode == KEY_2:
+				weapon_index = 1
+				play_sound("coin")
+			elif event.keycode == KEY_3:
+				weapon_index = 2
+				play_sound("coin")
+
+# ---------- ritning ----------
+func _draw() -> void:
+	draw_rect(Rect2(0, 0, W, H), Color(0.45, 0.65, 0.85))
+	draw_circle(Vector2(1010, 90), 42.0, Color(1, 0.92, 0.6))
+	if state == "title":
+		return
+	# Vindpil
+	var wl := clampf(absf(wind) * 1.6, 8.0, 70.0)
+	var wdir := 1.0 if wind >= 0.0 else -1.0
+	draw_line(Vector2(576 - wl * wdir, 40), Vector2(576 + wl * wdir, 40), Color(1, 1, 1, 0.8), 3.0)
+	draw_line(Vector2(576 + wl * wdir, 40), Vector2(576 + wl * wdir - 8.0 * wdir, 33), Color(1, 1, 1, 0.8), 3.0)
+	draw_line(Vector2(576 + wl * wdir, 40), Vector2(576 + wl * wdir - 8.0 * wdir, 47), Color(1, 1, 1, 0.8), 3.0)
+	# Tankar
+	draw_tank(player, Color(0.25, 0.55, 0.9), true)
+	draw_tank(enemy, Color(0.85, 0.3, 0.25), false)
+	# Siktlinje (forsta biten av banan) for spelaren
+	if state == "aim" and player_turn:
+		var from := Vector2(float(player["x"]), float(player["y"]) - 16.0)
+		var rad := deg_to_rad(aim_angle)
+		var pos := from + Vector2(cos(rad), -sin(rad)) * 20.0
+		var vel := Vector2(cos(rad), -sin(rad)) * (aim_power * 7.2)
+		for i in range(11):
+			var dt := 1.0 / 30.0
+			vel.y += GRAVITY * dt
+			vel.x += wind * WIND_DRIFT * dt
+			pos += vel * dt
+			draw_circle(pos, 2.5, Color(1, 1, 1, 0.55 - float(i) * 0.045))
+	# Projektil + spar
+	if state == "fly" and not proj.is_empty():
+		for i in range(trail.size()):
+			draw_circle(trail[i], 2.0, Color(1, 0.8, 0.4, float(i) / float(trail.size()) * 0.6))
+		draw_circle(proj["pos"], 5.0, Color(0.15, 0.15, 0.15))
+
+func draw_tank(t: Dictionary, col: Color, facing_right: bool) -> void:
+	var x := float(t["x"])
+	var y := float(t["y"])
+	var kick := recoil if (t == player) == player_turn else 0.0
+	var body := Rect2(x - 16.0, y - 12.0, 32.0, 12.0)
+	draw_rect(body, col)
+	draw_rect(Rect2(x - 12.0, y - 4.0, 24.0, 5.0), col.darkened(0.35))
+	# Eldror: SAMMA vinkelrymd for bada (aim_angle 5-175, AI siktar 95-175 =
+	# vansterut) - roret foljer siktet pa den vars tur det ar, viloriktning annars.
+	var ang := 45.0 if t == player else 135.0
+	if (t == player) == player_turn and state != "title":
+		ang = aim_angle
+	var rad := deg_to_rad(ang)
+	var dir := Vector2(cos(rad), -sin(rad))
+	var pivot := Vector2(x, y - 12.0)
+	draw_line(pivot, pivot + dir * (26.0 - kick), col.darkened(0.2), 5.0)
+	# HP-stapel
+	var frac := clampf(float(t["hp"]) / float(t["max_hp"]), 0.0, 1.0)
+	draw_rect(Rect2(x - 18.0, y - 26.0, 36.0, 5.0), Color(0, 0, 0, 0.4))
+	draw_rect(Rect2(x - 18.0, y - 26.0, 36.0 * frac, 5.0), Color(0.3, 0.9, 0.3).lerp(Color(0.9, 0.25, 0.2), 1.0 - frac))
+
+# ---------- juice ----------
+func spawn_burst(pos: Vector2, col: Color, count: int) -> void:
+	var p := CPUParticles2D.new()
+	p.position = pos
+	p.amount = count
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.lifetime = 0.55
+	p.spread = 180.0
+	p.initial_velocity_min = 80.0
+	p.initial_velocity_max = 220.0
+	p.gravity = Vector2(0, 260)
+	p.scale_amount_min = 2.0
+	p.scale_amount_max = 4.0
+	p.color = col
+	p.texture = make_texture(6, Color(1, 1, 1), Color(1, 1, 1))
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+
+func make_texture(size: int, base: Color, accent: Color) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(base)
+	for x in range(size):
+		for y in range(size):
+			if x == 0 or y == 0 or x == size - 1 or y == size - 1:
+				img.set_pixel(x, y, accent)
+	return ImageTexture.create_from_image(img)
+
+# ---------- touch (aktiveras BARA pa touchskarm - datorspel oforandrade) ----------
+func _setup_touch() -> void:
+	if not DisplayServer.is_touchscreen_available():
+		return
+	_touch_btn(Vector2(28, 536), "ui_left", "<")
+	_touch_btn(Vector2(132, 536), "ui_right", ">")
+	_touch_btn(Vector2(932, 444), "ui_up", "^")
+	_touch_btn(Vector2(932, 536), "ui_down", "v")
+	var fire_btn := _touch_btn(Vector2(1036, 536), "", "ELD")
+	fire_btn.pressed.connect(func(): touch_fire = true)
+	var weapon_btn := _touch_btn(Vector2(1036, 444), "", "VAPEN")
+	weapon_btn.pressed.connect(func():
+		weapon_index = (weapon_index + 1) % weapons.size()
+		play_sound("coin"))
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+	var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+	img2.fill(Color(1, 1, 1, 0.20))
+	for x in range(88):
+		for y in range(88):
+			if x < 3 or y < 3 or x > 84 or y > 84:
+				img2.set_pixel(x, y, Color(1, 1, 1, 0.55))
+	var b := TouchScreenButton.new()
+	b.texture_normal = ImageTexture.create_from_image(img2)
+	b.position = pos
+	if action != "":
+		b.action = action
+	hud.add_child(b)
+	var t := Label.new()
+	t.text = text
+	t.add_theme_font_size_override("font_size", 22)
+	t.position = pos
+	t.size = Vector2(88, 88)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(t)
+	return b
+
+# ---------- overlays ----------
+func show_title() -> void:
+	state = "title"
+	queue_redraw()
+	show_overlay("KANONADEN",
+		"Turbaserad artilleriduell pa forstorbar terrang.\nVanster/Hoger: vinkel   Upp/Ned: kraft   Space: ELD   1-3: vapen\nKompensera for vinden. Besegra Rekryten, Kaptenen och Generalen.\nRekordsvit: %d" % load_streak(),
+		["Starta duellen"])
+
+func show_overlay(title: String, message: String, buttons: Array) -> void:
+	position = Vector2.ZERO
+	shake = 0.0
+	close_overlay()
+	overlay = Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud.add_child(overlay)
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.65)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(bg)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.add_theme_constant_override("separation", 12)
+	overlay.add_child(box)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_font_size_override("font_size", 42)
+	box.add_child(t)
+	var m := Label.new()
+	m.text = message
+	m.add_theme_font_size_override("font_size", 16)
+	box.add_child(m)
+	for label in buttons:
+		var b := Button.new()
+		b.text = str(label)
+		b.pressed.connect(func():
+			play_sound("coin")
+			if next_duel_pending:
+				next_duel_pending = false
+				start_duel()
+			else:
+				new_game())
+		box.add_child(b)
 
 func close_overlay() -> void:
 	if overlay:

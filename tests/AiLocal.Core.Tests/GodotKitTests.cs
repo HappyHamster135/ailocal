@@ -196,6 +196,49 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void ArtilleriIGodot_FarKanonadenKitet()
+    {
+        // v1.98: artillerigenren (ShellShock Live/Worms-klassen) - forsta
+        // kittet med versus-form: turbaserad duell mot AI i stallet for
+        // ensam progression. Utan detta golv foll artilleriprompts till
+        // top-down-kitet och "ett spel som shellshock live" var omojligt.
+        const string prompt = "bygg ett artillerispel som shellshock live i godot";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("artillery", GameScaffoldService.DetectGenre(prompt));
+            Assert.Contains("Kanonaden", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            // Produktionsribban: forstorbar pixelterrang, kratrar, vind,
+            // AI som provskjuter, motstandarstege, vapenarsenal.
+            Assert.Contains("fill_rect", script);
+            Assert.Contains("crater", script);
+            Assert.Contains("wind", script);
+            Assert.Contains("simulate_shot", script);
+            Assert.Contains("OPPONENTS", script);
+            Assert.Contains("weapons", script);
+            Assert.Contains("CPUParticles2D", script);  // C1 juice
+            Assert.Contains("shake", script);
+            // Touchkontroller - runtime-gatade (datorspel oforandrade).
+            Assert.Contains("TouchScreenButton", script);
+            Assert.Contains("is_touchscreen_available", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void TankOrdstammen_TrafferInteTankar()
+    {
+        // "tanks" i genreregeln ar avsiktligt PLURAL: prefixet "tank" hade
+        // fangat "tankar/tanke" (svenska for tankar!) och skickat
+        // reflektionsspel till artillerikitet.
+        Assert.NotEqual("artillery", GameScaffoldService.DetectGenre("ett spel om tankar och minnen"));
+        Assert.Equal("artillery", GameScaffoldService.DetectGenre("bygg ett spel med tanks som skjuter pa varandra"));
+        Assert.Equal("artillery", GameScaffoldService.DetectGenre("worms-liknande artilleri i godot"));
+    }
+
+    [Fact]
     public async Task GodotHeadless_ParsarKiten_UtanSkriptfel()
     {
         // Miljöberoende men SKARPT där godot finns i verktygskatalogen (dev-
@@ -211,7 +254,8 @@ public class GodotKitTests
             "top-down äventyr i godot där man överlever vågor",
             "bygg ett racingspel i godot med bilar och tre varv",   // C1 juice: Varvet
             "bygg ett 3d samlarspel i godot",                         // C1 juice: Kuben (CPUParticles3D)
-            "bygg ett 2d plattformsspel i godot"                      // v1.85: Pixel Rush i GDScript
+            "bygg ett 2d plattformsspel i godot",                     // v1.85: Pixel Rush i GDScript
+            "bygg ett artillerispel som shellshock live i godot"      // v1.98: Kanonaden
         })
         {
             var (root, _) = ScaffoldTo(prompt);

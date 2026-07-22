@@ -74,8 +74,24 @@ public static class GenreIdeaBank
         "management" or "simulator" or "idle" => Management,
         "rpg" or "roguelike" or "shooter" => TopDown,
         "platformer" => Platformer,
+        "artillery" => Artillery,
         _ => General,
     };
+
+    // v1.98: artilleri/duell-genren (ShellShock Live/Worms-klassen).
+    private static readonly string[] Artillery =
+    [
+        "upplasbara vapen mellan duellerna (klustergranat, borrprojektil, napalm)",
+        "terrang-teman per motstandare (oken, snoberg, manlandskap) med olika studs/friktion",
+        "skoldgenerator som blockerar EN traff och maste skjutas sonder forst",
+        "bransle per tur: flytta tanken en bit i stallet for att skjuta",
+        "nedgravd power-up i terrangen som frigors nar nagon spranger fram den",
+        "overladdning: riskera sjalvskada for 50% extra kraft",
+        "bossmotstandare med dubbelskott och egen signaturattack",
+        "forstorbara broar/plattformar som tankarna star pa",
+        "vind som VAXLAR mitt i duellen och visas som prognos en tur i forvag",
+        "rikoschett-vapen som studsar en gang mot terrangen",
+    ];
 
     /// <summary>Slumpar <paramref name="count"/> olika frön ur genrens bank.
     /// Random.Shared avsiktligt - två körningar SKA dra olika.</summary>

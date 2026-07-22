@@ -174,6 +174,44 @@ public class WindowProbeAndFeelTests
     }
 
     [Fact]
+    public async Task PlayAsync_ArtillerikitMotRiktigGodot_StartarOchSpelas()
+    {
+        // v1.98: Kanonaden ar forsta versus-kittet (turbaserad duell, pixel-
+        // terrang som ritas om vid varje krater). Runtime-beviset fangar
+        // logikfel som headless-parsen inte ser (t.ex. en trasig _ready som
+        // aldrig visar titeln, eller terrangbilden som aldrig blir textur).
+        var godot = ToolLocator.Find("godot");
+        if (godot is null || !File.Exists(godot) || !OperatingSystem.IsWindows()) return;
+
+        var parent = Path.Combine(Path.GetTempPath(), "ailocal-probe-art-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(parent);
+        var scaffold = new GameScaffoldService().Scaffold("godot", "bygg ett artillerispel som shellshock live i godot", parent);
+        Assert.True(scaffold.Success, scaffold.Output);
+        var screenshot = Path.Combine(parent, "probe.png");
+
+        var psi = new ProcessStartInfo(godot)
+        {
+            Arguments = $"--path \"{scaffold.Path}\"",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        };
+        using var proc = Process.Start(psi)!;
+        try
+        {
+            var result = await GodotWindowProbe.PlayAsync(proc, screenshot, CancellationToken.None);
+            Assert.True(result.Ran, result.Notes); // startar, visar fonster, kraschar inte
+            Assert.True(File.Exists(screenshot), "artillerikitet lamnade ingen dump: " + result.Notes);
+            Assert.True(new FileInfo(screenshot).Length > 1000, "dumpen misstänkt liten");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(); } catch { /* redan död */ }
+            await Task.Delay(300);
+            try { Directory.Delete(parent, recursive: true); } catch { /* städning */ }
+        }
+    }
+
+    [Fact]
     public async Task PlayAsync_PlattformarkitMotRiktigGodot_StartarOchSpelas()
     {
         // v1.85: plattformaren porterades fran C#/mono till GDScript - detta

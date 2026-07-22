@@ -47,6 +47,10 @@ public partial class GameScaffoldService
         if (WordStart(p, "snake", "orm", "nokia")) return "snake";
         if (WordStart(p, "idle", "clicker", "klicker", "klickspel", "incremental", "cookie")) return "idle";
         if (WordStart(p, "breakout", "arkanoid", "brick", "tegel", "paddle", "pong")) return "breakout";
+        // v1.98: artilleri/duell (ShellShock Live/Worms-klassen) - turbaserad
+        // ballistik mot AI. "tanks" i plural (WordStart "tank" hade träffat
+        // "tanke"); "worms" krockar inte med orm-regeln (WordStart).
+        if (WordStart(p, "artilleri", "artillery", "shellshock", "worms", "tanks", "stridsvagn", "ballistik", "kanonad")) return "artillery";
         if (WordStart(p, "minesweeper", "minröj", "minroj", "minor", "mines")) return "minesweeper";
         if (WordStart(p, "quiz", "frågesport", "fragesport", "trivia")) return "quiz";
         if (WordStart(p, "memory", "minnesspel", "kortspel", "card", "pairs")) return "memory";

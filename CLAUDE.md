@@ -42,7 +42,7 @@ svenska (commits i ASCII-svenska, utan åäö).
   varje ny Host-endpoint som UI:t använder MÅSTE proxas här, annars 404 för
   Overseer-användare (vanligaste buggklassen historiskt).
 - `src/AiLocal.Node/Hosting/` — motorerna: GameScaffoldService(.Genres,
-  .GodotKits) med 16 HTML5-kit + 3 Godot-kit (kit = deterministiskt GOLV;
+  .GodotKits) med 16 HTML5-kit + 7 Godot-kit (kit = deterministiskt GOLV;
   all variation bor i regissörskontraktet), GamePlaytester (Jint-smoke →
   CDP-sond för webb / GodotWindowProbe för motorspel → vision med titel- +
   mittspelsdump), ToolProvisioner (pinnad katalog; ALDRIG url:er från
