@@ -85,6 +85,10 @@ public class GodotKitTests
             Assert.Contains("FINAL_WAVE", script);
             Assert.Contains("move_and_slide", script);
             Assert.Contains("load_highscore", script);
+            // C1 (game-feel/juice): screenshake + partiklar inbakat i golvet.
+            Assert.Contains("CPUParticles2D", script);
+            Assert.Contains("spawn_burst", script);
+            Assert.Contains("shake", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }

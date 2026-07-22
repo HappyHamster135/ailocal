@@ -1197,6 +1197,7 @@ var hp := 3
 var score := 0
 var wave := 0
 var invulnerable := 0.0
+var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
 var hud: CanvasLayer
 var hud_label: Label
 var overlay: Control
@@ -1223,6 +1224,29 @@ func _ready() -> void:
 func play_sound(key: String) -> void:
 	if snd.has(key):
 		snd[key].play()
+
+# C1 juice: en engangs-partikelskur. HUD/overlay ligger pa en CanvasLayer och
+# paverkas inte av att varldens Node2D (self) skakas.
+func spawn_burst(pos: Vector2, col: Color, count: int) -> void:
+	var p := CPUParticles2D.new()
+	p.position = pos
+	p.amount = count
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.lifetime = 0.5
+	p.spread = 180.0
+	p.initial_velocity_min = 70.0
+	p.initial_velocity_max = 180.0
+	p.gravity = Vector2(0, 200)
+	p.scale_amount_min = 2.0
+	p.scale_amount_max = 4.0
+	p.color = col
+	# C1: utan textur blir partiklarna en 1x1-quad (~2-4px) och nastan osynliga.
+	# Vit 6px-textur x scale 2-4 = 12-24px, och p.color tonar den till ratt farg.
+	p.texture = make_texture(6, Color(1, 1, 1), Color(1, 1, 1))
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
 
 func make_texture(size: int, base: Color, accent: Color) -> ImageTexture:
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -1331,6 +1355,13 @@ func save_highscore(value: int) -> void:
 func _physics_process(delta: float) -> void:
 	if state != "playing" or player == null:
 		return
+	# C1 juice: screenshake genom att flytta varldens Node2D en liten slump-
+	# forskjutning som avtar. Snapper tillbaka till noll nar den slocknat.
+	if shake > 0.0:
+		shake = move_toward(shake, 0.0, 32.0 * delta)
+		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+	elif position != Vector2.ZERO:
+		position = Vector2.ZERO
 	var dir := Vector2(
 		Input.get_axis("ui_left", "ui_right"),
 		Input.get_axis("ui_up", "ui_down"))
@@ -1348,6 +1379,14 @@ func _physics_process(delta: float) -> void:
 	player.position = player.position.clamp(ARENA.position, ARENA.end)
 	if invulnerable > 0.0:
 		invulnerable -= delta
+		# C1 juice: spelaren blinkar + tonar tillbaka fran rott medan
+		# ododlighetsfonstret varar - visar ocksa att i-frames ar aktiva.
+		if anim:
+			anim.visible = fmod(invulnerable, 0.2) < 0.12
+			anim.modulate = anim.modulate.lerp(Color.WHITE, 6.0 * delta)
+			if invulnerable <= 0.0:
+				anim.visible = true
+				anim.modulate = Color.WHITE
 	var speed := 60.0 + wave * 14.0 + difficulty * 12.0
 	for e in enemies:
 		e.position += (player.position - e.position).normalized() * speed * delta
@@ -1355,6 +1394,10 @@ func _physics_process(delta: float) -> void:
 			hp -= 1
 			invulnerable = 1.2
 			play_sound("hurt")
+			shake = 9.0  # C1 juice: kannbar traff
+			spawn_burst(player.position, Color(1, 0.3, 0.3), 18)
+			if anim:
+				anim.modulate = Color(1, 0.35, 0.35)  # C1 juice: spelaren blinkar rott
 			if hp <= 0:
 				finish(false)
 				return
@@ -1363,6 +1406,8 @@ func _physics_process(delta: float) -> void:
 		if c.position.distance_to(player.position) < 32.0:
 			score += 10
 			play_sound("coin")
+			spawn_burst(c.position, Color(1, 0.9, 0.3), 12)  # C1 juice
+			shake = max(shake, 3.0)
 			c.queue_free()
 		else:
 			remaining.append(c)
@@ -1392,6 +1437,8 @@ func show_title() -> void:
 	show_overlay("GLANTAN", "Overlev %d vagor. WASD/pilar for att rora dig.\nRekord: %d" % [FINAL_WAVE, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
+	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas
+	shake = 0.0
 	close_overlay()
 	overlay = Control.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
