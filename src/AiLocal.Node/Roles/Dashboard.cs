@@ -6753,9 +6753,34 @@ internal static class Dashboard
           }
         });
 
+        // v1.89: kontorsvyn, notiserna, backloggen och rollpanelen bor på
+        // HOSTEN (Overseer proxar dem sedan v1.84). På en Launcher/fristående
+        // Worker finns endpointsen inte alls - då GÖMS de i stället för att
+        // visa falskt tomma vyer ("Inga workers anslutna" på en dator som
+        // inte ens koordinerar en flotta). En sond avgör; funkar för alla
+        // rollkombinationer utan att hårdkoda rollnamn.
+        async function probeHostPanels() {
+          try {
+            const r = await fetch('/api/office', { headers: authHeaders() });
+            // BARA ett äkta 404 betyder "endpointen finns inte på den här
+            // rollen". En Overseer vars Host inte hunnit upptäckas svarar
+            // 5xx via proxyn - då ska panelerna INTE gömmas permanent.
+            if (r.status !== 404) return;
+          } catch { return; /* nätfel = döm inte rollen på det */ }
+          const officeTab = document.querySelector('.view-tab[data-view="office"]');
+          if (officeTab) officeTab.classList.add('hidden');
+          ['noticesList', 'backlogList', 'rolesList'].forEach(id => {
+            const section = $(id)?.closest('section');
+            if (section) section.classList.add('hidden');
+          });
+          // Stod operatören redan i kontorsvyn (t.ex. via historik) - byt bort.
+          if (state.activeView === 'office') switchView('work');
+        }
+
         loadProviders();
         refresh();
         setInterval(refresh, 3000);
+        probeHostPanels();
         loadAssignmentLog();
         loadBenchmark();
         refreshIsolation();
