@@ -1046,6 +1046,36 @@ public static class WorkerRole
                     }
                 }
 
+                // v1.88: cross-modell KODgranskning - körs EN gång (runda 0) när
+                // allt annat är grönt. Kontraktsgranskningen ser bara en evidens-
+                // sammanfattning (4 filer × 3000 tecken); den här läser HELA
+                // huvudkodfilerna på den starka tiern (annan modell än byggaren i
+                // normalfallet) och jagar enbart riktiga buggar. Fynd → fixrunda.
+                if (round == 0 && findings.Clean && buildIntent)
+                {
+                    var codeReviewModel = settings.Worker.ModelTiers.Complex;
+                    var codeHint = string.IsNullOrWhiteSpace(codeReviewModel) ? null : codeReviewModel;
+                    await EmitStep("tool_call",
+                        "cross-modell kodgranskning (läser hela huvudkoden, jagar riktiga buggar)"
+                        + (codeHint is null ? "" : $" - modell {codeHint}"));
+                    var codeBugs = await CodeReviewPass.ReviewAsync(
+                        findings.ProjectRoot ?? workspaceRoot, req.Assignment, completeAccounted, ct,
+                        reviewModelHint: codeHint);
+                    if (codeBugs.Count > 0)
+                    {
+                        findings = findings with
+                        {
+                            Clean = false,
+                            Report = "Kodgranskaren hittade riktiga buggar:\n" + string.Join("\n", codeBugs.Select(b => "- " + b))
+                        };
+                        await EmitStep("tool_error", findings.Report);
+                    }
+                    else
+                    {
+                        await EmitStep("tool_result", "Kodgranskaren: inga riktiga buggar hittade.");
+                    }
+                }
+
                 if (findings.Clean) break;
                 // B5: kostnadstaket hoppar över fler betalda rundor (AgentLoop-taket
                 // stoppar redan mitt i; det här sparar en extra rundas modellanrop).
