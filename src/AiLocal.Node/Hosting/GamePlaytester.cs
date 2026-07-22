@@ -366,7 +366,9 @@ public sealed class GamePlaytester
                     "Detta är en skärmdump av ett spel några sekunder efter start. Bedöm kort på svenska: " +
                     "1) Ser det ut som ett riktigt spel med titelskärm/spelgrafik och läsbar UI? " +
                     "2) Är ytan tom, helt svart eller trasig (tecken på kraschad rendering)? " +
-                    "3) Ge de två viktigaste konkreta visuella förbättringarna.", ct);
+                    "3) Syns TEXTDEFEKTER i UI:t: råa formatplatshållare (\"%d\", \"%s\"), synliga taggar (\"[color=...]\") " +
+                    "eller rådumpad data ('{ \"name\": ... }')? Om ja, skriv exakt ordet TEXTDEFEKT och citera vad du ser. " +
+                    "4) Ge de två viktigaste konkreta visuella förbättringarna.", ct);
                 if (ok && !string.IsNullOrWhiteSpace(text))
                 {
                     summary.AppendLine();
@@ -376,6 +378,10 @@ public sealed class GamePlaytester
                     if (lower.Contains("helt svart") || lower.Contains("tom canvas") || lower.Contains("tom yta")
                         || lower.Contains("ingenting renderas") || lower.Contains("completely black"))
                         issues.Add("Visuellt: skärmdumpen ser tom/svart ut - spelet renderar inget synligt vid start.");
+                    // v1.99: exakt de fel som sågs i en levererad build - rå
+                    // "Omgang %d: %s" i HUD, [color=...]-taggar, dumpad dict.
+                    if (lower.Contains("textdefekt"))
+                        issues.Add("Textdefekter i UI:t: råa formatsträngar/taggar/datadumpar syns för spelaren - hitta strängarna (sök %d, %s, [color=, '{ \"') och rätta dem.");
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -404,7 +410,9 @@ public sealed class GamePlaytester
                     "Detta är spelets ALLRA FÖRSTA skärm (titel-/startskärmen). Bedöm kort på svenska: " +
                     "1) Finns spelnamn, startval och läsbara instruktioner? " +
                     "2) Är ytan tom, helt svart eller trasig? " +
-                    "3) Ge den EN viktigaste förbättringen av startupplevelsen.", ct);
+                    "3) Syns TEXTDEFEKTER: råa \"%d\"/\"%s\", synliga \"[color=...]\"-taggar eller rådumpad data? " +
+                    "Om ja, skriv exakt ordet TEXTDEFEKT. " +
+                    "4) Ge den EN viktigaste förbättringen av startupplevelsen.", ct);
                 if (ok && !string.IsNullOrWhiteSpace(text))
                 {
                     summary.AppendLine();
@@ -415,6 +423,8 @@ public sealed class GamePlaytester
                         || lower.Contains("ingen titelskärm") || lower.Contains("saknar titel")
                         || lower.Contains("ingenting renderas"))
                         issues.Add("Titelskärmen: dumpen ser tom/trasig ut eller saknar titel - spelaren möts inte av en riktig startskärm.");
+                    if (lower.Contains("textdefekt"))
+                        issues.Add("Titelskärmen: textdefekter (råa formatsträngar/taggar/datadumpar) syns - rätta strängarna före leverans.");
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -98,6 +98,53 @@ public class CostAndKitFallbackTests : IDisposable
         Assert.Null(GdScriptLint.Check(ok));
     }
 
+    // ---- v1.99: UX-tripwires (koden parsar men SPELAREN ser felet) ---------
+
+    [Fact]
+    public void CheckUx_RaFormatstrangTillText_Flaggas()
+    {
+        // Exakt felbilden fran en levererad build: HUD:en visade
+        // "Omgang %d: %s  %s  %d-%d" ratt av - literalen tilldelades .text
+        // utan %-operator.
+        var bad = "extends Control\nfunc upd() -> void:\n\thud.text = \"Omgang %d: %s  %s  %d-%d\"\n";
+        var err = GdScriptLint.CheckUx(bad);
+        Assert.NotNull(err);
+        Assert.Contains("%-operator", err);
+    }
+
+    [Fact]
+    public void CheckUx_FormatstrangMedOperator_PasserarTyst()
+    {
+        var ok = "extends Control\nfunc upd() -> void:\n\thud.text = \"Round %d: %s\" % [week, name]\n";
+        Assert.Null(GdScriptLint.CheckUx(ok));
+    }
+
+    [Fact]
+    public void CheckUx_MallIVariabel_FlaggasInte()
+    {
+        // Literal som INTE tilldelas .text ar en legitim mall (formateras senare).
+        var ok = "extends Node\nconst TPL := \"Round %d: %s\"\nfunc upd() -> void:\n\thud.text = TPL % [week, name]\n";
+        Assert.Null(GdScriptLint.CheckUx(ok));
+    }
+
+    [Fact]
+    public void CheckUx_BbcodeIVanligLabel_Flaggas()
+    {
+        // Live-felbilden: "[color=white]Nasta match:[/color]" synligt RATT
+        // for spelaren - vanlig Label parsar inte BBCode.
+        var bad = "extends Control\nfunc upd() -> void:\n\tinfo.text = \"[color=white]Next match:[/color] vs \" + rival\n";
+        var err = GdScriptLint.CheckUx(bad);
+        Assert.NotNull(err);
+        Assert.Contains("RichTextLabel", err);
+    }
+
+    [Fact]
+    public void CheckUx_BbcodeMedRichTextLabel_PasserarTyst()
+    {
+        var ok = "extends Control\nvar rt := RichTextLabel.new()\nfunc upd() -> void:\n\trt.text = \"[color=white]Next:[/color]\"\n";
+        Assert.Null(GdScriptLint.CheckUx(ok));
+    }
+
     [Fact]
     public void DetectTruncation_GdFil_BarTripwiren()
     {

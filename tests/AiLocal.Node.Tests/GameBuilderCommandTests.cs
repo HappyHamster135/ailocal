@@ -230,6 +230,45 @@ public class GameBuilderCommandTests
     }
 
     [Fact]
+    public async Task BuildAsync_Godot_ExportFailureUtanUtskrift_FarDiagnos()
+    {
+        // v1.99, live-sett: exporten föll med exit 1 och HELT TOM utskrift -
+        // felraden var oanvändbar. Nu diagnostiserar vi presets/mallar själva.
+        var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "");
+        // Ingen export_presets.cfg skrivs -> diagnosen ska peka på just den.
+
+        var builder = new GameBuilder();
+        var (success, output, _) = await builder.BuildAsync("auto", root,
+            (c, dir, ct) => Task.FromResult((1, "   ")), CancellationToken.None,
+            godotFinder: () => "C:/Godot/godot.exe");
+
+        Assert.False(success);
+        Assert.Contains("ingen felutskrift", output);
+        Assert.Contains("export_presets.cfg saknas", output);
+
+        Directory.Delete(root, recursive: true);
+    }
+
+    [Fact]
+    public void GodotExportHints_MedPresets_PekarPaMallarna()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "export_presets.cfg"), "[preset.0]");
+        try
+        {
+            var hints = GameBuilder.GodotExportHints(root);
+            // Presets finns -> diagnosen handlar om mallarna ELLER säger
+            // ärligt att båda finns (dev-maskinen har mallar provisionerade).
+            Assert.DoesNotContain("export_presets.cfg saknas", hints);
+            Assert.Contains("Trolig orsak", hints);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task BuildAsync_AutoOnHtml5Project_ReportsNoBuildNeeded()
     {
         var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));

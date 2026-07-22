@@ -44,6 +44,40 @@ public static class GdScriptLint
         return null;
     }
 
+    /// <summary>v1.99: UX-tripwires - mönster som PARSAR men ser trasiga ut
+    /// på skärmen (live-sett i en levererad build: HUD med rå "Omgang %d: %s"
+    /// och synliga [color=white]-taggar). Separata från Check() eftersom
+    /// facit-texten är en annan: Godot vägrar INTE parsa dessa.</summary>
+    public static string? CheckUx(string content)
+    {
+        var lines = content.Replace("\r\n", "\n").Split('\n');
+        var hasRichText = content.Contains("RichTextLabel");
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+
+            // .text = "...%d...%s..." där strängen AVSLUTAR satsen = ingen
+            // %-operator någonsin -> spelaren ser platshållarna råa.
+            // Bara direkta literaler flaggas (mallar i variabler som
+            // formateras senare är legitima och lämnas ifred).
+            var m = System.Text.RegularExpressions.Regex.Match(
+                line, "\\.text\\s*\\+?=\\s*\"([^\"]*)\"\\s*$");
+            if (m.Success)
+            {
+                var lit = m.Groups[1].Value;
+                if (lit.Contains("%d") || lit.Contains("%s") || lit.Contains("%f"))
+                    return $"rad {i + 1}: formatsträng tilldelas .text UTAN %-operator - spelaren ser rå \"%d/%s\" på skärmen. Skriv: nod.text = \"...\" % [värden].";
+            }
+
+            // BBCode-taggar i strängar utan RichTextLabel i filen: en vanlig
+            // Label visar "[color=...]" RÅTT för spelaren.
+            if (!hasRichText &&
+                (line.Contains("[color=") || line.Contains("[/color]") || line.Contains("[font=") || line.Contains("[img]")))
+                return $"rad {i + 1}: BBCode-taggar ([color=...]) i en sträng, men filen använder ingen RichTextLabel - en vanlig Label visar taggarna RÅTT. Använd RichTextLabel med bbcode_enabled=true, eller ta bort taggarna.";
+        }
+        return null;
+    }
+
     private static (string Line, int Index)? NextNonEmpty(string[] lines, int from)
     {
         for (var i = from; i < lines.Length; i++)

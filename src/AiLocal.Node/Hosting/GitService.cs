@@ -60,12 +60,19 @@ public class GitService
     /// (true) when the folder already is a repo.</summary>
     public virtual async Task<bool> InitAsync(string folderPath, CancellationToken ct = default)
     {
-        if (await IsRepoAsync(folderPath, ct)) return true;
-        Directory.CreateDirectory(folderPath);
-        var (initExit, _, _) = await RunGitAsync(folderPath, ["init"], ct);
-        if (initExit != 0) return false;
-        await RunGitAsync(folderPath, ["config", "user.name", "AiLocal Agent"], ct);
-        await RunGitAsync(folderPath, ["config", "user.email", "agent@ailocal.local"], ct);
+        if (!await IsRepoAsync(folderPath, ct))
+        {
+            Directory.CreateDirectory(folderPath);
+            var (initExit, _, _) = await RunGitAsync(folderPath, ["init"], ct);
+            if (initExit != 0) return false;
+            await RunGitAsync(folderPath, ["config", "user.name", "AiLocal Agent"], ct);
+            await RunGitAsync(folderPath, ["config", "user.email", "agent@ailocal.local"], ct);
+        }
+        // v1.99: global core.autocrlf=true (vanligt på Windows) konverterar
+        // LF->CRLF vid worktree-checkout/merge => modellernas \n-ankare slutar
+        // matcha disken (edit_file-fiaskot i teamläget). Lokal repo-config
+        // vinner över global - stäng av även för REDAN initierade repon.
+        await RunGitAsync(folderPath, ["config", "core.autocrlf", "false"], ct);
         return true;
     }
 

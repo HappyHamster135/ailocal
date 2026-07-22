@@ -139,7 +139,7 @@ public class GodotKitTests
         try
         {
             Assert.Equal("racing", GameScaffoldService.DetectGenre(prompt));
-            Assert.Contains("Varvet", File.ReadAllText(Path.Combine(root, "project.godot")));
+            Assert.Contains("The Circuit", File.ReadAllText(Path.Combine(root, "project.godot")));
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("_physics_process", script);
             Assert.Contains("checkpoint", script);
@@ -161,7 +161,7 @@ public class GodotKitTests
         try
         {
             Assert.Equal("godot", GameScaffoldService.PickEngine(prompt));
-            Assert.Contains("Kuben", File.ReadAllText(Path.Combine(root, "project.godot")));
+            Assert.Contains("The Cube", File.ReadAllText(Path.Combine(root, "project.godot")));
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("CharacterBody3D", script);
             Assert.Contains("Camera3D", script);
@@ -183,7 +183,7 @@ public class GodotKitTests
         try
         {
             Assert.Equal("puzzle", GameScaffoldService.DetectGenre(prompt));
-            Assert.Contains("Tvatusen", File.ReadAllText(Path.Combine(root, "project.godot")));
+            Assert.Contains("Twenty48", File.ReadAllText(Path.Combine(root, "project.godot")));
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             Assert.Contains("_slide", script);
             Assert.Contains("TARGET", script);
@@ -207,7 +207,7 @@ public class GodotKitTests
         try
         {
             Assert.Equal("artillery", GameScaffoldService.DetectGenre(prompt));
-            Assert.Contains("Kanonaden", File.ReadAllText(Path.Combine(root, "project.godot")));
+            Assert.Contains("Cannonade", File.ReadAllText(Path.Combine(root, "project.godot")));
             var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
             // Produktionsribban: forstorbar pixelterrang, kratrar, vind,
             // AI som provskjuter, motstandarstege, vapenarsenal.

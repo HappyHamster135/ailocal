@@ -18,7 +18,7 @@ public partial class GameScaffoldService
     internal static string[] ScaffoldGodotManagement(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Klubben"));
+        Write(root, "project.godot", GodotKitProject("Club Manager"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -36,7 +36,8 @@ public partial class GameScaffoldService
         Write(root, "DESIGN.md", GodotManagementDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Klubben - Management/Tycoon (Godot 4, GDScript)\n\n" +
+            "# Club Manager - Management/Tycoon (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbar managementgrund: budget, trupp (8 medlemmar), marknad,\n" +
             "simulerade omgangar mot en liga pa 6 lag, tre svarighetsgrader och\n" +
             "spara/ladda. Oppna i Godot 4 och tryck Play, eller exportera:\n" +
@@ -54,7 +55,7 @@ public partial class GameScaffoldService
     internal static string[] ScaffoldGodotTopDown(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Glantan"));
+        Write(root, "project.godot", GodotKitProject("The Glade"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -83,7 +84,8 @@ public partial class GameScaffoldService
         Write(root, "DESIGN.md", GodotTopDownDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Glantan - Top-down action (Godot 4, GDScript)\n\n" +
+            "# The Glade - Top-down action (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbar top-down-grund: 8-vagars rorelse, jagande fiender,\n" +
             "mynt, 5 vagor, HP, tre svarighetsgrader, paus och highscore.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
@@ -153,7 +155,7 @@ public partial class GameScaffoldService
     internal static string[] ScaffoldGodotArtillery(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Kanonaden"));
+        Write(root, "project.godot", GodotKitProject("Cannonade"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -171,7 +173,8 @@ public partial class GameScaffoldService
         Write(root, "DESIGN.md", GodotArtilleryDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Kanonaden - Artilleriduell (Godot 4, GDScript)\n\n" +
+            "# Cannonade - Artilleriduell (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbar artilleriduell i ShellShock Live/Worms-klassen:\n" +
             "turbaserad ballistik mot AI, FORSTORBAR terrang med kratrar, vind,\n" +
             "tre vapen med ammunition, motstandarstege med stigande traffsakerhet,\n" +
@@ -191,7 +194,7 @@ public partial class GameScaffoldService
     internal static string[] ScaffoldGodotRacing(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Varvet"));
+        Write(root, "project.godot", GodotKitProject("The Circuit"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -209,7 +212,8 @@ public partial class GameScaffoldService
         Write(root, "DESIGN.md", GodotRacingDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Varvet - Top-down racing (Godot 4, GDScript)\n\n" +
+            "# The Circuit - Top-down racing (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbar varvracer: bilfysik (gas/broms/styr), oval bana med\n" +
             "gras som bromsar, checkpoints i ordning, 3 varv, varvtimer och basta tid.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
@@ -233,11 +237,11 @@ public partial class GameScaffoldService
     // stripar inget och GDScript-indenteringen bevaras exakt.
     const string GodotRacingMain = """
 extends Node2D
-# Varvet - top-down varvracer. Kor bilen runt banan, klara varven pa basta tid.
+# The Circuit - top-down varvracer. Kor bilen runt banan pa basta tid.
 # UI byggs i kod (_show_title/_finish), banan + bilen ritas i _draw. BYT TEMA:
-# farger/former i _draw och texterna i _show_title.
+# farger/former i _draw och texterna i _show_title. Spelartext pa ENGELSKA.
 
-const SAVE_PATH := "user://varvet_best.txt"
+const SAVE_PATH := "user://circuit_best.txt"
 const LAPS := 3
 
 var C := Vector2(576, 324)
@@ -259,6 +263,7 @@ var ui: CanvasLayer
 var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
 var dot_tex: ImageTexture  # C1 juice: liten vit partikeltextur (utan blir de osynliga)
 var car_flash := 0.0  # C1 juice: bilens egen vita blixt vid checkpoint (avtar)
+var focus_pending := true
 
 func _ready() -> void:
     randomize()
@@ -280,7 +285,7 @@ func _setup_touch() -> void:
     _touch_btn(Vector2(28, 536), "ui_left", "<")
     _touch_btn(Vector2(132, 536), "ui_right", ">")
     _touch_btn(Vector2(1036, 444), "ui_up", "GAS")
-    _touch_btn(Vector2(1036, 536), "ui_down", "BROMS")
+    _touch_btn(Vector2(1036, 536), "ui_down", "BRAKE")
 
 func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
     var img2 := Image.create(88, 88, false, Image.FORMAT_RGBA8)
@@ -352,6 +357,7 @@ func _play(key: String) -> void:
 func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
+    focus_pending = true
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -371,16 +377,21 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(416, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
+    # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
 
 func _show_title() -> void:
     state = "title"
     position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden
     shake = 0.0
     _clear_ui()
-    _label("VARVET", 80, 72, Color(1, 0.85, 0.2))
-    _label("Kor %d varv sa fort du kan - piltangenter: gas/broms/styr." % LAPS, 180, 22)
-    _label("Basta tid: %s" % ("-" if best <= 0.0 else "%.2f s" % best), 216, 22, Color(0.7, 0.9, 1))
-    var names := ["Latt", "Medel", "Svar"]
+    _label("THE CIRCUIT", 80, 72, Color(1, 0.85, 0.2))
+    _label("Race %d laps as fast as you can - arrow keys: gas/brake/steer." % LAPS, 180, 22)
+    _label("Best time: %s" % ("-" if best <= 0.0 else "%.2f s" % best), 216, 22, Color(0.7, 0.9, 1))
+    var names := ["Easy", "Normal", "Hard"]
     for i in range(3):
         var d := i
         _button(names[i], 290 + i * 58, func(): _start(d))
@@ -436,7 +447,7 @@ func _physics_process(delta: float) -> void:
     _progress()
     var hud := ui.get_node_or_null("Hud")
     if hud:
-        hud.text = "Varv %d/%d   Tid %.2f s" % [min(lap + 1, LAPS), LAPS, t]
+        hud.text = "Lap %d/%d   Time %.2f s" % [min(lap + 1, LAPS), LAPS, t]
     queue_redraw()
 
 func _progress() -> void:
@@ -465,9 +476,9 @@ func _finish() -> void:
         best = t
         _save_best(t)
     _clear_ui()
-    _label("MALGANG!", 200, 60, Color(1, 0.9, 0.3))
-    _label("Tid: %.2f s%s" % [t, "   NYTT REKORD!" if rec else "   Rekord: %.2f s" % best], 280, 26)
-    _button("Spela igen", 340, func(): _show_title())
+    _label("FINISH!", 200, 60, Color(1, 0.9, 0.3))
+    _label("Time: %.2f s%s" % [t, "   NEW RECORD!" if rec else "   Best: %.2f s" % best], 280, 26)
+    _button("Play again", 340, func(): _show_title())
 
 func _draw() -> void:
     draw_rect(Rect2(Vector2.ZERO, Vector2(1152, 648)), Color(0.12, 0.4, 0.16))
@@ -509,7 +520,7 @@ func _save_best(v: float) -> void:
     internal static string[] ScaffoldGodotPuzzle(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Tvatusen"));
+        Write(root, "project.godot", GodotKitProject("Twenty48"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -527,7 +538,8 @@ func _save_best(v: float) -> void:
         Write(root, "DESIGN.md", GodotPuzzleDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Tvatusen - Slajd-pussel (Godot 4, GDScript)\n\n" +
+            "# Twenty48 - Slajd-pussel (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbart slajd-pussel (2048): slajda med piltangenterna, sla\n" +
             "ihop lika brickor, na 2048. Poang, basta resultat, vinst/forlust.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
@@ -549,11 +561,12 @@ func _save_best(v: float) -> void:
 
     const string GodotPuzzleMain = """
 extends Node2D
-# Tvatusen - slajd-pussel (2048): slajda med piltangenter, sla ihop lika brickor,
+# Twenty48 - slajd-pussel (2048): slajda med piltangenter, sla ihop lika brickor,
 # na 2048. Rutnat + UI ritas i kod. BYT TEMA: farger i _tile_color, mal i TARGET.
+# Spelartext pa ENGELSKA (husregeln).
 
 const N := 4
-const SAVE_PATH := "user://tvatusen_best.txt"
+const SAVE_PATH := "user://twenty48_best.txt"
 const TARGET := 2048
 
 var grid: Array[int] = []
@@ -562,6 +575,7 @@ var score := 0
 var best := 0
 var snd := {}
 var ui: CanvasLayer
+var focus_pending := true
 
 func _ready() -> void:
     randomize()
@@ -621,6 +635,7 @@ func _play(key: String) -> void:
 func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
+    focus_pending = true
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -640,14 +655,19 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(426, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
+    # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
 
 func _show_title() -> void:
     state = "title"
     _clear_ui()
-    _label("TVATUSEN", 90, 70, Color(0.95, 0.8, 0.3))
-    _label("Slajda med piltangenterna. Sla ihop lika brickor och na %d." % TARGET, 200, 22)
-    _label("Basta: %d" % best, 240, 22, Color(0.7, 0.9, 1))
-    _button("Spela", 310, func(): _start())
+    _label("TWENTY48", 90, 70, Color(0.95, 0.8, 0.3))
+    _label("Slide with the arrow keys. Merge equal tiles to reach %d." % TARGET, 200, 22)
+    _label("Best: %d" % best, 240, 22, Color(0.7, 0.9, 1))
+    _button("Play", 310, func(): _start())
     queue_redraw()
 
 func _start() -> void:
@@ -659,7 +679,7 @@ func _start() -> void:
     _spawn()
     _spawn()
     _clear_ui()
-    var hud := _label("Poang: 0", 20, 26)
+    var hud := _label("Score: 0", 20, 26)
     hud.name = "Hud"
     state = "playing"
     queue_redraw()
@@ -692,7 +712,7 @@ func _input(event: InputEvent) -> void:
         _spawn()
         var hud := ui.get_node_or_null("Hud")
         if hud:
-            hud.text = "Poang: %d" % score
+            hud.text = "Score: %d" % score
         queue_redraw()
         _check_end()
 
@@ -762,9 +782,9 @@ func _finish(won: bool) -> void:
         best = score
         _save_best(score)
     _clear_ui()
-    _label("DU VANN!" if won else "SLUT - inga drag kvar", 200, 54, Color(0.95, 0.85, 0.3))
-    _label("Poang: %d   Basta: %d" % [score, best], 280, 26)
-    _button("Spela igen", 340, func(): _show_title())
+    _label("YOU WIN!" if won else "NO MOVES LEFT", 200, 54, Color(0.95, 0.85, 0.3))
+    _label("Score: %d   Best: %d" % [score, best], 280, 26)
+    _button("Play again", 340, func(): _show_title())
 
 func _draw() -> void:
     draw_rect(Rect2(0, 0, 1152, 648), Color(0.16, 0.15, 0.13))
@@ -811,7 +831,7 @@ func _save_best(v: int) -> void:
     internal static string[] ScaffoldGodot3D(string root, string prompt)
     {
         var files = new List<string>();
-        Write(root, "project.godot", GodotKitProject("Kuben"));
+        Write(root, "project.godot", GodotKitProject("The Cube"));
         files.Add("project.godot");
         Write(root, "export_presets.cfg", GodotExportPresets());
         files.Add("export_presets.cfg");
@@ -829,7 +849,8 @@ func _save_best(v: int) -> void:
         Write(root, "DESIGN.md", GodotThreeDDesignDoc(prompt));
         files.Add("DESIGN.md");
         Write(root, "README.md",
-            "# Kuben - 3D-samlarspel (Godot 4, GDScript)\n\n" +
+            "# The Cube - 3D-samlarspel (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbart 3D-spel: styr kuben (CharacterBody3D) pa en bana, samla\n" +
             "alla mynt innan tiden tar slut. Kamera, ljus, mark och meshar byggs i kod.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
@@ -851,11 +872,12 @@ func _save_best(v: int) -> void:
 
     const string GodotThreeDMain = """
 extends Node3D
-# Kuben - ett litet 3D-samlarspel: styr kuben, samla alla mynt innan tiden tar
-# slut. Hela scenen (mark/ljus/kamera/spelare/mynt) byggs i kod. BYT TEMA:
-# farger/former i _build_world och mal/tid i konstanterna.
+# The Cube - ett litet 3D-samlarspel: styr kuben, samla alla mynt innan tiden
+# tar slut. Hela scenen (mark/ljus/kamera/spelare/mynt) byggs i kod. BYT TEMA:
+# farger/former i _build_world och mal/tid i konstanterna. Spelartext pa
+# ENGELSKA (husregeln).
 
-const SAVE_PATH := "user://kuben_best.txt"
+const SAVE_PATH := "user://cube_best.txt"
 const COINS := 8
 
 var state := "title"
@@ -869,6 +891,7 @@ var snd := {}
 var ui: CanvasLayer
 var cam: Camera3D
 var shake := 0.0  # C1 juice: kamerashake-magnitud (varldsenheter), avtar mot 0
+var focus_pending := true
 
 func _ready() -> void:
     randomize()
@@ -1008,6 +1031,7 @@ func _build_world() -> void:
 func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
+    focus_pending = true
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -1027,14 +1051,19 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(416, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
+    # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
 
 func _show_title() -> void:
     state = "title"
     _clear_ui()
-    _label("KUBEN", 80, 72, Color(0.5, 0.8, 1))
-    _label("Samla alla %d mynt innan tiden tar slut. WASD / piltangenter." % COINS, 190, 22)
-    _label("Basta: %d mynt" % best, 226, 22, Color(0.7, 0.9, 1))
-    var names := ["Latt", "Medel", "Svar"]
+    _label("THE CUBE", 80, 72, Color(0.5, 0.8, 1))
+    _label("Collect all %d coins before time runs out. WASD / arrow keys." % COINS, 190, 22)
+    _label("Best: %d coins" % best, 226, 22, Color(0.7, 0.9, 1))
+    var names := ["Easy", "Normal", "Hard"]
     for i in range(3):
         var d := i
         _button(names[i], 290 + i * 58, func(): _start(d))
@@ -1101,7 +1130,7 @@ func _physics_process(delta: float) -> void:
                 _play("coin")
     var hud := ui.get_node_or_null("Hud")
     if hud:
-        hud.text = "Mynt %d/%d   Tid %.0f s" % [collected, COINS, max(0.0, time_left)]
+        hud.text = "Coins %d/%d   Time %.0f s" % [collected, COINS, max(0.0, time_left)]
     if collected >= COINS:
         _finish(true)
     elif time_left <= 0.0:
@@ -1114,9 +1143,9 @@ func _finish(won: bool) -> void:
         best = collected
         _save_best(collected)
     _clear_ui()
-    _label("DU VANN!" if won else "TIDEN TOG SLUT", 200, 56, Color(0.6, 0.9, 0.4) if won else Color(1, 0.5, 0.4))
-    _label("Mynt: %d/%d   Basta: %d" % [collected, COINS, best], 280, 26)
-    _button("Spela igen", 340, func(): _show_title())
+    _label("YOU WIN!" if won else "TIME'S UP", 200, 56, Color(0.6, 0.9, 0.4) if won else Color(1, 0.5, 0.4))
+    _label("Coins: %d/%d   Best: %d" % [collected, COINS, best], 280, 26)
+    _button("Play again", 340, func(): _show_title())
 
 func _load_best() -> int:
     if not FileAccess.file_exists(SAVE_PATH):
@@ -1183,13 +1212,14 @@ func _save_best(v: int) -> void:
     // ---- Main.gd: management ------------------------------------------------
     const string GodotManagementMain = """
 extends Control
-# Klubben - komplett management/tycoon-grund. Allt UI byggs i kod har.
+# Club Manager - komplett management/tycoon-grund. Allt UI byggs i kod har.
 # BYT TEMA: andra texter, NAMES/roller och siffror - strukturen bar allt.
+# Spelartext pa ENGELSKA (husregeln).
 
-const SAVE_PATH := "user://klubben_save.json"
+const SAVE_PATH := "user://clubmanager_save.json"
 const SEASON_LENGTH := 10
 const NAMES := ["Alva","Bo","Cleo","Dag","Elin","Frans","Greta","Hugo","Ines","Jarl","Klara","Leo","Maja","Nils","Olga","Per"]
-const ROLES := ["Anfall","Mitt","Forsvar","Malvakt"]
+const ROLES := ["Striker","Midfield","Defence","Keeper"]
 const RIVALS := ["Norrvik","Sodra IF","Ostkusten","Vastra BK","Bergslaget"]
 
 var difficulty := 1
@@ -1200,6 +1230,7 @@ var league: Array = []
 var market: Array = []
 var last_result := ""
 var snd := {}
+var focus_pending := true
 
 func _ready() -> void:
 	for key in ["click","coin","hurt","win"]:
@@ -1233,7 +1264,7 @@ func new_game(diff: int) -> void:
 	league = []
 	for i in range(RIVALS.size()):
 		league.append({"name": RIVALS[i], "strength": 55 + i * 6 + diff * 4, "points": 0, "played": 0})
-	league.append({"name": "Ditt lag", "strength": 0, "points": 0, "played": 0})
+	league.append({"name": "Your Team", "strength": 0, "points": 0, "played": 0})
 	refill_market()
 	last_result = ""
 	show_hub()
@@ -1291,14 +1322,14 @@ func play_week() -> void:
 			other["points"] = int(other["points"]) + [0, 1, 3][randi() % 3]
 	var income := 40000 + int(me["points"]) * 4000 + my_goals * 5000
 	budget += income - wage_bill()
-	last_result = "Omgang %d: Ditt lag - %s  %d-%d   (publik +%s kr, loner -%s kr)" % [week + 1, rival["name"], my_goals, their_goals, fmt(income), fmt(wage_bill())]
+	last_result = "Round %d: Your Team - %s  %d-%d   (gate +%s, wages -%s)" % [week + 1, rival["name"], my_goals, their_goals, fmt(income), fmt(wage_bill())]
 	week += 1
 	refill_market()
 	save_game()
 	if budget < 0:
-		show_end(false, "Konkursen ar ett faktum - kassan ar tom.")
+		show_end(false, "Bankrupt - the club treasury is empty.")
 	elif week >= SEASON_LENGTH:
-		show_end(rank_of_me() == 1, "Sasongen ar slut - du slutade pa plats %d." % rank_of_me())
+		show_end(rank_of_me() == 1, "The season is over - you finished in position %d." % rank_of_me())
 	else:
 		show_hub()
 
@@ -1306,7 +1337,7 @@ func rank_of_me() -> int:
 	var sorted := league.duplicate()
 	sorted.sort_custom(func(a, b): return int(a["points"]) > int(b["points"]))
 	for i in range(sorted.size()):
-		if sorted[i]["name"] == "Ditt lag":
+		if sorted[i]["name"] == "Your Team":
 			return i + 1
 	return sorted.size()
 
@@ -1343,6 +1374,7 @@ func clear_ui() -> void:
 
 func panel_root() -> VBoxContainer:
 	clear_ui()
+	focus_pending = true
 	var bg := ColorRect.new()
 	bg.color = Color(0.08, 0.1, 0.14)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1371,6 +1403,11 @@ func button_into(parent: Control, text: String, handler: Callable) -> Button:
 		play("click")
 		handler.call())
 	parent.add_child(b)
+	# Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
+	# (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
 	return b
 
 func fmt(n: int) -> String:
@@ -1379,60 +1416,60 @@ func fmt(n: int) -> String:
 # ---------- skarmar ----------
 func show_title() -> void:
 	var box := panel_root()
-	label_into(box, "KLUBBEN", 44)
-	label_into(box, "Ta ligans samsta lag till toppen pa %d omgangar." % SEASON_LENGTH, 18)
-	label_into(box, "Valj svarighetsgrad:", 16)
-	button_into(box, "Latt (900 000 kr i startkassa)", func(): new_game(0))
-	button_into(box, "Medel (600 000 kr)", func(): new_game(1))
-	button_into(box, "Svar (350 000 kr)", func(): new_game(2))
+	label_into(box, "CLUB MANAGER", 44)
+	label_into(box, "Take the league's worst team to the top in %d rounds." % SEASON_LENGTH, 18)
+	label_into(box, "Choose difficulty:", 16)
+	button_into(box, "Easy (900 000 starting cash)", func(): new_game(0))
+	button_into(box, "Normal (600 000)", func(): new_game(1))
+	button_into(box, "Hard (350 000)", func(): new_game(2))
 	if FileAccess.file_exists(SAVE_PATH):
-		button_into(box, "Ladda sparat spel", func():
+		button_into(box, "Load saved game", func():
 			if load_game():
 				show_hub())
-	label_into(box, "Esc i spelet: spara och ga hit.", 12)
+	label_into(box, "Esc in game: save and return here.", 12)
 
 func show_hub() -> void:
 	var box := panel_root()
-	label_into(box, "Omgang %d/%d   Kassa: %s kr   Lagstyrka: %d   Tabellplats: %d" % [week + 1, SEASON_LENGTH, fmt(budget), team_strength(), rank_of_me()], 18)
+	label_into(box, "Round %d/%d   Cash: %s   Team strength: %d   League position: %d" % [week + 1, SEASON_LENGTH, fmt(budget), team_strength(), rank_of_me()], 18)
 	if last_result != "":
 		label_into(box, last_result, 14)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 8)
 	box.add_child(tabs)
-	button_into(tabs, "Trupp", show_squad)
-	button_into(tabs, "Marknad", show_market)
-	button_into(tabs, "Tabell", show_table)
-	button_into(tabs, "Spela omgang %d" % (week + 1), play_week)
+	button_into(tabs, "Squad", show_squad)
+	button_into(tabs, "Market", show_market)
+	button_into(tabs, "Table", show_table)
+	button_into(tabs, "Play round %d" % (week + 1), play_week)
 
 func show_squad() -> void:
 	var box := panel_root()
-	label_into(box, "Truppen (%d) - loner %s kr/omgang" % [players.size(), fmt(wage_bill())], 20)
+	label_into(box, "Squad (%d) - wages %s/round" % [players.size(), fmt(wage_bill())], 20)
 	for i in range(players.size()):
 		var p: Dictionary = players[i]
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		box.add_child(row)
-		label_into(row, "%s  [%s]  betyg %d" % [p["name"], p["role"], int(p["rating"])], 14)
+		label_into(row, "%s  [%s]  rating %d" % [p["name"], p["role"], int(p["rating"])], 14)
 		if players.size() > 6:
 			var index := i
-			button_into(row, "Salj +%s kr" % fmt(price_of(p) / 2), func():
+			button_into(row, "Sell +%s" % fmt(price_of(p) / 2), func():
 				budget += price_of(players[index]) / 2
 				players.remove_at(index)
 				play("coin")
 				show_squad())
-	button_into(box, "Tillbaka", show_hub)
+	button_into(box, "Back", show_hub)
 
 func show_market() -> void:
 	var box := panel_root()
-	label_into(box, "Marknaden - kassa %s kr" % fmt(budget), 20)
+	label_into(box, "Market - cash %s" % fmt(budget), 20)
 	for i in range(market.size()):
 		var p: Dictionary = market[i]
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		box.add_child(row)
-		label_into(row, "%s  [%s]  betyg %d" % [p["name"], p["role"], int(p["rating"])], 14)
+		label_into(row, "%s  [%s]  rating %d" % [p["name"], p["role"], int(p["rating"])], 14)
 		var index := i
-		var b := button_into(row, "Kop %s kr" % fmt(price_of(p)), func():
+		var b := button_into(row, "Buy %s" % fmt(price_of(p)), func():
 			if budget >= price_of(market[index]) and players.size() < 12:
 				budget -= price_of(market[index])
 				players.append(market[index])
@@ -1441,36 +1478,37 @@ func show_market() -> void:
 				show_market())
 		if budget < price_of(p) or players.size() >= 12:
 			b.disabled = true
-	button_into(box, "Tillbaka", show_hub)
+	button_into(box, "Back", show_hub)
 
 func show_table() -> void:
 	var box := panel_root()
-	label_into(box, "Ligatabellen", 20)
+	label_into(box, "League table", 20)
 	var sorted := league.duplicate()
 	sorted.sort_custom(func(a, b): return int(a["points"]) > int(b["points"]))
 	for i in range(sorted.size()):
 		var t: Dictionary = sorted[i]
-		var mark := "  <- du" if t["name"] == "Ditt lag" else ""
-		label_into(box, "%d. %s   %d p (%d spelade)%s" % [i + 1, t["name"], int(t["points"]), int(t["played"]), mark], 15)
-	button_into(box, "Tillbaka", show_hub)
+		var mark := "  <- you" if t["name"] == "Your Team" else ""
+		label_into(box, "%d. %s   %d pts (%d played)%s" % [i + 1, t["name"], int(t["points"]), int(t["played"]), mark], 15)
+	button_into(box, "Back", show_hub)
 
 func show_end(won: bool, message: String) -> void:
 	var box := panel_root()
 	if won:
 		play("win")
-	label_into(box, "SEGER!" if won else "SLUTET", 40)
+	label_into(box, "CHAMPIONS!" if won else "THE END", 40)
 	label_into(box, message, 18)
-	label_into(box, "Slutkassa: %s kr   Lagstyrka: %d" % [fmt(budget), team_strength()], 15)
-	button_into(box, "Spela igen", show_title)
+	label_into(box, "Final cash: %s   Team strength: %d" % [fmt(budget), team_strength()], 15)
+	button_into(box, "Play again", show_title)
 """;
 
     // ---- Main.gd: top-down --------------------------------------------------
     const string GodotTopDownMain = """
 extends Node2D
-# Glantan - komplett top-down-grund: vagor, fiender, mynt, HP, highscore.
-# BYT TEMA: farger/former i make_texture-anropen + texterna.
+# The Glade - komplett top-down-grund: vagor, fiender, mynt, HP, highscore.
+# BYT TEMA: farger/former i make_texture-anropen + texterna. Spelartext pa
+# ENGELSKA (husregeln).
 
-const SAVE_PATH := "user://glantan_highscore.save"
+const SAVE_PATH := "user://glade_highscore.save"
 const ARENA := Rect2(60, 60, 1032, 528)
 const FINAL_WAVE := 5
 
@@ -1657,7 +1695,7 @@ func finish(won: bool) -> void:
 	if score > best:
 		save_highscore(score)
 		best = score
-	show_overlay("DU VANN!" if won else "SLUTET", "Poang: %d   Rekord: %d" % [score, best], true)
+	show_overlay("YOU WIN!" if won else "GAME OVER", "Score: %d   Best: %d" % [score, best], true)
 
 # ---------- highscore ----------
 func load_highscore() -> int:
@@ -1735,13 +1773,13 @@ func _physics_process(delta: float) -> void:
 	if coins.is_empty():
 		score += 25
 		next_wave()
-	hud_label.text = "HP: %d   Poang: %d   Vag: %d/%d" % [hp, score, mini(wave, FINAL_WAVE), FINAL_WAVE]
+	hud_label.text = "HP: %d   Score: %d   Wave: %d/%d" % [hp, score, mini(wave, FINAL_WAVE), FINAL_WAVE]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if state == "playing":
 			state = "paused"
-			show_overlay("PAUS", "Esc: fortsatt", false)
+			show_overlay("PAUSED", "Esc: resume", false)
 		elif state == "paused":
 			state = "playing"
 			close_overlay()
@@ -1754,7 +1792,7 @@ func _draw() -> void:
 func show_title() -> void:
 	state = "title"
 	queue_redraw()
-	show_overlay("GLANTAN", "Overlev %d vagor. WASD/pilar for att rora dig.\nRekord: %d" % [FINAL_WAVE, load_highscore()], true)
+	show_overlay("THE GLADE", "Survive %d waves. WASD/arrow keys to move.\nBest: %d" % [FINAL_WAVE, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas
@@ -1780,14 +1818,20 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	m.add_theme_font_size_override("font_size", 16)
 	box.add_child(m)
 	if with_buttons:
-		for entry in [["Latt", 0], ["Medel", 1], ["Svar", 2]]:
+		var first := true
+		for entry in [["Easy", 0], ["Normal", 1], ["Hard", 2]]:
 			var b := Button.new()
-			b.text = "Starta: " + str(entry[0])
+			b.text = "Start: " + str(entry[0])
 			var diff: int = entry[1]
 			b.pressed.connect(func():
 				play_sound("click")
 				new_game(diff))
 			box.add_child(b)
+			# Forsta knappen far fokus -> Enter startar (tangentbords-
+			# spelbart, och grindens sond kommer forbi titelskarmen).
+			if first:
+				first = false
+				b.grab_focus()
 
 func close_overlay() -> void:
 	if overlay:
@@ -1871,7 +1915,7 @@ func _setup_touch() -> void:
 		return
 	_touch_btn(Vector2(28, 536), "ui_left", "<")
 	_touch_btn(Vector2(132, 536), "ui_right", ">")
-	var jump := _touch_btn(Vector2(1036, 536), "", "HOPP")
+	var jump := _touch_btn(Vector2(1036, 536), "", "JUMP")
 	jump.pressed.connect(func(): touch_jump = true)
 	jump.released.connect(func(): touch_jump = false)
 
@@ -2084,7 +2128,7 @@ func finish(won: bool) -> void:
 	if score > best:
 		save_highscore(score)
 		best = score
-	show_overlay("DU VANN!" if won else "SLUTET", "Poang: %d   Rekord: %d\nR: spela igen" % [score, best], true)
+	show_overlay("YOU WIN!" if won else "GAME OVER", "Score: %d   Best: %d\nR: play again" % [score, best], true)
 
 # ---------- highscore ----------
 func load_highscore() -> int:
@@ -2215,7 +2259,7 @@ func _physics_process(delta: float) -> void:
 			return
 		player.position = spawn_point
 		player.velocity = Vector2.ZERO
-	hud_label.text = "HP: %d   Poang: %d   Niva: %d/%d" % [hp, score, mini(level, FINAL_LEVEL), FINAL_LEVEL]
+	hud_label.text = "HP: %d   Score: %d   Level: %d/%d" % [hp, score, mini(level, FINAL_LEVEL), FINAL_LEVEL]
 
 func damage() -> void:
 	hp -= 1
@@ -2233,7 +2277,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if state == "playing":
 			state = "paused"
-			show_overlay("PAUS", "Esc: fortsatt", false)
+			show_overlay("PAUSED", "Esc: resume", false)
 		elif state == "paused":
 			state = "playing"
 			close_overlay()
@@ -2248,7 +2292,7 @@ func _draw() -> void:
 func show_title() -> void:
 	state = "title"
 	queue_redraw()
-	show_overlay("PIXEL RUSH", "Na flaggan pa %d nivaer. Pilar/A-D: rorelse, Space/W: hopp.\nHoppa PA fiender for att stampa dem. Rekord: %d" % [FINAL_LEVEL, load_highscore()], true)
+	show_overlay("PIXEL RUSH", "Reach the flag across %d levels. Arrows/A-D: move, Space/W: jump.\nJump ON enemies to stomp them. Best: %d" % [FINAL_LEVEL, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas
@@ -2274,14 +2318,20 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	m.add_theme_font_size_override("font_size", 16)
 	box.add_child(m)
 	if with_buttons:
-		for entry in [["Latt", 0], ["Medel", 1], ["Svar", 2]]:
+		var first := true
+		for entry in [["Easy", 0], ["Normal", 1], ["Hard", 2]]:
 			var b := Button.new()
-			b.text = "Starta: " + str(entry[0])
+			b.text = "Start: " + str(entry[0])
 			var diff: int = entry[1]
 			b.pressed.connect(func():
 				play_sound("click")
 				new_game(diff))
 			box.add_child(b)
+			# Forsta knappen far fokus -> Enter startar (tangentbords-
+			# spelbart, och grindens sond kommer forbi titelskarmen).
+			if first:
+				first = false
+				b.grab_focus()
 
 func close_overlay() -> void:
 	if overlay:
@@ -2306,13 +2356,14 @@ func close_overlay() -> void:
         "- Ljud: skott, explosion, vapenbyte, seger (sfxr-wav)\n- Touchkontroller (runtime-gatade): vinkel/kraft/ELD/VAPEN\n- All grafik ritas i kod - inga externa bilder\n\n" +
         "## Extension (tema-exempel)\n- Upplasbara vapen mellan dueller, terrang-teman per motstandare, skoldar,\n  bransle for att flytta tanken, 2 spelare hotseat, rikoschett-vapen\n";
 
-    // ---- Main.gd: artilleri (Kanonaden) ------------------------------------
+    // ---- Main.gd: artilleri (Cannonade) ------------------------------------
     const string GodotArtilleryMain = """
 extends Node2D
-# Kanonaden - turbaserad artilleriduell pa forstorbar terrang (ShellShock
+# Cannonade - turbaserad artilleriduell pa forstorbar terrang (ShellShock
 # Live/Worms-klassen). BYT TEMA: farger, terranggenerering och vapenlistan.
+# Spelartext pa ENGELSKA (husregeln).
 
-const SAVE_PATH := "user://kanonaden_svit.save"
+const SAVE_PATH := "user://cannonade_streak.save"
 const W := 1152
 const H := 648
 const GRAVITY := 240.0
@@ -2343,9 +2394,9 @@ var proj := {}
 var trail: Array = []
 
 var weapons: Array = [
-	{"namn": "Granat", "radie": 26.0, "dmg": 45.0, "ammo": -1},
-	{"namn": "Storbomb", "radie": 44.0, "dmg": 62.0, "ammo": 2},
-	{"namn": "Trippel", "radie": 18.0, "dmg": 26.0, "ammo": 3},
+	{"namn": "Grenade", "radie": 26.0, "dmg": 45.0, "ammo": -1},
+	{"namn": "Big Bomb", "radie": 44.0, "dmg": 62.0, "ammo": 2},
+	{"namn": "Triple", "radie": 18.0, "dmg": 26.0, "ammo": 3},
 ]
 var weapon_index := 0
 var touch_fire := false
@@ -2354,9 +2405,9 @@ var next_duel_pending := false
 # AI-minne: basta (vinkel, kraft) hittills mot spelaren, per duell.
 var ai_best := Vector2(135.0, 60.0)
 const OPPONENTS: Array = [
-	{"namn": "Rekryten", "hp": 100.0, "fel": 14.0},
-	{"namn": "Kaptenen", "hp": 120.0, "fel": 7.0},
-	{"namn": "Generalen", "hp": 140.0, "fel": 3.0},
+	{"namn": "The Recruit", "hp": 100.0, "fel": 14.0},
+	{"namn": "The Captain", "hp": 120.0, "fel": 7.0},
+	{"namn": "The General", "hp": 140.0, "fel": 3.0},
 ]
 
 var hud: CanvasLayer
@@ -2541,8 +2592,8 @@ func end_of_shot() -> void:
 		else:
 			opponent_index += 1
 			next_duel_pending = true
-			show_overlay("SEGER!", "%s besegrad. Nasta: %s\nSegersvit: %d" % [
-				str(OPPONENTS[opponent_index - 1]["namn"]), str(OPPONENTS[opponent_index]["namn"]), streak], ["Nasta duell"])
+			show_overlay("VICTORY!", "%s defeated. Next up: %s\nWin streak: %d" % [
+				str(OPPONENTS[opponent_index - 1]["namn"]), str(OPPONENTS[opponent_index]["namn"]), streak], ["Next duel"])
 			state = "over"
 		return
 	if float(player["hp"]) <= 0.0:
@@ -2610,8 +2661,8 @@ func finish(won: bool) -> void:
 	if streak > best:
 		save_streak(streak)
 		best = streak
-	show_overlay("DU VANN KANONADEN!" if won else "BESEGRAD",
-		"Segersvit: %d   Rekord: %d\nR: spela igen" % [streak, best], ["Spela igen"])
+	show_overlay("LADDER CLEARED!" if won else "DEFEATED",
+		"Win streak: %d   Best: %d\nR: play again" % [streak, best], ["Play again"])
 
 # ---------- highscore ----------
 func load_streak() -> int:
@@ -2672,7 +2723,7 @@ func _physics_process(delta: float) -> void:
 	var wind_txt := (">> %d" % int(absf(wind))) if wind >= 0.0 else ("<< %d" % int(absf(wind)))
 	var w: Dictionary = weapons[weapon_index]
 	var ammo_txt := "" if int(w["ammo"]) < 0 else " x%d" % int(w["ammo"])
-	hud_label.text = "Du: %d HP   %s: %d HP   Vind: %s   Vinkel: %d   Kraft: %d   Vapen: %s%s [1-3]" % [
+	hud_label.text = "You: %d HP   %s: %d HP   Wind: %s   Angle: %d   Power: %d   Weapon: %s%s [1-3]" % [
 		int(maxf(0.0, float(player["hp"]))), str(opp["namn"]), int(maxf(0.0, float(enemy["hp"]))),
 		wind_txt, int(aim_angle), int(aim_power), str(w["namn"]), ammo_txt]
 	queue_redraw()
@@ -2681,7 +2732,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if state == "aim":
 			state = "paused"
-			show_overlay("PAUS", "Esc: fortsatt", [])
+			show_overlay("PAUSED", "Esc: resume", [])
 		elif state == "paused":
 			state = "aim"
 			close_overlay()
@@ -2796,9 +2847,9 @@ func _setup_touch() -> void:
 	_touch_btn(Vector2(132, 536), "ui_right", ">")
 	_touch_btn(Vector2(932, 444), "ui_up", "^")
 	_touch_btn(Vector2(932, 536), "ui_down", "v")
-	var fire_btn := _touch_btn(Vector2(1036, 536), "", "ELD")
+	var fire_btn := _touch_btn(Vector2(1036, 536), "", "FIRE")
 	fire_btn.pressed.connect(func(): touch_fire = true)
-	var weapon_btn := _touch_btn(Vector2(1036, 444), "", "VAPEN")
+	var weapon_btn := _touch_btn(Vector2(1036, 444), "", "WEAPON")
 	weapon_btn.pressed.connect(func():
 		weapon_index = (weapon_index + 1) % weapons.size()
 		play_sound("coin"))
@@ -2831,9 +2882,9 @@ func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton
 func show_title() -> void:
 	state = "title"
 	queue_redraw()
-	show_overlay("KANONADEN",
-		"Turbaserad artilleriduell pa forstorbar terrang.\nVanster/Hoger: vinkel   Upp/Ned: kraft   Space: ELD   1-3: vapen\nKompensera for vinden. Besegra Rekryten, Kaptenen och Generalen.\nRekordsvit: %d" % load_streak(),
-		["Starta duellen"])
+	show_overlay("CANNONADE",
+		"Turn-based artillery duel on destructible terrain.\nLeft/Right: angle   Up/Down: power   Space: FIRE   1-3: weapons\nMind the wind. Defeat the Recruit, the Captain and the General.\nBest streak: %d" % load_streak(),
+		["Start the duel"])
 
 func show_overlay(title: String, message: String, buttons: Array) -> void:
 	position = Vector2.ZERO
@@ -2858,6 +2909,7 @@ func show_overlay(title: String, message: String, buttons: Array) -> void:
 	m.text = message
 	m.add_theme_font_size_override("font_size", 16)
 	box.add_child(m)
+	var first := true
 	for label in buttons:
 		var b := Button.new()
 		b.text = str(label)
@@ -2869,6 +2921,11 @@ func show_overlay(title: String, message: String, buttons: Array) -> void:
 			else:
 				new_game())
 		box.add_child(b)
+		# Forsta knappen far fokus -> Enter fungerar direkt (tangentbords-
+		# spelbart, och grindens sond kommer forbi titelskarmen).
+		if first:
+			first = false
+			b.grab_focus()
 
 func close_overlay() -> void:
 	if overlay:

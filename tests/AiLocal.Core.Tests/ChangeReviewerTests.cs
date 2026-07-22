@@ -53,4 +53,30 @@ public class ChangeReviewerTests
         var (approved, _) = ChangeReviewer.ParseVerdict(reply);
         Assert.True(approved);
     }
+
+    [Theory]
+    // v1.99, exakta live-avslagen: leverantörens PII-filter maskade GILTIG
+    // kod (PackedVector2Array(), particle_burst, efternamnslistor) till
+    // [ADDRESS] i diffen granskaren SÅG - och den avvisade korrekt kod som
+    // "ogiltig syntax". Skrivvakterna garanterar att markörer aldrig når
+    // disk, så ett avslag som citerar en markör är per definition ett
+    // kanalartefakt -> fail open.
+    [InlineData("AVVISA: `var buf := [ADDRESS]()` är inte giltig GDScript-syntax; använd PackedVector2Array().")]
+    [InlineData("AVVISA: Diffen innehåller `[ADDRESS]`-platshållare som skapar syntaxfel i GDScript.")]
+    [InlineData("REJECT: LAST_NAMES innehåller platshållaren \"[ADDRESS]\" som inte är ett riktigt efternamn.")]
+    [InlineData("AVVISA: mönstret \\[ADDRESS\\] förekommer i animate_button.")]
+    public void ParseVerdict_MaskningsartefaktIAvslaget_FailOpen(string reply)
+    {
+        var (approved, reason) = ChangeReviewer.ParseVerdict(reply);
+        Assert.True(approved);
+        Assert.Null(reason);
+    }
+
+    [Fact]
+    public void ParseVerdict_RiktigtAvslag_PaverkasInteAvArtefaktvakten()
+    {
+        // Ett avslag UTAN markörer blockerar fortfarande - vakten är smal.
+        var (approved, _) = ChangeReviewer.ParseVerdict("AVVISA: filen raderar hela nivådatan som uppgiften kräver.");
+        Assert.False(approved);
+    }
 }

@@ -505,6 +505,11 @@ public sealed class AgentToolExecutor
             // kropp). Fånga vid SKRIVNINGEN med facit, inte först i verify.
             if (GdScriptLint.Check(content) is { } gdErr)
                 return "VARNING: " + gdErr + " Rätta filen med edit_file innan du går vidare - Godot vägrar parsa den som den är.";
+            // v1.99: UX-tripwires - koden PARSAR men ser trasig ut för
+            // spelaren (live-sett: rå "Omgang %d: %s" i HUD:en, [color=...]-
+            // taggar synliga i en vanlig Label). Varna vid skrivningen.
+            if (GdScriptLint.CheckUx(content) is { } uxErr)
+                return "VARNING: " + uxErr + " Koden kör, men SPELAREN ser felet på skärmen - rätta med edit_file före leverans.";
         }
         return null;
     }
@@ -520,7 +525,19 @@ public sealed class AgentToolExecutor
             return Error(call, $"file not found: {path}");
 
         var content = await File.ReadAllTextAsync(path, ct);
-        var occurrences = content.Split(oldText).Length - 1;
+
+        // v1.99: radslutsOBEROENDE matchning. git autocrlf kan konvertera
+        // LF->CRLF vid worktree-checkout/merge på Windows, så filen på disk
+        // har CRLF medan modellen skickar \n i oldText - då föll VARJE
+        // flerradig redigering med "not found" trots att texten stämde
+        // (live-sett: ~40 anrop brända på feldiagnosen "edit_file klarar
+        // inte tabbar"; enradiga ankare fungerade, flerradiga aldrig).
+        // Matcha på \n-normaliserad vy, återställ filens radslut vid skrivning.
+        var usesCrlf = content.Contains("\r\n");
+        var normContent = usesCrlf ? content.Replace("\r\n", "\n") : content;
+        var normOld = oldText.Replace("\r\n", "\n");
+        var normNew = newText.Replace("\r\n", "\n");
+        var occurrences = normContent.Split(normOld).Length - 1;
 
         if (occurrences == 0)
         {
@@ -546,7 +563,8 @@ public sealed class AgentToolExecutor
                 $"edit_file: newText innehåller \"{newMarker}\" - det är AI-leverantörens integritetsmaskning av det du läst, " +
                 "inte riktig kod. Läs de exakta raderna via run_command (type/findstr) och gör om ändringen med de riktiga värdena.");
 
-        var updated = replaceAll ? content.Replace(oldText, newText) : content.Replace(oldText, newText);
+        var updatedNorm = normContent.Replace(normOld, normNew);
+        var updated = usesCrlf ? updatedNorm.Replace("\n", "\r\n") : updatedNorm;
 
         // Apply the same approval gate as write_file so the operator (or the
         // Host's ChangeReviewer) still previews an edit before it lands.

@@ -209,6 +209,25 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > versus-kittet - stänger formgapet "alla kit var ensam progression". Visuellt
 > verifierat i skarp körning: krater vid träff, AI träffar tillbaka, vind
 > växlar. 7 Godot-kit totalt.
+>
+> **v1.99 KVALITETSPASSET (ägarens skärmdumpar av en levererad build som "inte
+> gick att sälja"):** (1) edit_file radslutsoberoende + core.autocrlf=false i
+> agentrepon - CRLF/LF-mismatchen brände ~40% av teambyggets tokens på
+> feldiagnosen "edit_file klarar inte tabbar". (2) Granskaravslag som citerar
+> [ADDRESS] failar open (PII-filtret maskade GILTIG kod i diffen granskaren
+> såg - ett spår skrev medvetet sämre kod för att undvika filtret). (3) Tom
+> exportfelrad diagnostiseras deterministiskt (presets/mallar) och slutsvaret
+> döljer aldrig en exportmiss. (4) ALLA 7 Godot-kit på ENGELSKA (spelartext;
+> namn: Club Manager/The Glade/Pixel Rush/The Circuit/Twenty48/The Cube/
+> Cannonade) + stående regissörskriterium + AgentSystemPrompt-regel.
+> (5) Tangentbordsfokus i alla kit (första knappen per skärm får fokus) -
+> Enter fungerar OCH grindens sond kommer förbi titeln på musdrivna spel.
+> (6) UX-tripwires i GdScriptLint (rå %d/%s till .text, BBCode i vanlig
+> Label) + vision letar TEXTDEFEKT (råa formatsträngar/taggar/datadumpar).
+> KVAR (medvetet): språkväljare i spelens settings (i18n-golv med TEXT-dict,
+> sv/en-växel) - engelska är nu default; de 16 HTML5-kiten är kvar på
+> ASCII-svenska (Godot är husmotorn; regissörskriteriet styr agenten till
+> engelska även där).
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

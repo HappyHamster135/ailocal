@@ -403,6 +403,50 @@ public class AgentToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task EditFile_CrlfFilMedLfAnkare_MatcharOchBevararRadslut()
+    {
+        // v1.99, live-fiaskot: git autocrlf konverterade worktree-filer till
+        // CRLF, modellen skickade \n-ankare -> VARJE flerradig redigering
+        // föll med "not found" (~40 anrop brändes på feldiagnosen "edit_file
+        // klarar inte tabbar"; enradiga ankare fungerade, flerradiga aldrig).
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        var path = Path.Combine(_workspace, "crlf.gd");
+        await File.WriteAllTextAsync(path, "func a():\r\n\tpass\r\n\r\nfunc b():\r\n\tpass\r\n");
+
+        var result = await executor.ExecuteAsync(Call("edit_file", new
+        {
+            path = "crlf.gd",
+            oldText = "\tpass\n\nfunc b():",   // \n-ankare over TRE rader
+            newText = "\tpass\n\treturn\n\nfunc b():"
+        }), CancellationToken.None);
+
+        Assert.False(result.IsError, result.Output);
+        var after = await File.ReadAllTextAsync(path);
+        Assert.Contains("\treturn\r\n", after);            // ändringen inne, med CRLF
+        Assert.DoesNotContain("\n", after.Replace("\r\n", "")); // inga blandade radslut kvar
+    }
+
+    [Fact]
+    public async Task EditFile_LfFil_ForblirLf()
+    {
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        var path = Path.Combine(_workspace, "lf.gd");
+        await File.WriteAllTextAsync(path, "func a():\n\tpass\n");
+
+        var result = await executor.ExecuteAsync(Call("edit_file", new
+        {
+            path = "lf.gd",
+            oldText = "func a():\n\tpass",
+            newText = "func a():\n\treturn 1"
+        }), CancellationToken.None);
+
+        Assert.False(result.IsError, result.Output);
+        var after = await File.ReadAllTextAsync(path);
+        Assert.DoesNotContain("\r", after);
+        Assert.Contains("\treturn 1\n", after);
+    }
+
+    [Fact]
     public async Task EditFile_AmbiguousWithoutReplaceAll_Fails()
     {
         var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);

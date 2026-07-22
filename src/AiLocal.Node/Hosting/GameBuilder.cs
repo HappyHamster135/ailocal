@@ -91,10 +91,36 @@ public sealed class GameBuilder
         var cmd = MakeGodotCommand(godot, preset, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);
         if (exit != 0)
-            return (false, $"godot export misslyckades (exit {exit}):\n{output}", null);
+        {
+            // v1.99: exporten kan falla med HELT TOM utskrift (live-sett) -
+            // diagnostisera de vanligaste orsakerna deterministiskt sjalva
+            // i stallet for att visa en tom felrad ingen kan agera pa.
+            var detail = string.IsNullOrWhiteSpace(output)
+                ? "(ingen felutskrift fran godot)" + GodotExportHints(root)
+                : output;
+            return (false, $"godot export misslyckades (exit {exit}):\n{detail}", null);
+        }
         if (!File.Exists(outExe))
             return (false, $"godot avslutade utan fel men .exe saknas: {outExe}\n{output}", null);
         return (true, $"Byggde {outExe} ({new FileInfo(outExe).Length} bytes).", outExe);
+    }
+
+    /// <summary>Deterministiska ledtradar nar godot-exporten faller utan
+    /// utskrift: kontrollera presets och exportmallar SJALVA sa felraden
+    /// alltid ar agerbar. Public for test.</summary>
+    public static string GodotExportHints(string root)
+    {
+        var hints = new List<string>();
+        if (!File.Exists(Path.Combine(root, "export_presets.cfg")))
+            hints.Add("export_presets.cfg saknas i projektroten - preseten 'Windows Desktop' finns inte.");
+        var tplBase = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Godot", "export_templates");
+        if (!Directory.Exists(Path.Combine(tplBase, "4.3.stable.mono"))
+            && !Directory.Exists(Path.Combine(tplBase, "4.3.stable")))
+            hints.Add($"exportmallarna saknas ({tplBase}) - provisionera 'godot-templates' och forsok igen.");
+        if (hints.Count == 0)
+            hints.Add("presets och mallar finns - vanligaste kvarvarande orsakerna ar fel mallversion for editorn eller en preset med ogiltig exportvag.");
+        return " Trolig orsak: " + string.Join(" ", hints);
     }
 
     /// <summary>Web (HTML5/WASM) export of a Godot project - the "spela i webblasaren

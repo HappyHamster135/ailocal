@@ -141,7 +141,7 @@ public sealed partial class GameScaffoldService
         // Management/sim/idle får tycoon-grunden; rpg/roguelike/shooter får
         // top-down-grunden; övriga genrer behåller plattformaren tills fler
         // kit finns.
-        // 3D far det dedikerade 3D-kitet (Kuben) fore genre-routningen - genren
+        // 3D far det dedikerade 3D-kitet (The Cube) fore genre-routningen - genren
         // ar 2D-orienterad, men "3d" ar en motor-/dimensionssignal.
         // Normalisera en gang: inline (prompt ?? "") lamnade prompt som "kanske
         // null" for de foljande anropen (CS8604) - reassignen gor den non-null.

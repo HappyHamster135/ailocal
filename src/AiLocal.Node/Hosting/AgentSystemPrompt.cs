@@ -55,6 +55,7 @@ public static class AgentSystemPrompt
         - Performance: 60 FPS target - create nodes/textures/resources up front, not every frame; the game must not stutter even with many objects on screen.
         - Robustness: handle falling off the map, 0 HP, and rapid key mashing without breaking; frame-rate-independent movement via delta time.
         - Mobile: the DESKTOP experience is the baseline and must never be degraded. But when the user asks for mobile/Android OR the game may be exported there, add touch controls gated at runtime (Godot: TouchScreenButton + DisplayServer.is_touchscreen_available() so desktop stays untouched) and viewport stretch (canvas_items/keep) so the layout scales to any screen.
+        - Language & text quality: ALL player-facing text is ENGLISH with a professional tone (unless the user explicitly asks for another language). NEVER show raw format placeholders ("%d", "%s" - always apply the % operator), BBCode tags in a plain Label (use RichTextLabel with bbcode_enabled, or drop the tags), or raw data dumps (str(dict)) in the UI - print the specific field, e.g. opponent["name"].
 
         PRODUCTION BAR - APPS:
         - Validate input and fail with helpful messages, never stack traces.

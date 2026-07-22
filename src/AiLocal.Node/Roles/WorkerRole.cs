@@ -1245,6 +1245,17 @@ public static class WorkerRole
                     if (build.Success && build.ExePath is { } exe && File.Exists(exe))
                         artifactPath = "/api/artifact?path=" + Uri.EscapeDataString(
                             Path.GetRelativePath(workspaceRoot, exe).Replace('\\', '/'));
+                    else if (!build.Success)
+                        // v1.99: en misslyckad export får ALDRIG gömmas bakom
+                        // modellens "Klart"-sammanfattning (live-sett: exit 1
+                        // i stegflödet men slutsvaret sa godkänt utan exe).
+                        // Ärligheten ska stå i själva slutsvaret.
+                        result = result with
+                        {
+                            FinalAnswer = result.FinalAnswer +
+                                "\n\nOBS: exe-exporten misslyckades - spelet levereras som Godot-projekt (öppna via Spela/preview), ingen dubbelklickbar exe. " +
+                                "Detalj: " + build.Output.Split('\n')[0]
+                        };
                 }
                 else
                 {

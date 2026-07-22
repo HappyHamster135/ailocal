@@ -143,6 +143,12 @@ public static class DirectorPass
             // tunga per-frame-mönster från början.
             (["prestanda", "fps", "smidig", "performance", "ruckel", "hack", "allokering"],
                 "Smidig prestanda: 60 FPS-mål, inga tunga per-frame-allokeringar (skapa noder/texturer/resurser i _ready, inte varje bildruta) - spelet får inte hacka ens med många objekt på skärmen"),
+            // v1.99 (ägarens beslut efter en levererad build med ASCII-svenska,
+            // råa %s-strängar och synlig BBCode): spel skrivs på ENGELSKA som
+            // standard - professionellt OCH encodingsäkert. Ber användaren
+            // uttryckligen om ett annat språk vinner det via nyckelorden.
+            (["engelsk", "english", "språk", "sprak", "language", "svenska på", "lokaliser"],
+                "All spelartext på ENGELSKA med professionell ton (om inte användaren uttryckligen bett om annat språk) - och ALDRIG råa formatsträngar (%d/%s), synliga BBCode-taggar eller rådumpade data i UI:t"),
         ];
 
         var result = new List<string>(criteria);

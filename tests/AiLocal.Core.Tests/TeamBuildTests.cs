@@ -94,6 +94,13 @@ public class TeamBuildTests : IDisposable
         var (merged, output) = await isolation.MergeAsync(task.TaskId, CancellationToken.None);
         Assert.True(merged, output);
         Assert.True(File.Exists(Path.Combine(_dir, "sound.js")), "mergad fil saknas i huvudrepot");
+
+        // v1.99: InitAsync ska ha stängt av autocrlf lokalt - annars
+        // konverterar en global autocrlf=true worktree-checkouts till CRLF
+        // och modellernas \n-ankare slutar matcha (edit_file-fiaskot).
+        var cfg = Path.Combine(_dir, ".git", "config");
+        Assert.True(File.Exists(cfg), ".git/config saknas");
+        Assert.Contains("autocrlf = false", await File.ReadAllTextAsync(cfg));
     }
 
     [Fact]

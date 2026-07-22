@@ -69,6 +69,18 @@ public sealed class ChangeReviewer
                 || lower.Contains("approved") || lower.Contains("looks good") || lower.Contains("is correct"))
                 return (true, null);
 
+            // Maskningsartefakt (v1.99, sett live i teamlägget): leverantörens
+            // PII-filter maskar giltiga kodmönster (PackedVector2Array(),
+            // particle_burst-anrop, efternamnslistor) till "[ADDRESS]" i den
+            // diff GRANSKAREN ser - varpå den avvisar korrekt kod som
+            // "ogiltig GDScript-syntax". Skrivvakterna garanterar redan att
+            // markörer aldrig når disk, så ETT avslag som citerar en markör
+            // är per definition ett kanalartefakt, inte ett kodfel -> fail
+            // open. (Kostade rundor i tre spår och fick ett spår att skriva
+            // en medvetet enklare version för att undvika filtret.)
+            if (AiLocal.Core.Agent.AgentToolExecutor.RedactionArtifactIn(reason) is not null)
+                return (true, null);
+
             // Nitpick-filter: granskarprompten FÖRBJUDER stil-, namn- och
             // felhanterings-avslag, men svaga granskarmodeller avvisar ändå
             // på exakt de grunderna (transkript: "lacks proper error

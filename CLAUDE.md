@@ -103,7 +103,9 @@ svenska (commits i ASCII-svenska, utan åäö).
 - UI: svenska, INGA emoji (SVG-ikonuppsättningen ICONS i Dashboard.cs —
   varje `data-icon` MÅSTE ha en nyckel; testlåst), platt inte blockigt,
   transitions på nya interaktioner, native OS-pickers före egna fält.
-- Kit-innehåll (spelkoden i C#-strängar): ASCII-svenska (inga åäö).
+- Kit-innehåll (spelkoden i C#-strängar): SPELARTEXT PÅ ENGELSKA (v1.99 —
+  ägarens beslut; ASCII-svenska såg trasig ut för spelare), kodkommentarer
+  ASCII-svenska (inga åäö). Regissören kräver engelska via stående kriterium.
 - Nya Worker-inställningar: ALLA 8 kopplingspunkter (SettingsUpdate,
   StoredNodeSettings, LoadInto, Read, Update, CopyCurrentIntoStored,
   markup, applySettingsData+saveSettings) — annars dör värdet tyst.

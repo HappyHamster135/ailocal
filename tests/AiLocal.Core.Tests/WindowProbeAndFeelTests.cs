@@ -53,13 +53,14 @@ public class WindowProbeAndFeelTests
         var basic = new[] { "5 banor", "3 fiendetyper" };
 
         var godot = DirectorPass.EnsureEngineFeelCriteria(basic, "godot");
-        Assert.Equal(8, godot.Count); // 2 basic + 6 spelkänsla-/kvalitetskriterier
+        Assert.Equal(9, godot.Count); // 2 basic + 7 spelkänsla-/kvalitetskriterier
         Assert.Contains(godot, c => c.Contains("Ljudeffekt"));
         Assert.Contains(godot, c => c.Contains("feedback", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(godot, c => c.Contains("övergångar"));
         Assert.Contains(godot, c => c.Contains("replay-värde"));   // v1.97: svårighetsgrader ELLER upplåsningar/new game+
         Assert.Contains(godot, c => c.Contains("juice", StringComparison.OrdinalIgnoreCase));     // C1
         Assert.Contains(godot, c => c.Contains("prestanda", StringComparison.OrdinalIgnoreCase));  // C3
+        Assert.Contains(godot, c => c.Contains("ENGELSKA"));       // v1.99: spelspråk engelska + inga textdefekter
 
         Assert.Equal(basic, DirectorPass.EnsureEngineFeelCriteria(basic, "html5"));
         Assert.Equal(basic, DirectorPass.EnsureEngineFeelCriteria(basic, null));
@@ -71,9 +72,9 @@ public class WindowProbeAndFeelTests
         var withSound = new[] { "ljudeffekter för hopp/mynt/träff", "5 banor" };
         var result = DirectorPass.EnsureEngineFeelCriteria(withSound, "godot");
 
-        // Ljud-punkten är redan täckt av regissören - bara de fem övriga
-        // (feedback, övergångar, svårighet, juice, prestanda) läggs till.
-        Assert.Equal(7, result.Count);
+        // Ljud-punkten är redan täckt av regissören - bara de sex övriga
+        // (feedback, övergångar, replay, juice, prestanda, språk) läggs till.
+        Assert.Equal(8, result.Count);
         Assert.Single(result, c => c.Contains("ljud", StringComparison.OrdinalIgnoreCase));
     }
 
