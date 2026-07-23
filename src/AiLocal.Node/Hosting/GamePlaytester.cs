@@ -286,6 +286,32 @@ public sealed class GamePlaytester
                 && AiLocal.Core.Agent.ToolLocator.Find("godot") is { } godotExe
                 && File.Exists(godotExe))
             {
+                // v2.12 GENOMBROTTSFYNDET: `--path` i SPELLÄGE importerar
+                // ALDRIG resurser - alla sond-/lokalkörningar har spelat
+                // spelen UTAN sprites och ljud (osynliga gubbar, tysta pip;
+                // "No loader found for res://*.wav" i varenda logg). Kör
+                // explicit `--headless --import` FÖRST så fönsterkörningen
+                // faktiskt visar spelet som det ser ut.
+                try
+                {
+                    var import = new ProcessStartInfo(godotExe)
+                    {
+                        Arguments = $"--headless --path \"{projectRoot}\" --import",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using var ip = Process.Start(import);
+                    if (ip is not null)
+                    {
+                        _ = ip.StandardOutput.ReadToEndAsync();
+                        _ = ip.StandardError.ReadToEndAsync();
+                        await ip.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromMinutes(3)).Token);
+                    }
+                }
+                catch (OperationCanceledException) { /* import tog för länge - kör ändå */ }
+                catch { /* importen är ett golv, aldrig ett krav */ }
                 gamePath = godotExe;
                 exeArguments = $"--path \"{projectRoot}\"";
             }

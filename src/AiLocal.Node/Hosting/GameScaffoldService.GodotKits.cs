@@ -1904,15 +1904,21 @@ func close_overlay() -> void:
     // ---- Main.gd: plattformare (Pixel Rush) --------------------------------
     const string GodotPlatformerMain = """
 extends Node2D
-# Pixel Rush - komplett plattformargrund i ren GDScript: 3 nivaer, mynt,
-# patrullerande fiender (stampbara), mal-flagga, HP, highscore och juice.
-# BYT TEMA: farger/former i make_texture-anropen + texterna + nivadatan.
+# Pixel Rush PREMIUM - arkadgolvet pa riktigt: lagrad bakgrund (kullar/moln),
+# 5 designade banor (lar -> testa -> vrid), vittrande plattformar, studs-
+# plattor, medaljer (guld/silver/brons), overgangar, volymkontroll, coyote-
+# tid + hoppbuffert + variabel hopphojd + acceleration, landnings-squash.
+# BYT TEMA: farger/paletter i level_data + make_texture-anropen + texterna.
 
 const SAVE_PATH := "user://pixelrush_highscore.save"
-const FINAL_LEVEL := 3
+const MEDALS_PATH := "user://pixelrush_medals.save"
+const FINAL_LEVEL := 5
 const GRAVITY := 1400.0
-const MOVE_SPEED := 300.0
+const MOVE_SPEED := 320.0
+const GROUND_ACCEL := 2600.0
+const AIR_ACCEL := 1700.0
 const JUMP_VELOCITY := -620.0
+const SPRING_VELOCITY := -940.0
 
 var difficulty := 1
 var state := "title" # title | playing | paused | over
@@ -1920,21 +1926,40 @@ var player: CharacterBody2D
 var enemies: Array = []   # [{body, min_x, max_x, dir}]
 var coins: Array = []
 var platforms: Array = []
+var crumblers: Array = [] # [{body, sprite, shape, state, t, rect}]
+var springs: Array = []   # [{pos, t}]
 var goal: Sprite2D
 var level := 0
 var hp := 3
 var score := 0
 var invulnerable := 0.0
-var shake := 0.0  # C1 juice: screenshake-magnitud (px), avtar mot 0
+var shake := 0.0
 var coyote := 0.0
 var jump_buffer := 0.0
 var jump_was_down := false
-var touch_jump := false   # HOPP-knappen pa touchskarmar (datorspel: alltid false)
+var touch_jump := false
 var was_on_floor := false
 var spawn_point := Vector2(60, 540)
-var sky := Color(0.35, 0.55, 0.85)
+var sky_top := Color(0.30, 0.52, 0.86)
+var sky_bottom := Color(0.66, 0.82, 0.95)
+var hill_far := Color(0.42, 0.60, 0.80)
+var hill_near := Color(0.32, 0.50, 0.68)
+var clouds: Array = []    # [{x, y, speed, s}]
+var t_global := 0.0
+var fade := 1.0           # 1 = svart, 0 = klart; tonas i _process
+var fade_target := 0.0
+var level_card := 0.0     # "LEVEL N"-kortets kvarvarande tid
+var muted := false
+var volume_db := 0.0
+# Medaljer: {"1": "gold" | "silver" | "bronze"} - villkor spars per bana.
+var medals := {}
+var level_damage := 0
+var level_coins_total := 0
+var level_coins_taken := 0
 var hud: CanvasLayer
 var hud_label: Label
+var fade_rect: ColorRect
+var card_label: Label
 var overlay: Control
 var snd := {}
 
@@ -1957,12 +1982,33 @@ func _ready() -> void:
 		mp.finished.connect(mp.play)
 		add_child(mp)
 		mp.play()
+	for i in range(7):
+		clouds.append({"x": randf() * 1300.0 - 80.0, "y": 40.0 + randf() * 190.0,
+			"speed": 6.0 + randf() * 14.0, "s": 0.7 + randf() * 0.9})
 	hud = CanvasLayer.new()
 	add_child(hud)
 	hud_label = Label.new()
-	hud_label.position = Vector2(20, 14)
-	hud_label.add_theme_font_size_override("font_size", 18)
+	hud_label.position = Vector2(20, 12)
+	hud_label.add_theme_font_size_override("font_size", 19)
+	hud_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	hud_label.add_theme_constant_override("outline_size", 8)
 	hud.add_child(hud_label)
+	# Overgangslagret: svart fade + "LEVEL N"-kort, over allt annat.
+	fade_rect = ColorRect.new()
+	fade_rect.color = Color(0.06, 0.05, 0.10, 1.0)
+	fade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(fade_rect)
+	card_label = Label.new()
+	card_label.add_theme_font_size_override("font_size", 52)
+	card_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	card_label.add_theme_constant_override("outline_size", 12)
+	card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card_label.size = Vector2(1152, 70)
+	card_label.position = Vector2(0, 280)
+	card_label.visible = false
+	hud.add_child(card_label)
+	_load_medals()
 	_setup_touch()
 	show_title()
 
@@ -2004,6 +2050,12 @@ func play_sound(key: String) -> void:
 	if snd.has(key):
 		snd[key].play()
 
+# ---------- ljudkontroll (volym + mute - arkadribban kraver den) ----------
+func _apply_volume() -> void:
+	var bus := AudioServer.get_bus_index("Master")
+	AudioServer.set_bus_mute(bus, muted)
+	AudioServer.set_bus_volume_db(bus, volume_db)
+
 # C1 juice: en engangs-partikelskur. HUD/overlay ligger pa en CanvasLayer och
 # paverkas inte av att varldens Node2D (self) skakas.
 func spawn_burst(pos: Vector2, col: Color, count: int) -> void:
@@ -2020,7 +2072,6 @@ func spawn_burst(pos: Vector2, col: Color, count: int) -> void:
 	p.scale_amount_min = 2.0
 	p.scale_amount_max = 4.0
 	p.color = col
-	# C1: utan textur blir partiklarna en 1x1-quad och nastan osynliga.
 	p.texture = make_texture(6, Color(1, 1, 1), Color(1, 1, 1))
 	add_child(p)
 	p.emitting = true
@@ -2069,9 +2120,7 @@ func make_platform(r: Rect2) -> StaticBody2D:
 	var rect := RectangleShape2D.new()
 	rect.size = r.size
 	shape.shape = rect
-	# Genomhoppbar underifran (klassisk plattformare) - upptackt i skarpt
-	# Android-speltest v1.93: solida plattformar gav huvuddunk vid hopp
-	# under dem. Marken ligger langst ner sa one-way ar ofarlig aven dar.
+	# Genomhoppbar underifran (klassisk plattformare) - v1.93-fyndet.
 	shape.one_way_collision = true
 	body.add_child(shape)
 	var spr := Sprite2D.new()
@@ -2081,35 +2130,80 @@ func make_platform(r: Rect2) -> StaticBody2D:
 	add_child(body)
 	return body
 
-# ---------- nivadata ----------
-# Hopphojden ar ~137 px (v^2/2g) - alla plattformssteg ligger pa <= 120 px
-# sa varje niva ar bevisat klarbar. BYT TEMA/BANOR har.
+func make_crumbler(r: Rect2) -> void:
+	var body := StaticBody2D.new()
+	body.position = r.get_center()
+	var shape := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = r.size
+	shape.shape = rect
+	shape.one_way_collision = true
+	body.add_child(shape)
+	var spr := Sprite2D.new()
+	spr.texture = make_texture(8, Color(0.55, 0.45, 0.30), Color(0.85, 0.75, 0.45))
+	spr.scale = Vector2(r.size.x / 8.0, r.size.y / 8.0)
+	body.add_child(spr)
+	add_child(body)
+	crumblers.append({"body": body, "sprite": spr, "shape": shape, "state": "idle", "t": 0.0, "rect": r})
+
+# ---------- nivadata: lar -> testa -> vrid ----------
+# Hopphojden ar ~137 px - alla steg <= 120 px sa varje bana ar bevisat klarbar.
+# Varje bana har egen palett (sky/hills) och EN ny ide:
+#  1 LAR: hoppa + mynt, en langsam fiende.  2 TESTA: gap + tva fiender.
+#  3 VRID: vittrande plattformar.  4 VRID: studsplattor + hojd.
+#  5 FINAL: allt kombinerat, tight rutt.
 func level_data(n: int) -> Dictionary:
 	if n == 1:
 		return {
-			"plats": [Rect2(0, 600, 1152, 48), Rect2(150, 480, 220, 24), Rect2(450, 380, 200, 24), Rect2(760, 300, 200, 24), Rect2(950, 460, 180, 24)],
-			"coins": [Vector2(220, 444), Vector2(540, 344), Vector2(850, 264), Vector2(1030, 424), Vector2(640, 564)],
-			"enemies": [[Vector2(520, 576), 400.0, 720.0]],
-			"goal": Vector2(1090, 560),
-			"spawn": Vector2(60, 540),
-			"sky": Color(0.35, 0.55, 0.85)
+			"plats": [Rect2(0, 600, 1152, 48), Rect2(180, 490, 200, 24), Rect2(470, 400, 190, 24), Rect2(760, 490, 200, 24)],
+			"crumble": [], "springs": [],
+			"coins": [Vector2(260, 454), Vector2(560, 364), Vector2(850, 454), Vector2(400, 564), Vector2(700, 564)],
+			"enemies": [[Vector2(560, 576), 430.0, 700.0]],
+			"goal": Vector2(1080, 560), "spawn": Vector2(60, 540),
+			"sky_top": Color(0.30, 0.52, 0.86), "sky_bottom": Color(0.70, 0.85, 0.95),
+			"hill_far": Color(0.45, 0.62, 0.82), "hill_near": Color(0.34, 0.52, 0.70)
 		}
 	if n == 2:
 		return {
-			"plats": [Rect2(0, 600, 400, 48), Rect2(752, 600, 400, 48), Rect2(430, 520, 140, 24), Rect2(600, 440, 140, 24), Rect2(430, 360, 140, 24), Rect2(600, 280, 140, 24), Rect2(850, 220, 200, 24)],
-			"coins": [Vector2(490, 484), Vector2(660, 404), Vector2(490, 324), Vector2(660, 244), Vector2(200, 564), Vector2(940, 564), Vector2(900, 184)],
-			"enemies": [[Vector2(200, 576), 60.0, 340.0], [Vector2(900, 576), 800.0, 1090.0]],
-			"goal": Vector2(1010, 180),
-			"spawn": Vector2(60, 540),
-			"sky": Color(0.85, 0.6, 0.4)
+			"plats": [Rect2(0, 600, 360, 48), Rect2(470, 600, 220, 48), Rect2(800, 600, 352, 48), Rect2(300, 480, 150, 24), Rect2(600, 470, 150, 24), Rect2(900, 460, 150, 24)],
+			"crumble": [], "springs": [],
+			"coins": [Vector2(370, 444), Vector2(670, 434), Vector2(970, 424), Vector2(560, 564), Vector2(880, 564), Vector2(150, 564)],
+			"enemies": [[Vector2(150, 576), 40.0, 320.0], [Vector2(900, 576), 820.0, 1110.0]],
+			"goal": Vector2(1090, 420), "spawn": Vector2(50, 540),
+			"sky_top": Color(0.86, 0.58, 0.38), "sky_bottom": Color(0.96, 0.82, 0.60),
+			"hill_far": Color(0.80, 0.55, 0.45), "hill_near": Color(0.62, 0.42, 0.38)
+		}
+	if n == 3:
+		return {
+			"plats": [Rect2(0, 600, 300, 48), Rect2(852, 600, 300, 48), Rect2(180, 470, 140, 24), Rect2(850, 470, 140, 24)],
+			"crumble": [Rect2(380, 520, 110, 20), Rect2(540, 450, 110, 20), Rect2(700, 520, 110, 20), Rect2(470, 340, 110, 20), Rect2(640, 340, 110, 20)],
+			"springs": [],
+			"coins": [Vector2(430, 484), Vector2(590, 414), Vector2(750, 484), Vector2(520, 304), Vector2(690, 304), Vector2(240, 434)],
+			"enemies": [[Vector2(920, 576), 870.0, 1100.0]],
+			"goal": Vector2(920, 430), "spawn": Vector2(50, 540),
+			"sky_top": Color(0.26, 0.30, 0.52), "sky_bottom": Color(0.55, 0.50, 0.72),
+			"hill_far": Color(0.40, 0.40, 0.62), "hill_near": Color(0.30, 0.30, 0.50)
+		}
+	if n == 4:
+		return {
+			"plats": [Rect2(0, 600, 1152, 48), Rect2(200, 470, 150, 24), Rect2(520, 360, 150, 24), Rect2(840, 250, 150, 24)],
+			"crumble": [Rect2(380, 250, 100, 20)],
+			"springs": [Vector2(430, 580), Vector2(740, 580)],
+			"coins": [Vector2(270, 434), Vector2(590, 324), Vector2(910, 214), Vector2(430, 480), Vector2(740, 440), Vector2(430, 214)],
+			"enemies": [[Vector2(300, 576), 120.0, 560.0], [Vector2(900, 576), 700.0, 1080.0]],
+			"goal": Vector2(1080, 210), "spawn": Vector2(60, 540),
+			"sky_top": Color(0.15, 0.42, 0.48), "sky_bottom": Color(0.55, 0.80, 0.75),
+			"hill_far": Color(0.30, 0.55, 0.55), "hill_near": Color(0.22, 0.44, 0.44)
 		}
 	return {
-		"plats": [Rect2(0, 600, 1152, 48), Rect2(200, 490, 150, 24), Rect2(430, 490, 150, 24), Rect2(660, 490, 150, 24), Rect2(890, 490, 150, 24), Rect2(320, 380, 150, 24), Rect2(550, 380, 150, 24), Rect2(780, 380, 150, 24), Rect2(500, 270, 180, 24)],
-		"coins": [Vector2(270, 454), Vector2(500, 454), Vector2(730, 454), Vector2(960, 454), Vector2(390, 344), Vector2(620, 344), Vector2(850, 344), Vector2(590, 234)],
-		"enemies": [[Vector2(300, 576), 100.0, 500.0], [Vector2(800, 576), 600.0, 1050.0], [Vector2(620, 356), 560.0, 690.0]],
-		"goal": Vector2(580, 234),
-		"spawn": Vector2(60, 540),
-		"sky": Color(0.3, 0.3, 0.5)
+		"plats": [Rect2(0, 600, 260, 48), Rect2(892, 600, 260, 48), Rect2(220, 480, 130, 24), Rect2(800, 480, 130, 24)],
+		"crumble": [Rect2(400, 540, 100, 20), Rect2(560, 470, 100, 20), Rect2(720, 540, 100, 20), Rect2(500, 340, 100, 20)],
+		"springs": [Vector2(300, 580), Vector2(850, 460)],
+		"coins": [Vector2(450, 504), Vector2(610, 434), Vector2(770, 504), Vector2(550, 304), Vector2(300, 434), Vector2(950, 344), Vector2(120, 564), Vector2(1030, 564)],
+		"enemies": [[Vector2(140, 576), 40.0, 240.0], [Vector2(1000, 576), 910.0, 1120.0], [Vector2(860, 456), 810.0, 920.0]],
+		"goal": Vector2(1000, 300), "spawn": Vector2(50, 540),
+		"sky_top": Color(0.42, 0.20, 0.44), "sky_bottom": Color(0.90, 0.55, 0.45),
+		"hill_far": Color(0.60, 0.35, 0.48), "hill_near": Color(0.45, 0.26, 0.40)
 	}
 
 # ---------- flode ----------
@@ -2129,29 +2223,44 @@ func clear_entities() -> void:
 		c.queue_free()
 	for p in platforms:
 		p.queue_free()
+	for cr in crumblers:
+		cr["body"].queue_free()
 	if goal:
 		goal.queue_free()
 		goal = null
 	enemies = []
 	coins = []
 	platforms = []
+	crumblers = []
+	springs = []
 
 func next_level() -> void:
+	# Medalj for banan som just klarades (inte vid forsta anropet).
+	if level >= 1:
+		_award_medal()
 	level += 1
 	if level > FINAL_LEVEL:
 		finish(true)
 		return
 	clear_entities()
 	var data := level_data(level)
-	sky = data["sky"]
+	sky_top = data["sky_top"]
+	sky_bottom = data["sky_bottom"]
+	hill_far = data["hill_far"]
+	hill_near = data["hill_near"]
 	queue_redraw()
 	for r in data["plats"]:
 		platforms.append(make_platform(r))
+	for cr in data["crumble"]:
+		make_crumbler(cr)
+	for sp in data["springs"]:
+		springs.append({"pos": sp, "t": 0.0})
 	for cpos in data["coins"]:
 		var c := Sprite2D.new()
 		c.texture = make_texture(7, Color(0.95, 0.8, 0.2), Color(1, 1, 0.7))
 		c.scale = Vector2(2, 2)
 		c.position = cpos
+		c.set_meta("base_y", cpos.y)
 		add_child(c)
 		coins.append(c)
 	for def in data["enemies"]:
@@ -2172,12 +2281,37 @@ func next_level() -> void:
 	player.position = spawn_point
 	player.velocity = Vector2.ZERO
 	invulnerable = 0.0
+	level_damage = 0
+	level_coins_total = data["coins"].size()
+	level_coins_taken = 0
 	var panim := player.get_node("Anim") as AnimatedSprite2D
 	if panim:
 		panim.visible = true
 		panim.modulate = Color.WHITE
+	# Overgang: snabb svartton + "LEVEL N"-kort.
+	fade = 1.0
+	fade_target = 0.0
+	level_card = 1.1
+	card_label.text = "LEVEL %d" % level
+	card_label.visible = true
+	play_sound("click")
+
+func _award_medal() -> void:
+	var tier := "bronze"
+	if level_coins_taken >= level_coins_total and level_damage == 0:
+		tier = "gold"
+	elif level_coins_taken >= level_coins_total:
+		tier = "silver"
+	var key := str(level)
+	var rank := {"bronze": 1, "silver": 2, "gold": 3}
+	var old: String = medals.get(key, "")
+	if old == "" or int(rank.get(tier, 0)) > int(rank.get(old, 0)):
+		medals[key] = tier
+		_save_medals()
 
 func finish(won: bool) -> void:
+	if won:
+		_award_medal()
 	state = "over"
 	if won:
 		play_sound("win")
@@ -2187,7 +2321,7 @@ func finish(won: bool) -> void:
 		best = score
 	show_overlay("YOU WIN!" if won else "GAME OVER", "Score: %d   Best: %d\nR: play again" % [score, best], true)
 
-# ---------- highscore ----------
+# ---------- highscore + medaljer ----------
 func load_highscore() -> int:
 	if not FileAccess.file_exists(SAVE_PATH):
 		return 0
@@ -2199,25 +2333,55 @@ func save_highscore(value: int) -> void:
 	if f:
 		f.store_string(str(value))
 
+func _load_medals() -> void:
+	medals = {}
+	if not FileAccess.file_exists(MEDALS_PATH):
+		return
+	var f := FileAccess.open(MEDALS_PATH, FileAccess.READ)
+	if f:
+		var data: Variant = JSON.parse_string(f.get_as_text())
+		if typeof(data) == TYPE_DICTIONARY:
+			medals = data
+
+func _save_medals() -> void:
+	var f := FileAccess.open(MEDALS_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(medals))
+
 # ---------- loop ----------
+func _process(delta: float) -> void:
+	t_global += delta
+	# Moln driver alltid - varlden lever aven pa titeln.
+	for c in clouds:
+		c["x"] = float(c["x"]) + float(c["speed"]) * delta
+		if float(c["x"]) > 1260.0:
+			c["x"] = -140.0
+	# Overgangar: fade + nivakort.
+	fade = move_toward(fade, fade_target, 2.6 * delta)
+	fade_rect.color.a = fade
+	if level_card > 0.0:
+		level_card -= delta
+		if level_card <= 0.0:
+			card_label.visible = false
+	queue_redraw()
+
 func _physics_process(delta: float) -> void:
 	if state != "playing" or player == null:
 		return
-	# C1 juice: screenshake genom att flytta varldens Node2D en liten slump-
-	# forskjutning som avtar. Snapper tillbaka till noll nar den slocknat.
 	if shake > 0.0:
 		shake = move_toward(shake, 0.0, 32.0 * delta)
 		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
 	elif position != Vector2.ZERO:
 		position = Vector2.ZERO
-	# ---- spelarfysik: gravitation, coyotetid, hoppbuffert, variabelt hopp ----
+	# ---- rorelse: acceleration ger tyngd, coyote + buffert ger valvilja ----
 	var ax := Input.get_axis("ui_left", "ui_right")
 	if ax == 0.0:
 		if Input.is_physical_key_pressed(KEY_A):
 			ax = -1.0
 		elif Input.is_physical_key_pressed(KEY_D):
 			ax = 1.0
-	player.velocity.x = ax * MOVE_SPEED
+	var accel := GROUND_ACCEL if player.is_on_floor() else AIR_ACCEL
+	player.velocity.x = move_toward(player.velocity.x, ax * MOVE_SPEED, accel * delta)
 	player.velocity.y = minf(player.velocity.y + GRAVITY * delta, 980.0)
 	var jump_down := Input.is_physical_key_pressed(KEY_SPACE) \
 		or Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP) \
@@ -2225,7 +2389,7 @@ func _physics_process(delta: float) -> void:
 	if jump_down and not jump_was_down:
 		jump_buffer = 0.12
 	if not jump_down and jump_was_down and player.velocity.y < -220.0:
-		player.velocity.y = -220.0  # C1: slappt tidigt = kort hopp (variabel hojd)
+		player.velocity.y = -220.0  # slappt tidigt = kort hopp (variabel hojd)
 	jump_was_down = jump_down
 	coyote = 0.14 if player.is_on_floor() else maxf(coyote - delta, 0.0)
 	jump_buffer = maxf(jump_buffer - delta, 0.0)
@@ -2234,15 +2398,18 @@ func _physics_process(delta: float) -> void:
 		jump_buffer = 0.0
 		coyote = 0.0
 		play_sound("click")
-		spawn_burst(player.position + Vector2(0, 20), Color(0.9, 0.9, 0.85), 6)  # C1: hoppdamm
+		spawn_burst(player.position + Vector2(0, 20), Color(0.9, 0.9, 0.85), 6)
 	player.move_and_slide()
 	var on_floor := player.is_on_floor()
-	if on_floor and not was_on_floor:
-		spawn_burst(player.position + Vector2(0, 20), Color(0.8, 0.75, 0.7), 8)  # C1: landningsdamm
-		shake = maxf(shake, 2.0)
-	was_on_floor = on_floor
 	var anim := player.get_node("Anim") as AnimatedSprite2D
+	if on_floor and not was_on_floor:
+		spawn_burst(player.position + Vector2(0, 20), Color(0.8, 0.75, 0.7), 8)
+		shake = maxf(shake, 2.0)
+		if anim:
+			anim.scale = Vector2(2.5, 1.6)  # landnings-squash
+	was_on_floor = on_floor
 	if anim:
+		anim.scale = anim.scale.lerp(Vector2(2, 2), 12.0 * delta)
 		if absf(player.velocity.x) > 10.0:
 			anim.play("walk")
 			anim.flip_h = player.velocity.x < 0.0
@@ -2250,16 +2417,51 @@ func _physics_process(delta: float) -> void:
 			anim.play("idle")
 	if invulnerable > 0.0:
 		invulnerable -= delta
-		# C1 juice: spelaren blinkar + tonar tillbaka fran rott medan
-		# ododlighetsfonstret varar - visar ocksa att i-frames ar aktiva.
 		if anim:
 			anim.visible = fmod(invulnerable, 0.2) < 0.12
 			anim.modulate = anim.modulate.lerp(Color.WHITE, 6.0 * delta)
 			if invulnerable <= 0.0:
 				anim.visible = true
 				anim.modulate = Color.WHITE
+	# ---- vittrande plattformar: sta pa -> skakar -> faller -> ater ----
+	for cr in crumblers:
+		var st: String = cr["state"]
+		var body2: StaticBody2D = cr["body"]
+		var rct: Rect2 = cr["rect"]
+		if st == "idle":
+			if on_floor and absf(player.position.x - rct.get_center().x) < rct.size.x * 0.5 + 12.0 \
+				and absf((player.position.y + 12.0) - rct.position.y) < 14.0:
+				cr["state"] = "shaking"
+				cr["t"] = 0.45
+		elif st == "shaking":
+			cr["t"] = float(cr["t"]) - delta
+			(cr["sprite"] as Sprite2D).offset = Vector2(randf_range(-2, 2), 0)
+			if float(cr["t"]) <= 0.0:
+				cr["state"] = "gone"
+				cr["t"] = 2.6
+				body2.visible = false
+				(cr["shape"] as CollisionShape2D).set_deferred("disabled", true)
+				spawn_burst(rct.get_center(), Color(0.7, 0.6, 0.4), 10)
+				play_sound("hurt")
+		elif st == "gone":
+			cr["t"] = float(cr["t"]) - delta
+			if float(cr["t"]) <= 0.0:
+				cr["state"] = "idle"
+				body2.visible = true
+				(cr["sprite"] as Sprite2D).offset = Vector2.ZERO
+				(cr["shape"] as CollisionShape2D).set_deferred("disabled", false)
+	# ---- studsplattor ----
+	for sp in springs:
+		sp["t"] = maxf(float(sp["t"]) - delta, 0.0)
+		var spos: Vector2 = sp["pos"]
+		if player.velocity.y > 40.0 and player.position.distance_to(spos + Vector2(0, -14)) < 30.0:
+			player.velocity.y = SPRING_VELOCITY
+			sp["t"] = 0.25
+			play_sound("coin")
+			shake = maxf(shake, 4.0)
+			spawn_burst(spos, Color(0.5, 1.0, 0.9), 14)
 	# ---- fiender: patrull + stamp/traff ----
-	var speed := 46.0 + level * 10.0 + difficulty * 14.0
+	var speed := 46.0 + level * 9.0 + difficulty * 14.0
 	var alive: Array = []
 	for e in enemies:
 		var body: Node2D = e["body"]
@@ -2275,11 +2477,11 @@ func _physics_process(delta: float) -> void:
 		var stomped := false
 		if absf(to_player.x) < 26.0 and absf(to_player.y) < 32.0:
 			if player.velocity.y > 120.0 and to_player.y < -8.0:
-				stomped = true  # spelaren faller ovanifran -> stamp
+				stomped = true
 				score += 20
-				player.velocity.y = -430.0  # studsen ar belonningen
+				player.velocity.y = -430.0
 				play_sound("coin")
-				shake = maxf(shake, 5.0)  # C1 juice
+				shake = maxf(shake, 5.0)
 				spawn_burst(body.position, Color(0.9, 0.5, 0.9), 14)
 				body.queue_free()
 			elif invulnerable <= 0.0:
@@ -2289,26 +2491,30 @@ func _physics_process(delta: float) -> void:
 		if not stomped:
 			alive.append(e)
 	enemies = alive
-	# ---- mynt ----
+	# ---- mynt (bobbar i luften) ----
 	var remaining: Array = []
 	for c in coins:
+		c.position.y = float(c.get_meta("base_y")) + sin(t_global * 3.0 + c.position.x * 0.05) * 3.0
 		if c.position.distance_to(player.position) < 30.0:
 			score += 10
+			level_coins_taken += 1
 			play_sound("coin")
-			spawn_burst(c.position, Color(1, 0.9, 0.3), 12)  # C1 juice
+			spawn_burst(c.position, Color(1, 0.9, 0.3), 12)
 			shake = maxf(shake, 3.0)
 			c.queue_free()
 		else:
 			remaining.append(c)
 	coins = remaining
-	# ---- mal-flaggan ----
-	if goal and player.position.distance_to(goal.position) < 40.0:
-		score += 50
-		play_sound("coin")
-		shake = maxf(shake, 6.0)
-		spawn_burst(goal.position, Color(0.4, 1, 0.6), 20)  # C1 juice
-		next_level()
-		return
+	# ---- mal-flaggan (vajar) ----
+	if goal:
+		goal.scale.x = 3.0 + sin(t_global * 4.0) * 0.35
+		if player.position.distance_to(goal.position) < 40.0:
+			score += 50
+			play_sound("coin")
+			shake = maxf(shake, 6.0)
+			spawn_burst(goal.position, Color(0.4, 1, 0.6), 20)
+			next_level()
+			return
 	# ---- fall utanfor skarmen ----
 	if player.position.y > 720.0:
 		damage()
@@ -2320,13 +2526,14 @@ func _physics_process(delta: float) -> void:
 
 func damage() -> void:
 	hp -= 1
+	level_damage += 1
 	invulnerable = 1.2
 	play_sound("hurt")
-	shake = 9.0  # C1 juice: kannbar traff
+	shake = 9.0
 	spawn_burst(player.position, Color(1, 0.3, 0.3), 18)
 	var anim := player.get_node("Anim") as AnimatedSprite2D
 	if anim:
-		anim.modulate = Color(1, 0.35, 0.35)  # C1 juice: spelaren blinkar rott
+		anim.modulate = Color(1, 0.35, 0.35)
 	if hp <= 0:
 		finish(false)
 
@@ -2338,57 +2545,138 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif state == "paused":
 			state = "playing"
 			close_overlay()
-	if event is InputEventKey and event.pressed and event.keycode == KEY_R and state == "over":
-		new_game(difficulty)
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_R and state == "over":
+			new_game(difficulty)
+		elif event.keycode == KEY_M:
+			muted = not muted
+			_apply_volume()
+		elif event.keycode == KEY_MINUS:
+			volume_db = maxf(volume_db - 3.0, -24.0)
+			_apply_volume()
+		elif event.keycode == KEY_EQUAL:
+			volume_db = minf(volume_db + 3.0, 6.0)
+			_apply_volume()
 
+# ---------- ritning: lagrad varld i stallet for platt himmel ----------
 func _draw() -> void:
-	draw_rect(Rect2(0, 0, 1152, 648), sky)
+	# Himmelsgradient (band) + sol med glod.
+	var bands := 18
+	for i in range(bands):
+		var tt := float(i) / float(bands - 1)
+		draw_rect(Rect2(0, 648.0 * float(i) / float(bands), 1152, 648.0 / float(bands) + 1.0),
+			sky_top.lerp(sky_bottom, tt))
+	draw_circle(Vector2(1010, 90), 58.0, Color(1, 0.95, 0.75, 0.25))
 	draw_circle(Vector2(1010, 90), 42.0, Color(1, 0.92, 0.6))
+	# Moln (driver i _process).
+	for c in clouds:
+		var cx: float = c["x"]
+		var cy: float = c["y"]
+		var cs: float = c["s"]
+		draw_circle(Vector2(cx, cy), 26.0 * cs, Color(1, 1, 1, 0.55))
+		draw_circle(Vector2(cx + 24.0 * cs, cy + 6.0 * cs), 20.0 * cs, Color(1, 1, 1, 0.50))
+		draw_circle(Vector2(cx - 24.0 * cs, cy + 7.0 * cs), 18.0 * cs, Color(1, 1, 1, 0.50))
+	# Kullar i tva lager - djup utan kamera.
+	var far := PackedVector2Array()
+	far.append(Vector2(0, 648))
+	for i in range(9):
+		var x := float(i) * 144.0
+		far.append(Vector2(x, 470.0 + sin(float(i) * 1.7 + 0.8) * 55.0))
+	far.append(Vector2(1152, 648))
+	draw_colored_polygon(far, hill_far)
+	var near := PackedVector2Array()
+	near.append(Vector2(0, 648))
+	for i in range(7):
+		var x2 := float(i) * 192.0
+		near.append(Vector2(x2, 540.0 + sin(float(i) * 2.3) * 45.0))
+	near.append(Vector2(1152, 648))
+	draw_colored_polygon(near, hill_near)
+	# Studsplattor ritas i varlden (fjaderputs som trycks ihop).
+	for sp in springs:
+		var spos: Vector2 = sp["pos"]
+		var squish: float = 1.0 - float(sp["t"]) * 1.6
+		draw_rect(Rect2(spos.x - 22, spos.y - 8.0 * squish, 44, 8.0 * squish + 4.0), Color(0.20, 0.75, 0.65))
+		draw_rect(Rect2(spos.x - 22, spos.y - 8.0 * squish, 44, 4), Color(0.65, 1.0, 0.9))
 
 # ---------- overlays ----------
 func show_title() -> void:
 	state = "title"
+	sky_top = Color(0.30, 0.52, 0.86)
+	sky_bottom = Color(0.70, 0.85, 0.95)
+	hill_far = Color(0.45, 0.62, 0.82)
+	hill_near = Color(0.34, 0.52, 0.70)
+	fade = 0.0
+	fade_target = 0.0
 	queue_redraw()
-	show_overlay("PIXEL RUSH", "Reach the flag across %d levels. Arrows/A-D: move, Space/W: jump.\nJump ON enemies to stomp them. Best: %d" % [FINAL_LEVEL, load_highscore()], true)
+	show_overlay("PIXEL RUSH", "Reach the flag across %d levels. Arrows/A-D: move, Space/W: jump.\nStomp enemies, ride the springs, mind the crumbling ledges.\nBest: %d      M: mute   -/+: volume" % [FINAL_LEVEL, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
-	position = Vector2.ZERO  # C1 juice: snappa tillbaka varlden nar en overlay visas
+	position = Vector2.ZERO
 	shake = 0.0
 	close_overlay()
 	overlay = Control.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud.add_child(overlay)
 	var bg := ColorRect.new()
-	bg.color = Color(0, 0, 0, 0.65)
+	bg.color = Color(0.03, 0.04, 0.10, 0.55)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(bg)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
+	# FULL_RECT + centrerad alignment i stallet for PRESET_CENTER: center-
+	# preseten satter bara PIVOTEN i mitten sa innehallet vaxer at hoger -
+	# layouten blev hogerforskjuten (sags i skarp korning).
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 12)
 	overlay.add_child(box)
+	# Logotypkansla: stor rubrik med kraftig kontur + skuggrad under.
 	var t := Label.new()
 	t.text = title
-	t.add_theme_font_size_override("font_size", 42)
+	t.add_theme_font_size_override("font_size", 64)
+	t.add_theme_color_override("font_color", Color(1.0, 0.85, 0.25))
+	t.add_theme_color_override("font_outline_color", Color(0.25, 0.12, 0.05))
+	t.add_theme_constant_override("outline_size", 16)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(t)
 	var m := Label.new()
 	m.text = message
 	m.add_theme_font_size_override("font_size", 16)
+	m.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	m.add_theme_constant_override("outline_size", 6)
+	m.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(m)
+	if with_buttons and state == "title":
+		var medal_row := Label.new()
+		medal_row.text = _medal_row_text()
+		medal_row.add_theme_font_size_override("font_size", 15)
+		medal_row.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+		medal_row.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		medal_row.add_theme_constant_override("outline_size", 6)
+		medal_row.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		box.add_child(medal_row)
 	if with_buttons:
 		var first := true
 		for entry in [["Easy", 0], ["Normal", 1], ["Hard", 2]]:
 			var b := Button.new()
 			b.text = "Start: " + str(entry[0])
+			b.custom_minimum_size = Vector2(320, 46)
+			b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			var diff: int = entry[1]
 			b.pressed.connect(func():
 				play_sound("click")
 				new_game(diff))
 			box.add_child(b)
-			# Forsta knappen far fokus -> Enter startar (tangentbords-
-			# spelbart, och grindens sond kommer forbi titelskarmen).
 			if first:
 				first = false
 				b.grab_focus()
+
+func _medal_row_text() -> String:
+	var icons := {"gold": "[G]", "silver": "[S]", "bronze": "[b]"}
+	var parts: Array = []
+	for i in range(1, FINAL_LEVEL + 1):
+		var m: String = medals.get(str(i), "")
+		parts.append("L%d %s" % [i, icons.get(m, "--")])
+	return "Medals:  " + "   ".join(parts)
 
 func close_overlay() -> void:
 	if overlay:
@@ -4483,7 +4771,7 @@ func _save_best(v: int) -> void:
         "- MgFall3D: golvplattor faller - overlev langst (flytta dig fran rott)\n- MgCollect3D: plocka flest mynt pa 15 s\n\n" +
         "## Produktion\n- Titel med bradval/svarighet (fokus pa Easy - Enter startar), paus, resultat, highscore (user://)\n" +
         "- Juice: kamerashake, partiklar (3D), hoppanimation, rutpuls\n- Ljud: EGNA ljud per minispel + tarning/stjarna (olika sfxr-kategorier/seeds)\n\n" +
-        "## Extension (tema-exempel)\n- Pummel Party-elak: sabotage-items, stold av mynt\n- Lego-tema: bygg-minispel (stapla block)\n- Fler brador, items/foremål, boss-minispel, 2-4 manniskor hotseat\n";
+        "## Extension (tema-exempel)\n- Pummel Party-elak: sabotage-items, stold av mynt\n- Lego-tema: bygg-minispel (stapla block)\n- Fler brador, items/foremÃ¥l, boss-minispel, 2-4 manniskor hotseat\n";
 
     // ---- Main.gd: Board Bash 3D (flerfilskittets nav) ----------------------
     const string GodotParty3DMain = """
