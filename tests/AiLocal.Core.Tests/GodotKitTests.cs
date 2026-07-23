@@ -361,6 +361,30 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void TeamFallback_GodotPromptUtanGolv_FarAldrigJsRad()
+    {
+        // v2.6, live-buggen: arbetsytan hade bara DESIGN.md (inget kit
+        // scaffoldat) => DetectEngine "unknown" => spårens filråd blev
+        // "egen js-fil" => tre spår byggde WEBBSPEL i ett godot-uppdrag.
+        // Nu följer rådet PROMPTENS motorval när golvet saknas.
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-teamhint-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "DESIGN.md"), "# Design");
+            var tracks = TeamBuild.FallbackTracks(
+                "bygg ett 3d mario party pummel party spel i godot med 15 minigames och en karta", dir);
+            Assert.True(tracks.Count >= 2);
+            foreach (var t in tracks)
+            {
+                Assert.DoesNotContain("js-fil", t.Description);
+                Assert.Contains(".gd", t.Description);
+            }
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public void TankOrdstammen_TrafferInteTankar()
     {
         // "tanks" i genreregeln ar avsiktligt PLURAL: prefixet "tank" hade

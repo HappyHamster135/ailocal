@@ -226,7 +226,12 @@ public sealed class OpenRouterProvider : IChatProvider
         }
         catch (Exception ex)
         {
-            return ProviderResponse.Fail(ProviderOutcome.FatalError, $"parse error: {ex.Message}");
+            // v2.6: TRANSIENT, inte fatalt (live-sett: OpenRouter svarade
+            // 200 med icke-JSON/trunkerat skrap -> "parse error ... does not
+            // contain any JSON tokens" dodade HELA kedjan). Ett svar som inte
+            // gar att tolka ar en kanal-/upstream-hicka av samma klass som
+            // "no choices" (v1.95) - cooldown + nasta forsok, aldrig totalstopp.
+            return ProviderResponse.Fail(ProviderOutcome.TransientError, $"parse error (transient): {ex.Message}");
         }
     }
 

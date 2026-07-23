@@ -433,6 +433,12 @@ public static class TeamBuild
         var isGame = engine != "unknown"
             || assignment.Contains("spel", StringComparison.OrdinalIgnoreCase)
             || assignment.Contains("game", StringComparison.OrdinalIgnoreCase);
+        // v2.6: "unknown" betyder att golvet inte scaffoldats AN - folj
+        // PROMPTENS motorval i stallet for att defaulta till js. Live-sett:
+        // tre spar byggde WEBBSPEL i ett "i godot"-uppdrag for att arbets-
+        // ytan bara innehall DESIGN.md nar arkitekten korde.
+        if (isGame && engine == "unknown")
+            engine = GameScaffoldService.PickEngine(assignment);
 
         // Filråden måste följa motorn - "lägg koden i en js-fil" i ett
         // Godot-projekt skickar utvecklaren åt helt fel håll.

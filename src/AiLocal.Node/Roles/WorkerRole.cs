@@ -754,6 +754,28 @@ public static class WorkerRole
                         "ska följa användarens begärda tema, inte kittets platshållartema.";
                 }
             }
+            // v2.6: MOTORGARANTIN - ett spelbygge med motorprompt ("i godot")
+            // får ALDRIG starta utan motorgolv. Live-sett: icke-tom arbetsyta
+            // (gamla lösa filer) + tema-vakt som inte slog till => inget kit
+            // scaffoldades => motordetekteringen sa "unknown" => teamspåren
+            // fick js-rådet och byggde WEBBSPEL i ett godot-uppdrag. Saknas
+            // motorprojekt i roten scaffoldas genrekittet nu (undermapp på
+            // icke-tom yta - ScaffoldPaths sköter det).
+            else if (buildIntent && wantsGame
+                && GameScaffoldService.PickEngine(req.Assignment) is "godot" or "unity"
+                && GameBuilder.DetectEngine(ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot) == "unknown")
+            {
+                var g = new GameScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                if (g.Success)
+                {
+                    await EmitStep("tool_call", "scaffold_game (motorgarantin: spelbygge utan motorgolv i arbetsytan)");
+                    await EmitStep("tool_result", g.Output);
+                    assignmentText = req.Assignment +
+                        "\n\nOBS: Arbetsytan saknade ett motorprojekt, så en komplett spelbar projektgrund är skapad (" + g.Output +
+                        "). Arbeta i den projektmappen - skapa INTE html/js-filer utanför den. Kittet kan ha ett " +
+                        "generiskt platshållartema - matchar det inte uppdraget: BYT TEMA som första steg.";
+                }
+            }
             // Projektkontinuitet - spegelbilden av förskaffolden: en uppfölj-
             // ning ("gör spelet svårare") på en ICKE-tom arbetsyta får det
             // befintliga projektets kontext (mapp, motor, filer, DESIGN.md)

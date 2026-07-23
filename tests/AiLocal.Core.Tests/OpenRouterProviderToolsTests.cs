@@ -68,6 +68,22 @@ public class OpenRouterProviderToolsTests
     }
 
     [Fact]
+    public async Task CompleteAsync_IckeJsonSvar_ArTransientInteFatalt()
+    {
+        // v2.6, live-kraschen: OpenRouter svarade 200 med icke-JSON ("parse
+        // error: The input does not contain any JSON tokens") och FatalError
+        // dödade hela kedjan. Ett otolkbart svar är en kanalhicka - transient.
+        var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, "<html>upstream error</html>"));
+        var provider = new OpenRouterProvider(new HttpClient(handler), () => "sk-or-fake-key", new ProviderSettings());
+
+        var result = await provider.CompleteAsync(new ChatRequest { Messages = { new ChatMessage("user", "hi") } });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ProviderOutcome.TransientError, result.Outcome);
+        Assert.Contains("transient", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CompleteAsync_SendsBearerAuthHeader()
     {
         var handler = new StubHandler((_, _) => JsonResponse(HttpStatusCode.OK, ToolCallResponseBody));

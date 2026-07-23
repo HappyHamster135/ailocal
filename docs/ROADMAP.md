@@ -318,6 +318,21 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > RequestedBoards ("3 kartor") → BOARD_*-konstanter/"# Board N"-rubriker
 > räknas som hårt krav. KVAR: demorundornas fulla kedja live-testad mot
 > nod (endpoint/kort är milstolpskloner, men ett skarpt bygge är beviset).
+>
+> **v2.6 KRASCHEN + WEBBSPELSBUGGEN (ägarens partytranskript, två rot-
+> orsaker).** (1) ALLA FEM providers klassade svarsparse-fel som FATALT -
+> OpenRouter svarade 200 med icke-JSON ("The input does not contain any
+> JSON tokens") och hela kedjan dog. Nu TRANSIENT (cooldown + nästa
+> försök), samma klass som v1.95:s "no choices"; regressionstest med
+> HTML-svar. (2) MOTORGARANTIN: icke-tom arbetsyta utan motorprojekt +
+> tema-vakt som inte slog till => inget kit => DetectEngine "unknown" =>
+> teamspårens filråd blev "egen js-fil" => TRE spår byggde WEBBSPEL i ett
+> "i godot"-uppdrag. Nu: (a) WorkerRole scaffoldar genrekittet när ett
+> spelbygge med motorprompt saknar motorgolv i roten (fjärde grenen före
+> kontinuiteten), (b) TeamBuilds filråd följer PROMPTENS motorval när
+> DetectEngine säger unknown. Testlåst: godot-prompt utan golv får aldrig
+> js-råd. OBS: ägarens nod körde v2.3.0 under transkriptet - demorundor/
+> FPS/musik fanns inte där.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

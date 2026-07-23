@@ -151,7 +151,9 @@ public sealed class OpenAIProvider : IChatProvider
         }
         catch (Exception ex)
         {
-            return ProviderResponse.Fail(ProviderOutcome.FatalError, $"parse error: {ex.Message}");
+            // v2.6: transient - ett otolkbart leverantorssvar ar en kanalhicka,
+            // inte ett permanent fel (samma klass som v1.95:s "no choices").
+            return ProviderResponse.Fail(ProviderOutcome.TransientError, $"parse error (transient): {ex.Message}");
         }
     }
 
