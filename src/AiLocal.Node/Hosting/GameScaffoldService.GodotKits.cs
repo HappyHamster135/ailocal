@@ -241,6 +241,9 @@ extends Node2D
 # UI byggs i kod (_show_title/_finish), banan + bilen ritas i _draw. BYT TEMA:
 # farger/former i _draw och texterna i _show_title. Spelartext pa ENGELSKA.
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://circuit_best.txt"
 const LAPS := 3
 
@@ -267,6 +270,7 @@ var focus_pending := true
 
 func _ready() -> void:
     randomize()
+    Shell.startup()
     _build_checkpoints()
     _setup_audio()
     best = _load_best()
@@ -368,6 +372,7 @@ func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
     focus_pending = true
+    _last_button = null
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -380,6 +385,8 @@ func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     ui.add_child(l)
     return l
 
+var _last_button: Button = null   # v2.22: fokuskedja for pilnavigering
+
 func _button(txt: String, y: float, cb: Callable) -> void:
     var b := Button.new()
     b.text = txt
@@ -387,6 +394,12 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(416, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # v2.22: fristaende knappar pa en CanvasLayer far inte palitliga
+    # automatiska fokusgrannar - lanka pil-upp/ner-kedjan explicit.
+    if _last_button != null and is_instance_valid(_last_button):
+        _last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+        b.focus_neighbor_top = b.get_path_to(_last_button)
+    _last_button = b
     # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
     # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
     if focus_pending:
@@ -405,7 +418,15 @@ func _show_title() -> void:
     for i in range(3):
         var d := i
         _button(names[i], 290 + i * 58, func(): _start(d))
+    # v2.22 spelskalet: Options + Quit pa titeln.
+    _button("Options", 470, func(): _show_options())
+    _button("Quit", 528, func(): get_tree().quit())
     queue_redraw()
+
+func _show_options() -> void:
+    _play("click")
+    _clear_ui()
+    Shell.options_panel(ui, func(): _show_title())
 
 func _start(d: int) -> void:
     difficulty = d
@@ -575,6 +596,9 @@ extends Node2D
 # na 2048. Rutnat + UI ritas i kod. BYT TEMA: farger i _tile_color, mal i TARGET.
 # Spelartext pa ENGELSKA (husregeln).
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const N := 4
 const SAVE_PATH := "user://twenty48_best.txt"
 const TARGET := 2048
@@ -589,6 +613,7 @@ var focus_pending := true
 
 func _ready() -> void:
     randomize()
+    Shell.startup()
     _setup_audio()
     best = _load_best()
     ui = CanvasLayer.new()
@@ -656,6 +681,7 @@ func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
     focus_pending = true
+    _last_button = null
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -668,6 +694,8 @@ func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     ui.add_child(l)
     return l
 
+var _last_button: Button = null   # v2.22: fokuskedja for pilnavigering
+
 func _button(txt: String, y: float, cb: Callable) -> void:
     var b := Button.new()
     b.text = txt
@@ -675,6 +703,11 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(426, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # v2.22: explicit fokuskedja (CanvasLayer-knappar saknar auto-grannar).
+    if _last_button != null and is_instance_valid(_last_button):
+        _last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+        b.focus_neighbor_top = b.get_path_to(_last_button)
+    _last_button = b
     # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
     # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
     if focus_pending:
@@ -688,7 +721,15 @@ func _show_title() -> void:
     _label("Slide with the arrow keys. Merge equal tiles to reach %d." % TARGET, 200, 22)
     _label("Best: %d" % best, 240, 22, Color(0.7, 0.9, 1))
     _button("Play", 310, func(): _start())
+    # v2.22 spelskalet: Options + Quit pa titeln.
+    _button("Options", 368, func(): _show_options())
+    _button("Quit", 426, func(): get_tree().quit())
     queue_redraw()
+
+func _show_options() -> void:
+    _play("click")
+    _clear_ui()
+    Shell.options_panel(ui, func(): _show_title())
 
 func _start() -> void:
     _play("click")
@@ -897,6 +938,9 @@ extends Node3D
 # farger/former i _build_world och mal/tid i konstanterna. Spelartext pa
 # ENGELSKA (husregeln).
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://cube_best.txt"
 const COINS := 8
 
@@ -915,6 +959,7 @@ var focus_pending := true
 
 func _ready() -> void:
     randomize()
+    Shell.startup()
     _setup_audio()
     best = _load_best()
     _build_world()
@@ -1062,6 +1107,7 @@ func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
     focus_pending = true
+    _last_button = null
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -1074,6 +1120,8 @@ func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     ui.add_child(l)
     return l
 
+var _last_button: Button = null   # v2.22: fokuskedja for pilnavigering
+
 func _button(txt: String, y: float, cb: Callable) -> void:
     var b := Button.new()
     b.text = txt
@@ -1081,6 +1129,11 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(416, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # v2.22: explicit fokuskedja (CanvasLayer-knappar saknar auto-grannar).
+    if _last_button != null and is_instance_valid(_last_button):
+        _last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+        b.focus_neighbor_top = b.get_path_to(_last_button)
+    _last_button = b
     # Forsta knappen pa varje skarm far fokus -> Enter/Space fungerar direkt
     # (tangentbordsspelbart, och kvalitetsgrindens sond kommer forbi titeln).
     if focus_pending:
@@ -1097,6 +1150,14 @@ func _show_title() -> void:
     for i in range(3):
         var d := i
         _button(names[i], 290 + i * 58, func(): _start(d))
+    # v2.22 spelskalet: Options + Quit pa titeln.
+    _button("Options", 470, func(): _show_options())
+    _button("Quit", 528, func(): get_tree().quit())
+
+func _show_options() -> void:
+    _play("click")
+    _clear_ui()
+    Shell.options_panel(ui, func(): _show_title())
 
 func _start(d: int) -> void:
     difficulty = d
@@ -1250,6 +1311,9 @@ extends Control
 # BYT TEMA: andra texter, NAMES/roller och siffror - strukturen bar allt.
 # Spelartext pa ENGELSKA (husregeln).
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://clubmanager_save.json"
 const SEASON_LENGTH := 10
 const NAMES := ["Alva","Bo","Cleo","Dag","Elin","Frans","Greta","Hugo","Ines","Jarl","Klara","Leo","Maja","Nils","Olga","Per"]
@@ -1267,6 +1331,7 @@ var snd := {}
 var focus_pending := true
 
 func _ready() -> void:
+	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
 		# Nullsakert: fore forsta importen (headless-parse) finns ingen
 		# wav-resurs - spelet ska anda starta tyst, aldrig spamma fel.
@@ -1469,7 +1534,15 @@ func show_title() -> void:
 		button_into(box, "Load saved game", func():
 			if load_game():
 				show_hub())
+	# v2.22 spelskalet: Options + Quit pa titeln.
+	button_into(box, "Options", show_options)
+	button_into(box, "Quit", func(): get_tree().quit())
 	label_into(box, "Esc in game: save and return here.", 12)
+
+func show_options() -> void:
+	clear_ui()
+	focus_pending = true
+	Shell.options_panel(self, show_title)
 
 func show_hub() -> void:
 	var box := panel_root()
@@ -1551,6 +1624,10 @@ extends Node2D
 # BYT TEMA: farger/former i make_texture-anropen + texterna. Spelartext pa
 # ENGELSKA (husregeln).
 
+# Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
+# importen, och class_name-registret finns forst efter import.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://glade_highscore.save"
 const ARENA := Rect2(60, 60, 1032, 528)
 const FINAL_WAVE := 5
@@ -1577,6 +1654,8 @@ var decor: Array = []   # {pos, tex}
 
 func _ready() -> void:
 	randomize()
+	# Spelskalet: sparade installningar (volym/mute/fullskarm) galler direkt.
+	Shell.startup()
 	# Pixelart = skarpa pixlar aven i gamla projekt utan mallens filterrad.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	grass_a = _make_grass_tex(0)
@@ -1999,6 +2078,29 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 			if first:
 				first = false
 				b.grab_focus()
+	# v2.22 spelskalet: Options (volym/mute/fullskarm, sparas) + Quit -
+	# bara pa titeln, aldrig pa paus/game over-overlays.
+	if with_buttons and state == "title":
+		var ob := Button.new()
+		ob.text = "Options"
+		ob.custom_minimum_size = Vector2(320, 46)
+		ob.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ob.pressed.connect(func():
+			play_sound("click")
+			open_options())
+		box.add_child(ob)
+		var qb := Button.new()
+		qb.text = "Quit"
+		qb.custom_minimum_size = Vector2(320, 46)
+		qb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		qb.pressed.connect(func(): get_tree().quit())
+		box.add_child(qb)
+
+func open_options() -> void:
+	close_overlay()
+	overlay = Shell.options_panel(hud, func():
+		play_sound("click")
+		show_title())
 
 func close_overlay() -> void:
 	if overlay:
@@ -2912,6 +3014,9 @@ extends Node2D
 # Live/Worms-klassen). BYT TEMA: farger, terranggenerering och vapenlistan.
 # Spelartext pa ENGELSKA (husregeln).
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://cannonade_streak.save"
 const W := 1152
 const H := 648
@@ -2966,6 +3071,7 @@ var snd := {}
 
 func _ready() -> void:
 	randomize()
+	Shell.startup()
 	for key in ["click", "coin", "hurt", "win"]:
 		# Nullsakert fore forsta importen - se management-kitets kommentar.
 		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
@@ -3456,21 +3562,28 @@ func show_overlay(title: String, message: String, buttons: Array) -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(bg)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
+	# FULL_RECT + centrerad alignment - PRESET_CENTER satter bara pivoten
+	# och hogerforskjuter innehallet (v2.12-fyndet, fixat har v2.22).
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 12)
 	overlay.add_child(box)
 	var t := Label.new()
 	t.text = title
 	t.add_theme_font_size_override("font_size", 42)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(t)
 	var m := Label.new()
 	m.text = message
 	m.add_theme_font_size_override("font_size", 16)
+	m.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(m)
 	var first := true
 	for label in buttons:
 		var b := Button.new()
 		b.text = str(label)
+		b.custom_minimum_size = Vector2(320, 46)
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		b.pressed.connect(func():
 			play_sound("coin")
 			if next_duel_pending:
@@ -3484,6 +3597,28 @@ func show_overlay(title: String, message: String, buttons: Array) -> void:
 		if first:
 			first = false
 			b.grab_focus()
+	# v2.22 spelskalet: Options + Quit - bara pa titeln.
+	if state == "title" and buttons.size() > 0:
+		var ob := Button.new()
+		ob.text = "Options"
+		ob.custom_minimum_size = Vector2(320, 46)
+		ob.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ob.pressed.connect(func():
+			play_sound("click")
+			open_options())
+		box.add_child(ob)
+		var qb := Button.new()
+		qb.text = "Quit"
+		qb.custom_minimum_size = Vector2(320, 46)
+		qb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		qb.pressed.connect(func(): get_tree().quit())
+		box.add_child(qb)
+
+func open_options() -> void:
+	close_overlay()
+	overlay = Shell.options_panel(hud, func():
+		play_sound("click")
+		show_title())
 
 func close_overlay() -> void:
 	if overlay:
@@ -5108,6 +5243,9 @@ extends Node3D
 # Strike Arena - first person arena shooter. BYT TEMA: farger/material i
 # _build_world, fiendernas varden i WAVES-logiken. Spelartext pa ENGELSKA.
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://strikearena_best.txt"
 const FINAL_WAVE := 5
 const ARENA_R := 17.0
@@ -5138,6 +5276,7 @@ var snd := {}
 
 func _ready() -> void:
     randomize()
+    Shell.startup()
     for key in ["click", "coin", "hurt", "win"]:
         var s = load("res://%s.wav" % key)
         if s:
@@ -5286,6 +5425,8 @@ func _label_ui(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     ui.add_child(l)
     return l
 
+var _last_button: Button = null   # v2.22: fokuskedja for pilnavigering
+
 func _button_ui(txt: String, y: float, cb: Callable) -> Button:
     var b := Button.new()
     b.text = txt
@@ -5293,6 +5434,11 @@ func _button_ui(txt: String, y: float, cb: Callable) -> Button:
     b.position = Vector2(416, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # v2.22: explicit fokuskedja (CanvasLayer-knappar saknar auto-grannar).
+    if _last_button != null and is_instance_valid(_last_button):
+        _last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+        b.focus_neighbor_top = b.get_path_to(_last_button)
+    _last_button = b
     if focus_pending:
         focus_pending = false
         b.grab_focus()
@@ -5303,6 +5449,7 @@ func _show_title() -> void:
     state = "title"
     Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
     _clear_overlay()
+    _last_button = null
     hud.text = ""
     crosshair.visible = false
     _label_ui("STRIKE ARENA", 80, 64, Color(1, 0.5, 0.35))
@@ -5312,6 +5459,15 @@ func _show_title() -> void:
     _button_ui("Start: Easy", 300, func(): _start(0))
     _button_ui("Start: Normal", 358, func(): _start(1))
     _button_ui("Start: Hard", 416, func(): _start(2))
+    # v2.22 spelskalet: Options + Quit pa titeln.
+    _button_ui("Options", 474, func(): _show_options())
+    _button_ui("Quit", 532, func(): get_tree().quit())
+
+func _show_options() -> void:
+    play_sound("click")
+    _clear_overlay()
+    _last_button = null
+    Shell.options_panel(ui, func(): _show_title())
 
 func _start(diff: int) -> void:
     difficulty = diff
@@ -5607,6 +5763,9 @@ const TILE_RED := 1
 const TILE_BONUS := 2
 const TILE_STAR := 3
 
+# Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
+const Shell = preload("res://Shell.gd")
+
 # Minispelsregistret - utbyggnadskonventionen: en Mg*.gd-fil per minispel.
 const MINIGAMES: Array = [
     {"scene": "res://MgRace3D.gd", "name": "Foot Race", "sound": "mg_race"},
@@ -5640,6 +5799,7 @@ var snd := {}
 
 func _ready() -> void:
     randomize()
+    Shell.startup()
     _setup_audio()
     best_stars = _load_best()
     _build_world()
@@ -5857,7 +6017,15 @@ func _show_title() -> void:
     _button_ui("Start: Easy", 260, func(): _start_game(0))
     _button_ui("Start: Normal", 318, func(): _start_game(1))
     _button_ui("Start: Hard", 376, func(): _start_game(2))
-    _label_ui("Space/Enter rolls the dice on your turn. Arrows/WASD in minigames.", 448, 14, Color(0.55, 0.55, 0.6))
+    # v2.22 spelskalet: Options + Quit pa titeln.
+    _button_ui("Options", 434, func(): _show_options())
+    _button_ui("Quit", 492, func(): get_tree().quit())
+    _label_ui("Space/Enter rolls the dice on your turn. Arrows/WASD in minigames.", 560, 14, Color(0.55, 0.55, 0.6))
+
+func _show_options() -> void:
+    play_sound("click")
+    _clear_overlay()
+    Shell.options_panel(ui, func(): _show_title())
 
 func _start_game(diff: int) -> void:
     difficulty = diff

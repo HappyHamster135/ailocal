@@ -506,6 +506,38 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void AllaKit_HarSpelskalet_OptionsOchQuit()
+    {
+        // v2.22: Options (volym/mute/fullskarm som sparas) + Quit ar standard
+        // i ALLA kit - release-checklistan kraver det av byggen, sa golvet
+        // maste forega. Puzzle saknar svarighetsval men aldrig skalet.
+        foreach (var prompt in new[]
+        {
+            "bygg ett fotbolls management spel i godot",
+            "top-down äventyr i godot där man överlever vågor",
+            "bygg ett racingspel i godot med bilar och tre varv",
+            "bygg ett 3d samlarspel i godot",
+            "bygg ett 2d plattformsspel i godot",
+            "bygg ett artillerispel som shellshock live i godot",
+            "bygg ett pusselspel som 2048 i godot",
+            "bygg ett mario party liknande spel i godot med minigames",
+            "bygg ett 3d mario party spel i godot med minigames",
+            "bygg ett litet fps spel i godot"
+        })
+        {
+            var (root, _) = ScaffoldTo(prompt);
+            try
+            {
+                var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+                Assert.Contains("Shell.options_panel", script);
+                Assert.Contains("get_tree().quit()", script);
+                Assert.Contains("Shell.startup()", script);
+            }
+            finally { Cleanup(root); }
+        }
+    }
+
+    [Fact]
     public async Task GodotHeadless_ParsarKiten_UtanSkriptfel()
     {
         // Miljöberoende men SKARPT där godot finns i verktygskatalogen (dev-

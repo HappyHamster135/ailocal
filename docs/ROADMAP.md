@@ -495,6 +495,15 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > PLAYERS[i].ai. Skärmdumpar: introkortet med nedräkning + Humans-
 > knappen. KVAR: 3D-partyts pixellyft, Options/Quit i Gläntan,
 > stil-förhandsbilder av riktiga kit-skärmdumpar.
+>
+> **v2.22 SPELSKALET I ALLA KIT.** Options (Shell-panelen, sparas) +
+> Quit + Shell.startup i samtliga tio kit (nya: Management, Gläntan,
+> Circuit, Twenty48, Kuben, Kanonaden, FPS, 3D-partyt). Fokuskedjan
+> utrullad i Circuit/Twenty48/Kuben/FPS; PRESET_CENTER-fixen även i
+> Kanonaden. Heltäckande test: alla tio prompts → Shell.startup +
+> options_panel + quit i Main.gd. KVAR: 3D-partyts pixellyft (tokens/
+> tiles), stilkort med riktiga skärmdumpar, AI-bakgrunder via pipelinen,
+> CC0-assetpaket, språkväljare.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
