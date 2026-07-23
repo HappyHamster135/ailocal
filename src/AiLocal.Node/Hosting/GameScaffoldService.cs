@@ -196,7 +196,14 @@ public sealed partial class GameScaffoldService
         // null" for de foljande anropen (CS8604) - reassignen gor den non-null.
         prompt ??= "";
         if (prompt.Contains("3d", StringComparison.OrdinalIgnoreCase))
+        {
+            // v2.3: "3d mario party" ska INTE bli samlarspelet Kuben -
+            // party-genren har ett eget 3D-golv (flerfilskittet Board Bash
+            // 3D: Main + Mg*.gd-minispel = utbyggnadskonventionen).
+            if (DetectGenre(prompt) == "party")
+                return ScaffoldGodotParty3D(root, prompt);
             return ScaffoldGodot3D(root, prompt);
+        }
 
         var genre = DetectGenre(prompt);
         if (genre is "management" or "simulator" or "idle")

@@ -108,6 +108,13 @@ public static class GenreIdeaBank
         "en butik mellan rundorna dar mynt koper power-ups (extra tarning, skold)",
         "allianser: tva spelare slar ihop sina mynt tillfalligt for en runda",
         "en tredje bradlayout: spiralformat som tvingar ihop spelare",
+        // v2.3: Pummel Party-/Lego Party-elementen (agarens referensspel).
+        "sabotage-items i Pummel Party-stil: kop och kasta en falla pa en ruta (bjornsax, bomb) som drabbar nasta spelare som landar",
+        "myntstold: en item/ruta later dig stjala 5-10 mynt fran ledaren (comeback-mekanik)",
+        "battle-minispel dar SISTA overlevande tar potten (knuffa av plattform, krympande yta)",
+        "bygg-minispel i Lego-stil: stapla fallande block hogst innan tiden gar ut",
+        "ett elakt slumphjul i rundans slut (Pummel-stil): byt platser, tappa mynt, dubbla nasta minispel",
+        "kosmetiska upplasningar for spelarens figur (hattar/farger) vid milstolpar - syns pa bradan",
     ];
 
     /// <summary>Slumpar <paramref name="count"/> olika frön ur genrens bank.

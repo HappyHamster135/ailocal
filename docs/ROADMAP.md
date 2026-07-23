@@ -264,6 +264,25 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > MECHANICS.md i varje Godot-scaffold (beprövade snuttar att klistra in);
 > AntiPatternDb var redan wirad (rådgivande). Genreord kompletterade:
 > brädspel/partyspel/sällskapsspel/tärning/pummel party/lego party.
+>
+> **v2.3 BOARD BASH 3D (målets 3D-ben: "riktigt Mario Party/Pummel Party
+> i 3D").** 10:e kittet och det FÖRSTA FLERFILSKITTET: Main.gd (3D-bräda
+> 24 rutor i ring, tärning, 4 kapselspelare, mynt/stjärnor, 6 ronder,
+> kamerashake, 3D-partiklar) + TRE fristående minispel som EGNA filer
+> (MgRace3D/MgFall3D/MgCollect3D) enligt kontraktet setup(main) →
+> main.minigame_done(rankings). FILKONVENTIONEN ÄR SKALVÄGEN: fler minispel
+> = fler Mg*.gd (CountMinigames räknar dem, teamspår bygger dem parallellt,
+> DESIGN.md/README dokumenterar kontraktet för agenter). "3d mario party"
+> routas hit (inte The Cube). OLIKA LJUD: 9 wav-filer (bas 4 + tärning +
+> stjärna + ETT eget ljud per minispel, olika sfxr-kategori/seed).
+> Pummel-/Lego-frön i idébanken (sabotage-items, myntstöld, battle-royale-
+> minispel, byggminispel, elakt slumphjul, kosmetiska upplåsningar).
+> Verifierat: riktig Godot parsar Main + alla tre Mg-filer (--check-only
+> per fil - --quit lastar aldrig runtime-laddade skript!), egna skärmdumpar
+> bevisar 3D-brädan i spel (tärningsrull, mynt, turordning). KVAR mot
+> fullskala: 15-minispelskörningen är TEAM+RUNDOR-driven (golvet ger 3;
+> kontraktsräknaren + dekomposern + utvecklingsrundorna bygger resten) -
+> nästa naturliga steg är ett skarpt "15 minigames"-klusterbygge live.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

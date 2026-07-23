@@ -3851,4 +3851,814 @@ func _draw_minigame() -> void:
             draw_colored_polygon(pts, arrow_colors[d])
 
 """;
+
+    /// <summary>v2.3: Board Bash 3D - partygenrens 3D-golv och det FORSTA
+    /// flerfilskittet: Main.gd (brada/flode) + tre fristaende Mg*.gd-minispel.
+    /// Filkonventionen AR utbyggnadsvagen: fler minispel = fler Mg*.gd-filer
+    /// (GenreContracts.CountMinigames raknar dem, teamspar bygger dem
+    /// parallellt). 3D-modeller byggs i kod (meshar/material/ljus) och varje
+    /// minispel har EGET ljud (olika sfxr-kategori+seed).</summary>
+    internal static string[] ScaffoldGodotParty3D(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Board Bash 3D"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node3D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotParty3DMain);
+        files.Add("Main.gd");
+        Write(root, "MgRace3D.gd", GodotParty3DMgRace);
+        files.Add("MgRace3D.gd");
+        Write(root, "MgFall3D.gd", GodotParty3DMgFall);
+        files.Add("MgFall3D.gd");
+        Write(root, "MgCollect3D.gd", GodotParty3DMgCollect);
+        files.Add("MgCollect3D.gd");
+        // OLIKA ljudeffekter: basljuden + ETT eget ljud per minispel
+        // (distinkt sfxr-kategori och seed - inte samma pip overallt).
+        foreach (var (name, category, seed) in new[]
+        {
+            ("click.wav", "select", 7), ("coin.wav", "coin", 7),
+            ("hurt.wav", "hurt", 7), ("win.wav", "win", 7),
+            ("dice.wav", "select", 21), ("star.wav", "powerup", 9),
+            ("mg_race.wav", "jump", 13), ("mg_fall.wav", "explosion", 17),
+            ("mg_collect.wav", "coin", 23),
+        })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotParty3DDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Board Bash 3D - 3D party board game (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "FLERFILSKIT - utbyggnadskonventionen: VARJE minispel ar en egen\n" +
+            "Mg*.gd-fil (extends Node3D, func setup(main), anropar\n" +
+            "main.minigame_done(rankings) nar det ar klart) och registreras i\n" +
+            "MINIGAMES-listan i Main.gd. Fler minispel = fler Mg*.gd-filer -\n" +
+            "kvalitetsgrinden RAKNAR dem mot promptens begarda antal.\n\n" +
+            "Innehall: 3D-brada (24 rutor i ring), tarning, 4 spelare (du + 3\n" +
+            "AI), mynt/stjarnor, 3 st 3D-minispel (Race, Falling Floor,\n" +
+            "Coin Rush) med EGNA ljud, 6 ronder, resultatskarm.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Styrning: Space/Enter rullar tarningen; pilar/WASD i minispelen;\n" +
+            "Esc pausar. All grafik ar kodbyggda meshar - byt tema via\n" +
+            "material/farger i _build_world och minispelens filer.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotParty3DDesignDoc(string prompt) =>
+        "# 3D Party / bradspel med minispel (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nMario Party/Pummel Party-klassen i 3D: rulla tarningen pa en 3D-brada,\n" +
+        "samla mynt, kop stjarnor, och avgor ronderna i 3D-minispel.\n\n" +
+        "## Arkitektur (VIKTIG - foljs vid utbyggnad)\n" +
+        "- `Main.gd`: spelflode (titel -> brada -> minispel -> resultat), delat spelartillstand, ljud\n" +
+        "- `Mg*.gd`: ETT minispel per fil. Kontrakt: `extends Node3D`, `func setup(main)`,\n" +
+        "  kor sitt lopp och anropar `main.minigame_done(rankings)` (Array[int], basta forst)\n" +
+        "- Nytt minispel = ny Mg*.gd + en rad i MINIGAMES-listan + eget ljud (sfxr-wav)\n" +
+        "- Kvalitetsgrinden raknar Mg*.gd-filer mot promptens begarda antal (\"15 minigames\")\n\n" +
+        "## Mekanik\n- Brada: 24 rutor i ring (bla +3 mynt, roda -3, gula = minispelsbonus, lila = stjarnruta 20 mynt)\n" +
+        "- Tarning 1-6 (Space), token hoppar ruta for ruta; AI rullar sjalv\n" +
+        "- Efter varje rond (alla 4 flyttat): ett slumpat minispel; vinnaren far mest mynt\n" +
+        "- 6 ronder; flest stjarnor vinner (mynt avgor lika)\n\n" +
+        "## Minispel (golvets tre - LAGG FLER)\n- MgRace3D: springlopp till mallinjen (pilar; AI-fart per svarighet)\n" +
+        "- MgFall3D: golvplattor faller - overlev langst (flytta dig fran rott)\n- MgCollect3D: plocka flest mynt pa 15 s\n\n" +
+        "## Produktion\n- Titel med bradval/svarighet (fokus pa Easy - Enter startar), paus, resultat, highscore (user://)\n" +
+        "- Juice: kamerashake, partiklar (3D), hoppanimation, rutpuls\n- Ljud: EGNA ljud per minispel + tarning/stjarna (olika sfxr-kategorier/seeds)\n\n" +
+        "## Extension (tema-exempel)\n- Pummel Party-elak: sabotage-items, stold av mynt\n- Lego-tema: bygg-minispel (stapla block)\n- Fler brador, items/foremål, boss-minispel, 2-4 manniskor hotseat\n";
+
+    // ---- Main.gd: Board Bash 3D (flerfilskittets nav) ----------------------
+    const string GodotParty3DMain = """
+extends Node3D
+# Board Bash 3D - 3D-partybrada med minispel i EGNA filer (Mg*.gd).
+# BYT TEMA: farger/material i _build_world, ruttyper i TILE_*, minispel
+# registreras i MINIGAMES. Spelartext pa ENGELSKA (husregeln).
+
+const SAVE_PATH := "user://boardbash3d_best.txt"
+const TILE_COUNT := 24
+const ROUNDS := 6
+const TILE_BLUE := 0
+const TILE_RED := 1
+const TILE_BONUS := 2
+const TILE_STAR := 3
+
+# Minispelsregistret - utbyggnadskonventionen: en Mg*.gd-fil per minispel.
+const MINIGAMES: Array = [
+    {"scene": "res://MgRace3D.gd", "name": "Foot Race", "sound": "mg_race"},
+    {"scene": "res://MgFall3D.gd", "name": "Falling Floor", "sound": "mg_fall"},
+    {"scene": "res://MgCollect3D.gd", "name": "Coin Rush", "sound": "mg_collect"},
+]
+
+var state := "title" # title | board | minigame | results
+var difficulty := 1
+var round_no := 1
+var turn_idx := 0
+var rolling := false
+var moving_steps := 0
+var move_timer := 0.0
+var ai_timer := 0.0
+var shake := 0.0
+var best_stars := 0
+
+# Spelare: {name, color, tile, coins, stars, node}
+var players: Array = []
+var tiles: Array = []        # {type, pos, node}
+var tile_nodes: Array = []
+var mode_node: Node3D = null
+var cam: Camera3D
+var ui: CanvasLayer
+var hud: Label
+var phase_label: Label
+var focus_pending := true
+var snd := {}
+
+func _ready() -> void:
+    randomize()
+    _setup_audio()
+    best_stars = _load_best()
+    _build_world()
+    ui = CanvasLayer.new()
+    add_child(ui)
+    hud = Label.new()
+    hud.position = Vector2(16, 10)
+    hud.add_theme_font_size_override("font_size", 17)
+    ui.add_child(hud)
+    phase_label = Label.new()
+    phase_label.position = Vector2(700, 10)
+    phase_label.add_theme_font_size_override("font_size", 20)
+    phase_label.add_theme_color_override("font_color", Color(1, 0.9, 0.4))
+    ui.add_child(phase_label)
+    _setup_touch()
+    _show_title()
+
+func _setup_audio() -> void:
+    for key in ["click", "coin", "hurt", "win", "dice", "star", "mg_race", "mg_fall", "mg_collect"]:
+        var s = load("res://%s.wav" % key)
+        if s:
+            var p := AudioStreamPlayer.new()
+            p.stream = s
+            add_child(p)
+            snd[key] = p
+
+func play_sound(key: String) -> void:
+    if snd.has(key):
+        snd[key].play()
+
+# ---------- touch (aktiveras BARA pa touchskarm) ----------
+func _setup_touch() -> void:
+    if not DisplayServer.is_touchscreen_available():
+        return
+    _touch_btn(Vector2(28, 536), "ui_left", "<")
+    _touch_btn(Vector2(132, 536), "ui_right", ">")
+    _touch_btn(Vector2(1036, 444), "ui_up", "^")
+    _touch_btn(Vector2(1036, 536), "ui_accept", "GO")
+
+func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton:
+    var img := Image.create(88, 88, false, Image.FORMAT_RGBA8)
+    img.fill(Color(1, 1, 1, 0.20))
+    for x in range(88):
+        for y in range(88):
+            if x < 3 or y < 3 or x > 84 or y > 84:
+                img.set_pixel(x, y, Color(1, 1, 1, 0.55))
+    var b := TouchScreenButton.new()
+    b.texture_normal = ImageTexture.create_from_image(img)
+    b.position = pos
+    if action != "":
+        b.action = action
+    ui.add_child(b)
+    var t := Label.new()
+    t.text = text
+    t.add_theme_font_size_override("font_size", 22)
+    t.position = pos
+    t.size = Vector2(88, 88)
+    t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(t)
+    return b
+
+# ---------- 3D-varlden (allt i kod - inga externa modeller) ----------
+func _mat(c: Color) -> StandardMaterial3D:
+    var m := StandardMaterial3D.new()
+    m.albedo_color = c
+    return m
+
+func _build_world() -> void:
+    var light := DirectionalLight3D.new()
+    light.rotation_degrees = Vector3(-58, -35, 0)
+    light.light_energy = 1.2
+    add_child(light)
+    var env := WorldEnvironment.new()
+    var e := Environment.new()
+    e.background_mode = Environment.BG_COLOR
+    e.background_color = Color(0.10, 0.09, 0.16)
+    e.ambient_light_color = Color(0.55, 0.5, 0.65)
+    e.ambient_light_energy = 0.7
+    env.environment = e
+    add_child(env)
+    var ground := MeshInstance3D.new()
+    var gm := CylinderMesh.new()
+    gm.top_radius = 15.0
+    gm.bottom_radius = 15.0
+    gm.height = 0.8
+    ground.mesh = gm
+    ground.position = Vector3(0, -0.4, 0)
+    ground.material_override = _mat(Color(0.16, 0.3, 0.2))
+    add_child(ground)
+    cam = Camera3D.new()
+    cam.position = Vector3(0, 16, 15)
+    cam.rotation_degrees = Vector3(-48, 0, 0)
+    add_child(cam)
+    # Bradan: 24 rutor i en ring av kodbyggda boxar.
+    for i in range(TILE_COUNT):
+        var ang := TAU * float(i) / float(TILE_COUNT)
+        var pos := Vector3(cos(ang) * 11.0, 0.15, sin(ang) * 11.0)
+        var t := TILE_BLUE
+        if i % 6 == 3:
+            t = TILE_RED
+        elif i % 8 == 5:
+            t = TILE_BONUS
+        elif i % 12 == 7:
+            t = TILE_STAR
+        var node := MeshInstance3D.new()
+        if t == TILE_STAR:
+            var sm := SphereMesh.new()
+            sm.radius = 0.75
+            sm.height = 1.5
+            node.mesh = sm
+        else:
+            var bm := BoxMesh.new()
+            bm.size = Vector3(1.6, 0.3, 1.6)
+            node.mesh = bm
+        node.material_override = _mat(_tile_color(t))
+        node.position = pos
+        add_child(node)
+        tiles.append({"type": t, "pos": pos})
+        tile_nodes.append(node)
+
+func _tile_color(t: int) -> Color:
+    if t == TILE_RED:
+        return Color(0.85, 0.25, 0.25)
+    if t == TILE_BONUS:
+        return Color(0.95, 0.8, 0.25)
+    if t == TILE_STAR:
+        return Color(0.75, 0.4, 0.95)
+    return Color(0.25, 0.5, 0.9)
+
+func _make_player_token(col: Color) -> MeshInstance3D:
+    var n := MeshInstance3D.new()
+    var m := CapsuleMesh.new()
+    m.radius = 0.42
+    m.height = 1.5
+    n.mesh = m
+    n.material_override = _mat(col)
+    add_child(n)
+    return n
+
+func _burst3d(pos: Vector3, col: Color) -> void:
+    var p := CPUParticles3D.new()
+    p.position = pos
+    p.amount = 14
+    p.one_shot = true
+    p.explosiveness = 0.9
+    p.lifetime = 0.6
+    p.direction = Vector3(0, 1, 0)
+    p.spread = 75.0
+    p.initial_velocity_min = 2.5
+    p.initial_velocity_max = 6.0
+    p.gravity = Vector3(0, -12, 0)
+    p.scale_amount_min = 1.0
+    p.scale_amount_max = 2.0
+    var m := SphereMesh.new()
+    m.radius = 0.12
+    m.height = 0.24
+    var mat := StandardMaterial3D.new()
+    mat.albedo_color = col
+    m.material = mat
+    p.mesh = m
+    add_child(p)
+    p.emitting = true
+    get_tree().create_timer(1.2).timeout.connect(p.queue_free)
+
+# ---------- ui-hjalpare ----------
+func _clear_overlay() -> void:
+    for c in ui.get_children():
+        if c is Control and c != hud and c != phase_label:
+            c.queue_free()
+    focus_pending = true
+
+func _label_ui(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button_ui(txt: String, y: float, cb: Callable) -> Button:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(320, 46)
+    b.position = Vector2(416, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
+    return b
+
+# ---------- flode ----------
+func _show_title() -> void:
+    state = "title"
+    _clear_overlay()
+    hud.text = ""
+    phase_label.text = ""
+    _label_ui("BOARD BASH 3D", 70, 64, Color(1, 0.82, 0.25))
+    _label_ui("A 3D party board game! Roll dice, grab coins, buy stars, win minigames.", 160, 20)
+    _label_ui("Most stars after %d rounds wins. Best so far: %d stars." % [ROUNDS, best_stars], 194, 16, Color(0.7, 0.9, 1))
+    _button_ui("Start: Easy", 260, func(): _start_game(0))
+    _button_ui("Start: Normal", 318, func(): _start_game(1))
+    _button_ui("Start: Hard", 376, func(): _start_game(2))
+    _label_ui("Space/Enter rolls the dice on your turn. Arrows/WASD in minigames.", 448, 14, Color(0.55, 0.55, 0.6))
+
+func _start_game(diff: int) -> void:
+    difficulty = diff
+    play_sound("click")
+    round_no = 1
+    turn_idx = 0
+    for p in players:
+        if p.has("node") and is_instance_valid(p["node"]):
+            p["node"].queue_free()
+    players = []
+    var defs := [
+        {"name": "You", "color": Color(0.3, 0.7, 1.0)},
+        {"name": "Bot A", "color": Color(0.95, 0.4, 0.35)},
+        {"name": "Bot B", "color": Color(0.4, 0.9, 0.45)},
+        {"name": "Bot C", "color": Color(0.95, 0.75, 0.3)},
+    ]
+    for i in range(4):
+        var d: Dictionary = defs[i]
+        var tok := _make_player_token(d["color"])
+        players.append({"name": d["name"], "color": d["color"], "tile": 0, "coins": 10, "stars": 0, "node": tok})
+    _place_tokens()
+    _clear_overlay()
+    state = "board"
+    rolling = false
+    _update_hud()
+
+func _place_tokens() -> void:
+    for i in range(players.size()):
+        var p: Dictionary = players[i]
+        var base: Vector3 = tiles[p["tile"]]["pos"]
+        var off := Vector3(float(i % 2) * 0.7 - 0.35, 1.0, float(i / 2) * 0.7 - 0.35)
+        p["node"].position = base + off
+
+func _update_hud() -> void:
+    var parts: Array = []
+    for p in players:
+        parts.append("%s S:%d C:%d" % [p["name"], p["stars"], p["coins"]])
+    hud.text = "  ".join(parts)
+    if state == "board":
+        phase_label.text = "Round %d/%d   %s" % [round_no, ROUNDS,
+            ("Your turn - roll!" if turn_idx == 0 else str(players[turn_idx]["name"]) + " rolls...")]
+
+func _physics_process(delta: float) -> void:
+    if shake > 0.0:
+        shake = move_toward(shake, 0.0, 2.5 * delta)
+        cam.position = Vector3(0, 16, 15) + Vector3(randf_range(-shake, shake), randf_range(-shake, shake), 0)
+    if state != "board":
+        return
+    if moving_steps > 0:
+        move_timer -= delta
+        if move_timer <= 0.0:
+            move_timer = 0.22
+            var p: Dictionary = players[turn_idx]
+            p["tile"] = (int(p["tile"]) + 1) % TILE_COUNT
+            _place_tokens()
+            play_sound("click")
+            moving_steps -= 1
+            if moving_steps == 0:
+                _resolve_tile()
+        return
+    if turn_idx == 0:
+        if not rolling and Input.is_action_just_pressed("ui_accept"):
+            _roll()
+    else:
+        ai_timer -= delta
+        if ai_timer <= 0.0:
+            _roll()
+
+func _roll() -> void:
+    rolling = true
+    play_sound("dice")
+    moving_steps = 1 + randi() % 6
+    move_timer = 0.35
+    phase_label.text = "Round %d/%d   %s rolled %d!" % [round_no, ROUNDS, ("You" if turn_idx == 0 else str(players[turn_idx]["name"])), moving_steps]
+
+func _resolve_tile() -> void:
+    var p: Dictionary = players[turn_idx]
+    var tile: Dictionary = tiles[p["tile"]]
+    var t: int = tile["type"]
+    var pos: Vector3 = tile["pos"]
+    if t == TILE_BLUE:
+        p["coins"] = int(p["coins"]) + 3
+        play_sound("coin")
+        _burst3d(pos, Color(0.4, 0.7, 1.0))
+    elif t == TILE_RED:
+        p["coins"] = maxi(0, int(p["coins"]) - 3)
+        play_sound("hurt")
+        shake = maxf(shake, 0.5)
+        _burst3d(pos, Color(0.9, 0.3, 0.3))
+    elif t == TILE_BONUS:
+        p["coins"] = int(p["coins"]) + 6
+        play_sound("coin")
+        _burst3d(pos, Color(1, 0.9, 0.4))
+    elif t == TILE_STAR:
+        if int(p["coins"]) >= 20:
+            p["coins"] = int(p["coins"]) - 20
+            p["stars"] = int(p["stars"]) + 1
+            play_sound("star")
+            _burst3d(pos + Vector3(0, 1, 0), Color(0.85, 0.5, 1.0))
+    _update_hud()
+    rolling = false
+    turn_idx += 1
+    ai_timer = 0.8
+    if turn_idx >= players.size():
+        turn_idx = 0
+        _start_minigame()
+    else:
+        _update_hud()
+
+# ---------- minispel (flerfilskonventionen) ----------
+func _start_minigame() -> void:
+    state = "minigame"
+    var mg: Dictionary = MINIGAMES[randi() % MINIGAMES.size()]
+    phase_label.text = "Minigame: " + str(mg["name"])
+    play_sound(str(mg["sound"]))
+    var script_res = load(str(mg["scene"]))
+    if script_res == null:
+        _after_minigame([0, 1, 2, 3])
+        return
+    mode_node = Node3D.new()
+    mode_node.set_script(script_res)
+    add_child(mode_node)
+    if mode_node.has_method("setup"):
+        mode_node.call("setup", self)
+
+func minigame_done(rankings: Array) -> void:
+    var awards := [10, 6, 3, 1]
+    for rank in range(mini(rankings.size(), 4)):
+        var pi: int = rankings[rank]
+        var award: int = awards[rank]
+        players[pi]["coins"] = int(players[pi]["coins"]) + award
+    play_sound("win")
+    _after_minigame(rankings)
+
+func _after_minigame(_rankings: Array) -> void:
+    if mode_node and is_instance_valid(mode_node):
+        mode_node.queue_free()
+    mode_node = null
+    _place_tokens()
+    _update_hud()
+    if round_no >= ROUNDS:
+        _show_results()
+        return
+    round_no += 1
+    state = "board"
+    _update_hud()
+
+func _show_results() -> void:
+    state = "results"
+    var ranked := players.duplicate()
+    ranked.sort_custom(func(a, b):
+        if int(a["stars"]) != int(b["stars"]):
+            return int(a["stars"]) > int(b["stars"])
+        return int(a["coins"]) > int(b["coins"]))
+    var winner: Dictionary = ranked[0]
+    if int(winner["stars"]) > best_stars and str(winner["name"]) == "You":
+        best_stars = int(winner["stars"])
+        _save_best(best_stars)
+    play_sound("win")
+    _clear_overlay()
+    _label_ui("RESULTS", 90, 54, Color(1, 0.85, 0.3))
+    for i in range(ranked.size()):
+        var p: Dictionary = ranked[i]
+        _label_ui("%d. %s - %d stars, %d coins" % [i + 1, p["name"], int(p["stars"]), int(p["coins"])], 180 + i * 34, 22, p["color"])
+    _label_ui(("You win the party!" if str(winner["name"]) == "You" else str(winner["name"]) + " wins the party!"), 340, 26)
+    _button_ui("Play again", 400, func(): _show_title())
+
+func _unhandled_input(event: InputEvent) -> void:
+    if event.is_action_pressed("ui_cancel") and state == "board":
+        _show_title()
+
+# ---------- highscore ----------
+func _load_best() -> int:
+    if not FileAccess.file_exists(SAVE_PATH):
+        return 0
+    var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    return int(f.get_as_text()) if f else 0
+
+func _save_best(v: int) -> void:
+    var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if f:
+        f.store_string(str(v))
+""";
+
+    // ---- MgRace3D.gd: springlopp (Minigame 1) ------------------------------
+    const string GodotParty3DMgRace = """
+extends Node3D
+# Minigame 1 (Foot Race): forsta over mallinjen. Pilar/WASD = spring.
+# Kontraktet for ALLA minispel: setup(main) -> spela -> main.minigame_done(rankings).
+
+var main: Node3D = null
+var runners: Array = []
+var t := 0.0
+var countdown := 3.0
+var done := false
+var finished: Array = []
+
+func setup(m: Node3D) -> void:
+    main = m
+    for i in range(4):
+        var body := MeshInstance3D.new()
+        var cm := CapsuleMesh.new()
+        cm.radius = 0.4
+        cm.height = 1.4
+        body.mesh = cm
+        var mat := StandardMaterial3D.new()
+        mat.albedo_color = main.players[i]["color"]
+        body.material_override = mat
+        body.position = Vector3(-9.0, 1.0, float(i) * 1.6 - 2.4)
+        add_child(body)
+        runners.append({"idx": i, "node": body, "x": -9.0, "speed": 0.0})
+    var goal := MeshInstance3D.new()
+    var gm := BoxMesh.new()
+    gm.size = Vector3(0.4, 2.2, 8.0)
+    goal.mesh = gm
+    var gmat := StandardMaterial3D.new()
+    gmat.albedo_color = Color(1, 1, 1, 0.8)
+    goal.material_override = gmat
+    goal.position = Vector3(9.0, 1.0, 0)
+    add_child(goal)
+
+func _physics_process(delta: float) -> void:
+    if main == null or done:
+        return
+    if countdown > 0.0:
+        countdown -= delta
+        main.phase_label.text = "Foot Race - GO in %d..." % int(ceil(countdown))
+        return
+    t += delta
+    var ai_speed: Array = [3.2, 3.9, 4.6]
+    for r in runners:
+        var i: int = r["idx"]
+        if finished.has(i):
+            continue
+        if i == 0:
+            var dir := Input.get_axis("ui_left", "ui_right")
+            var fwd := 1.0 if Input.is_action_pressed("ui_up") else 0.0
+            r["x"] = float(r["x"]) + (maxf(dir, fwd)) * 5.2 * delta
+        else:
+            var sp: float = ai_speed[main.difficulty]
+            r["x"] = float(r["x"]) + (sp + randf_range(-0.6, 0.6)) * delta
+        r["node"].position.x = float(r["x"])
+        if float(r["x"]) >= 9.0:
+            finished.append(i)
+            main.play_sound("mg_race")
+    main.phase_label.text = "Foot Race - run right! (%.0fs)" % t
+    if finished.size() >= 3 or t > 25.0:
+        done = true
+        for r in runners:
+            var i2: int = r["idx"]
+            if not finished.has(i2):
+                finished.append(i2)
+        main.minigame_done(finished)
+""";
+
+    // ---- MgFall3D.gd: fallande golv (Minigame 2) ---------------------------
+    const string GodotParty3DMgFall = """
+extends Node3D
+# Minigame 2 (Falling Floor): plattor blir roda och faller - overlev langst.
+# Pilar/WASD flyttar dig mellan plattorna.
+
+var main: Node3D = null
+var pads: Array = []
+var actors: Array = []
+var countdown := 3.0
+var t := 0.0
+var next_drop := 1.2
+var done := false
+var eliminated: Array = []
+
+func setup(m: Node3D) -> void:
+    main = m
+    for gx in range(4):
+        for gz in range(4):
+            var pad := MeshInstance3D.new()
+            var bm := BoxMesh.new()
+            bm.size = Vector3(2.4, 0.3, 2.4)
+            pad.mesh = bm
+            var mat := StandardMaterial3D.new()
+            mat.albedo_color = Color(0.35, 0.55, 0.8)
+            pad.material_override = mat
+            pad.position = Vector3(float(gx) * 2.7 - 4.05, 0.2, float(gz) * 2.7 - 4.05)
+            add_child(pad)
+            pads.append({"node": pad, "alive": true, "warn": 0.0})
+    for i in range(4):
+        var body := MeshInstance3D.new()
+        var cm := CapsuleMesh.new()
+        cm.radius = 0.4
+        cm.height = 1.4
+        body.mesh = cm
+        var mat2 := StandardMaterial3D.new()
+        mat2.albedo_color = main.players[i]["color"]
+        body.material_override = mat2
+        body.position = Vector3(float(i % 2) * 2.7 - 1.35, 1.2, float(i / 2) * 2.7 - 1.35)
+        add_child(body)
+        actors.append({"idx": i, "node": body, "alive": true})
+
+func _pad_at(pos: Vector3) -> int:
+    for pi in range(pads.size()):
+        var pd: Dictionary = pads[pi]
+        if not pd["alive"]:
+            continue
+        var pp: Vector3 = pd["node"].position
+        if absf(pos.x - pp.x) < 1.35 and absf(pos.z - pp.z) < 1.35:
+            return pi
+    return -1
+
+func _physics_process(delta: float) -> void:
+    if main == null or done:
+        return
+    if countdown > 0.0:
+        countdown -= delta
+        main.phase_label.text = "Falling Floor - survive! %d..." % int(ceil(countdown))
+        return
+    t += delta
+    next_drop -= delta
+    if next_drop <= 0.0:
+        next_drop = maxf(0.45, 1.2 - t * 0.03)
+        var alive_pads: Array = []
+        for pi in range(pads.size()):
+            if pads[pi]["alive"] and float(pads[pi]["warn"]) <= 0.0:
+                alive_pads.append(pi)
+        if alive_pads.size() > 3:
+            var pick: int = alive_pads[randi() % alive_pads.size()]
+            pads[pick]["warn"] = 0.9
+            pads[pick]["node"].material_override.albedo_color = Color(0.9, 0.3, 0.25)
+    for pd in pads:
+        if float(pd["warn"]) > 0.0:
+            pd["warn"] = float(pd["warn"]) - delta
+            if float(pd["warn"]) <= 0.0 and pd["alive"]:
+                pd["alive"] = false
+                pd["node"].visible = false
+                main.play_sound("mg_fall")
+    for a in actors:
+        if not a["alive"]:
+            continue
+        var i: int = a["idx"]
+        var node: MeshInstance3D = a["node"]
+        if i == 0:
+            var dx := Input.get_axis("ui_left", "ui_right")
+            var dz := Input.get_axis("ui_up", "ui_down")
+            node.position.x += dx * 4.5 * delta
+            node.position.z += dz * 4.5 * delta
+        else:
+            var here := _pad_at(node.position)
+            if here < 0 or float(pads[here]["warn"]) > 0.0:
+                var target := -1
+                for pi in range(pads.size()):
+                    if pads[pi]["alive"] and float(pads[pi]["warn"]) <= 0.0:
+                        target = pi
+                        break
+                if target >= 0:
+                    var tp: Vector3 = pads[target]["node"].position
+                    var err := 1.0 - float(main.difficulty) * 0.35
+                    node.position.x = move_toward(node.position.x, tp.x + randf_range(-err, err), 3.6 * delta)
+                    node.position.z = move_toward(node.position.z, tp.z + randf_range(-err, err), 3.6 * delta)
+        if _pad_at(node.position) < 0:
+            a["alive"] = false
+            node.visible = false
+            eliminated.append(i)
+            main.play_sound("hurt")
+    var alive_count := 0
+    for a2 in actors:
+        if a2["alive"]:
+            alive_count += 1
+    main.phase_label.text = "Falling Floor - last one standing! (%.0fs)" % t
+    if alive_count <= 1 or t > 30.0:
+        done = true
+        var rankings: Array = []
+        for a3 in actors:
+            if a3["alive"]:
+                rankings.append(a3["idx"])
+        for j in range(eliminated.size() - 1, -1, -1):
+            rankings.append(eliminated[j])
+        main.minigame_done(rankings)
+""";
+
+    // ---- MgCollect3D.gd: myntrush (Minigame 3) -----------------------------
+    const string GodotParty3DMgCollect = """
+extends Node3D
+# Minigame 3 (Coin Rush): plocka flest mynt pa 15 sekunder. Pilar/WASD.
+
+var main: Node3D = null
+var actors: Array = []
+var coins: Array = []
+var scores: Array = [0, 0, 0, 0]
+var countdown := 3.0
+var time_left := 15.0
+var done := false
+
+func setup(m: Node3D) -> void:
+    main = m
+    for i in range(4):
+        var body := MeshInstance3D.new()
+        var cm := CapsuleMesh.new()
+        cm.radius = 0.4
+        cm.height = 1.4
+        body.mesh = cm
+        var mat := StandardMaterial3D.new()
+        mat.albedo_color = main.players[i]["color"]
+        body.material_override = mat
+        body.position = Vector3(float(i % 2) * 4.0 - 2.0, 1.0, float(i / 2) * 4.0 - 2.0)
+        add_child(body)
+        actors.append({"idx": i, "node": body})
+    for c in range(14):
+        _spawn_coin()
+
+func _spawn_coin() -> void:
+    var coin := MeshInstance3D.new()
+    var sm := SphereMesh.new()
+    sm.radius = 0.35
+    sm.height = 0.7
+    coin.mesh = sm
+    var mat := StandardMaterial3D.new()
+    mat.albedo_color = Color(1, 0.85, 0.2)
+    coin.material_override = mat
+    coin.position = Vector3(randf_range(-8.0, 8.0), 0.6, randf_range(-8.0, 8.0))
+    add_child(coin)
+    coins.append(coin)
+
+func _physics_process(delta: float) -> void:
+    if main == null or done:
+        return
+    if countdown > 0.0:
+        countdown -= delta
+        main.phase_label.text = "Coin Rush - grab coins! %d..." % int(ceil(countdown))
+        return
+    time_left -= delta
+    var ai_speed: Array = [3.4, 4.1, 4.8]
+    for a in actors:
+        var i: int = a["idx"]
+        var node: MeshInstance3D = a["node"]
+        if i == 0:
+            var dx := Input.get_axis("ui_left", "ui_right")
+            var dz := Input.get_axis("ui_up", "ui_down")
+            node.position.x = clampf(node.position.x + dx * 5.2 * delta, -9.0, 9.0)
+            node.position.z = clampf(node.position.z + dz * 5.2 * delta, -9.0, 9.0)
+        else:
+            var nearest: MeshInstance3D = null
+            var best_d := 999.0
+            for c in coins:
+                if is_instance_valid(c):
+                    var d := node.position.distance_to(c.position)
+                    if d < best_d:
+                        best_d = d
+                        nearest = c
+            if nearest:
+                var sp: float = ai_speed[main.difficulty]
+                var dirv := (nearest.position - node.position).normalized()
+                node.position += dirv * sp * delta
+        # Plocka forst, spawna EFTER loopen - att appenda till "coins" mitt
+        # under iterationen over samma array ar odefinierat i GDScript.
+        var remaining: Array = []
+        var respawn := 0
+        for c2 in coins:
+            if is_instance_valid(c2) and node.position.distance_to(c2.position) < 0.9:
+                scores[i] += 1
+                main.play_sound("mg_collect")
+                c2.queue_free()
+                respawn += 1
+            elif is_instance_valid(c2):
+                remaining.append(c2)
+        coins = remaining
+        for s in range(respawn):
+            _spawn_coin()
+    main.phase_label.text = "Coin Rush - %ds left  (You: %d)" % [int(ceil(time_left)), scores[0]]
+    if time_left <= 0.0:
+        done = true
+        var order: Array = [0, 1, 2, 3]
+        order.sort_custom(func(a2, b2): return scores[a2] > scores[b2])
+        main.minigame_done(order)
+""";
 }

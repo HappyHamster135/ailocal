@@ -273,6 +273,59 @@ public class GodotKitTests
 
 
     [Fact]
+    public void Party3dIGodot_FarFlerfilskittet()
+    {
+        // v2.3: "3d mario party" ska ge party-3D-golvet (flerfilskittet),
+        // INTE 3D-samlarspelet The Cube - och konventionen (en Mg*.gd per
+        // minispel) ar det GenreContracts.CountMinigames raknar och det
+        // teamsparen bygger vidare pa.
+        const string prompt = "bygg ett 3d mario party spel i godot med minigames";
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Equal("party", GameScaffoldService.DetectGenre(prompt));
+            Assert.Contains("Board Bash 3D", File.ReadAllText(Path.Combine(root, "project.godot")));
+            foreach (var f in new[] { "MgRace3D.gd", "MgFall3D.gd", "MgCollect3D.gd", "MECHANICS.md" })
+                Assert.True(File.Exists(Path.Combine(root, f)), $"{f} saknas");
+            // Olika ljud: egna wav-filer per minispel + tarning/stjarna.
+            foreach (var w in new[] { "dice.wav", "star.wav", "mg_race.wav", "mg_fall.wav", "mg_collect.wav" })
+                Assert.True(File.Exists(Path.Combine(root, w)), $"{w} saknas");
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("MINIGAMES", script);
+            Assert.Contains("minigame_done", script);
+            Assert.Contains("CPUParticles3D", script);   // 3D-juice
+            Assert.Contains("CapsuleMesh", script);      // 3D-modeller i kod
+            // Raknaren ser flerfilskonventionen: 3 Mg*.gd = 3 minispel.
+            Assert.True(GenreContracts.CountMinigames(root, script) >= 3);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void BegartAntalMinispel_BlirMatbartKrav()
+    {
+        // Malprompten: "15 minigames" ska BLI kravet - och ett kit med 3
+        // ska underkannas pa just den punkten tills 15 finns.
+        Assert.Equal(15, GenreContracts.RequestedMinigames("En mapp 15 minigames med 3d modeller"));
+        Assert.Equal(5, GenreContracts.RequestedMinigames("bygg 5 minispel"));
+        Assert.Null(GenreContracts.RequestedMinigames("bygg ett partyspel"));
+
+        var (root, _) = ScaffoldTo("bygg ett 3d mario party spel i godot med minigames");
+        try
+        {
+            var (met, total, findings) = GenreContracts.Verify(root, "party",
+                "bygg ett mario party spel med 15 minigames");
+            Assert.True(met < total, "minispelskravet borde vara ouppfyllt (3 av 15)");
+            Assert.Contains(findings, f => f.Contains("15 begärda"));
+            // Utan begart antal racker kitgolvets 3.
+            var (met2, total2, _) = GenreContracts.Verify(root, "party", "bygg ett partyspel");
+            Assert.Equal(total2, met2);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void TankOrdstammen_TrafferInteTankar()
     {
         // "tanks" i genreregeln ar avsiktligt PLURAL: prefixet "tank" hade
@@ -301,7 +354,8 @@ public class GodotKitTests
             "bygg ett 3d samlarspel i godot",                         // C1 juice: Kuben (CPUParticles3D)
             "bygg ett 2d plattformsspel i godot",                     // v1.85: Pixel Rush i GDScript
             "bygg ett artillerispel som shellshock live i godot",     // v1.98: Cannonade
-            "bygg ett mario party liknande spel i godot med minigames" // v2.1: Board Bash (fangade 6 riktiga parse-fel forra passet)
+            "bygg ett mario party liknande spel i godot med minigames", // v2.1: Board Bash (fangade 6 riktiga parse-fel forra passet)
+            "bygg ett 3d mario party spel i godot med minigames"        // v2.3: Board Bash 3D (flerfilskittet)
         })
         {
             var (root, _) = ScaffoldTo(prompt);
