@@ -16,5 +16,6 @@
     <!-- Microsoft.Win32.Registry is part of the net10.0 framework (NU1510):
          the Registry type resolves without an explicit package reference. -->
     <PackageReference Include="Jint" Version="4.13.0" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.10" />
   </ItemGroup>
 </Project>

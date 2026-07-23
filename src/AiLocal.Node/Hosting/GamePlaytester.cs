@@ -135,6 +135,11 @@ public sealed class GamePlaytester
                 UseShellExecute = false,
                 CreateNoWindow = false
             };
+            // v2.13: autopiloten - kit som läser AILOCAL_AUTOPILOT spelar sig
+            // själva under sonden (startar från titeln, springer/hoppar mot
+            // mål). Dumparna visar då RIKTIGT spelande i stället för en
+            // stillastående figur; vanliga spelare ser aldrig variabeln.
+            psi.Environment["AILOCAL_AUTOPILOT"] = "1";
 
             using var proc = new Process { StartInfo = psi };
             var started = proc.Start();

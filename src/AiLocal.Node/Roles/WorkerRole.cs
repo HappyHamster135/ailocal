@@ -1099,6 +1099,26 @@ public static class WorkerRole
                     lastCleanRoot = okRoot;
                     lastCleanSnapshotFile = ProjectSnapshots.List(workspaceRoot, okRoot).FirstOrDefault()?.File;
                 }
+                // v2.13: REFERENSDUMPEN - godkänt läge = facit för hur spelet
+                // FÅR se ut; före/efter-vakten dömer senare rundor mot den.
+                try
+                {
+                    var srcT = Path.Combine(okRoot, "screenshots", "playtest-title.png");
+                    if (File.Exists(srcT))
+                        File.Copy(srcT, Path.Combine(okRoot, "screenshots", "reference-title.png"), true);
+                }
+                catch { /* referensen är ett plus, aldrig ett krav */ }
+            }
+
+            // v2.13: FÖRE/EFTER-VAKTEN - grinden kan vara tekniskt grön medan
+            // spelet BLEV FULARE. Visionen dömer nu-dumpen mot referensen
+            // (sida vid sida); "SAMRE" = degradering. Fail-open.
+            async Task<bool> LooksWorseThanReferenceAsync(string root2)
+            {
+                var refT = Path.Combine(root2, "screenshots", "reference-title.png");
+                var curT = Path.Combine(root2, "screenshots", "playtest-title.png");
+                return await PolishPass.LooksWorseAsync(refT, curT,
+                    Path.Combine(root2, "screenshots"), BuildVisionReview(), ct);
             }
 
             const int maxFixRounds = 2;
@@ -1312,8 +1332,23 @@ public static class WorkerRole
                 }
                 if (findings.Clean)
                 {
-                    result = result with { Success = true };
-                    RememberCleanState();
+                    // Före/efter-vakten även på demofeedback-rundor: blev det
+                    // visuellt sämre återställs senaste godkända bygget direkt.
+                    var fbRoot = findings.ProjectRoot ?? workspaceRoot;
+                    if (await LooksWorseThanReferenceAsync(fbRoot)
+                        && lastCleanSnapshotFile is not null && lastCleanRoot is not null
+                        && ProjectSnapshots.Restore(workspaceRoot, lastCleanRoot, lastCleanSnapshotFile) is { Success: true })
+                    {
+                        await EmitStep("tool_error",
+                            $"Före/efter-vakten: demorunda {stage} gjorde spelet visuellt sämre - ÅTERSTÄLLT till godkända bygget.");
+                        findings = await InspectAsync();
+                        result = result with { Success = true };
+                    }
+                    else
+                    {
+                        result = result with { Success = true };
+                        RememberCleanState();
+                    }
                 }
             }
 
@@ -1389,7 +1424,11 @@ public static class WorkerRole
                         after = await InspectAsync();
                         await EmitStep(after.Clean ? "tool_result" : "tool_error", after.Report);
                     }
-                    if (after.Clean)
+                    var lookedWorse = after.Clean && await LooksWorseThanReferenceAsync(polishRoot);
+                    if (lookedWorse)
+                        await EmitStep("tool_error",
+                            $"Före/efter-vakten: utvecklingsrunda {pr} gjorde spelet VISUELLT sämre än det godkända läget - rundan förkastas.");
+                    if (after.Clean && !lookedWorse)
                     {
                         findings = after;
                         // Grinden är sanningen: landade rundan grönt räknas

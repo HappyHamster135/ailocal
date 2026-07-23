@@ -322,4 +322,59 @@ const FINAL_LEVEL = 3
         Assert.Contains(list, s => s.Contains("frost_night"));
         Assert.Contains(list, s => s.Contains("desert_warmth"));
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // v2.13: RELEASE-CHECKLISTAN (radgivande smaspels-krav i grinden)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ReleaseChecklistan_FlaggarSaknadeDelarna()
+    {
+        var dir = Directory.CreateTempSubdirectory("ailocal-rc-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Main.gd"), "extends Node2D\nfunc _ready() -> void:\n\tqueue_redraw()\n");
+            File.WriteAllText(Path.Combine(dir, "project.godot"), "[application]\nconfig/name=\"Game\"\n");
+            var notes = ReleaseChecklist.Review(dir, "godot");
+            Assert.Contains(notes, n => n.Contains("omstart"));
+            Assert.Contains(notes, n => n.Contains("volymkontroll"));
+            Assert.Contains(notes, n => n.Contains("paus"));
+            Assert.Contains(notes, n => n.Contains("highscore"));
+            Assert.Contains(notes, n => n.Contains("generisk"));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void ReleaseChecklistan_GodkannerKomplettSmaspel()
+    {
+        var dir = Directory.CreateTempSubdirectory("ailocal-rc2-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Main.gd"),
+                "extends Node2D\nconst SAVE_PATH := \"user://hs.save\"\nvar muted := false\nvar state := \"title\"\n" +
+                "func _unhandled_input(event: InputEvent) -> void:\n" +
+                "\tif event.is_action_pressed(\"ui_cancel\"):\n\t\tstate = \"paused\"\n" +
+                "\tif event is InputEventKey and event.keycode == KEY_R:\n\t\tnew_game()\n" +
+                "\tAudioServer.set_bus_volume_db(0, -6.0)\n" +
+                "func new_game() -> void:\n\tstate = \"playing\"\n");
+            File.WriteAllText(Path.Combine(dir, "project.godot"), "[application]\nconfig/name=\"Pixel Rush\"\n");
+            Assert.Empty(ReleaseChecklist.Review(dir, "godot"));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void ReleaseChecklistan_TigerForIckeSpelmotorer()
+    {
+        // Checklistan galler spel - en CLI-app eller okand motor far inga fynd.
+        var dir = Directory.CreateTempSubdirectory("ailocal-rc3-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Program.cs"), "class P { static void Main() {} }");
+            Assert.Empty(ReleaseChecklist.Review(dir, "unknown"));
+            Assert.Empty(ReleaseChecklist.Review(dir, null));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
 }

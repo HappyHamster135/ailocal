@@ -155,4 +155,56 @@ public static class PolishPass
 
     private static string Trunc(string s, int max) =>
         string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s[..max] + "…";
+
+    /// <summary>v2.13: FÖRE/EFTER-VAKTEN. Grinden kan vara tekniskt grön
+    /// medan spelet BLEV FULARE (live-sett: dubbelrenderad text, tömda
+    /// skärmar). Referens- och nu-dumpen sys ihop sida vid sida till EN
+    /// bild (visionsdelegaten tar en bild) och visionen dömer: blev höger
+    /// SÄMRE? Då återställer säkerhetsnätet i stället för att leverera.</summary>
+    public static string? ComposeBeforeAfter(string beforePath, string afterPath, string outPath)
+    {
+#pragma warning disable CA1416 // appen shippas enbart win-x64 (PublishSingleFile)
+        try
+        {
+            if (!File.Exists(beforePath) || !File.Exists(afterPath)) return null;
+            using var before = System.Drawing.Image.FromFile(beforePath);
+            using var after = System.Drawing.Image.FromFile(afterPath);
+            var h = Math.Max(before.Height, after.Height);
+            using var canvas = new System.Drawing.Bitmap(before.Width + after.Width + 8, h);
+            using (var g = System.Drawing.Graphics.FromImage(canvas))
+            {
+                g.Clear(System.Drawing.Color.Black);
+                g.DrawImage(before, 0, 0, before.Width, before.Height);
+                g.DrawImage(after, before.Width + 8, 0, after.Width, after.Height);
+            }
+            canvas.Save(outPath, System.Drawing.Imaging.ImageFormat.Png);
+            return outPath;
+        }
+        catch { return null; }
+#pragma warning restore CA1416
+    }
+
+    /// <summary>True när visionen dömer att EFTER (höger) blev sämre.
+    /// Fail-open: varje tvekan/fel räknas som INTE sämre - vakten får
+    /// aldrig kassera bra arbete på en gissning.</summary>
+    public static async Task<bool> LooksWorseAsync(
+        string beforePath, string afterPath, string workDir,
+        Func<string, string, CancellationToken, Task<(bool Ok, string Text)>> visionReview,
+        CancellationToken ct)
+    {
+        try
+        {
+            var composite = ComposeBeforeAfter(beforePath, afterPath,
+                Path.Combine(workDir, "before-after.png"));
+            if (composite is null) return false;
+            var (ok, text) = await visionReview(composite,
+                "Left half = the APPROVED previous build of this game. Right half = the new build after changes. " +
+                "Judge ONLY visual regressions: did the RIGHT side get clearly WORSE (broken/overlapping text, " +
+                "emptier screen, missing elements, uglier layout)? New content that looks equally good is NOT worse. " +
+                "Answer with EXACTLY one word first: SAMRE or OK, then one short sentence why.", ct);
+            return ok && text.TrimStart().StartsWith("SAMRE", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return false; }
+    }
 }

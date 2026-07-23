@@ -54,6 +54,62 @@ public class PolishPassTests
     }
 
     [Fact]
+    public void ForeEfterVakten_KomponerarSidaVidSida_OchTalSaknadeBilder()
+    {
+        // v2.13: vakten far ALDRIG kasta - saknade bilder ger null (fail-open),
+        // tva riktiga PNG:er ger en komposit pa disk.
+        var dir = Directory.CreateTempSubdirectory("ailocal-ba-").FullName;
+        try
+        {
+            Assert.Null(PolishPass.ComposeBeforeAfter(
+                Path.Combine(dir, "saknas-a.png"), Path.Combine(dir, "saknas-b.png"),
+                Path.Combine(dir, "ut.png")));
+
+            var rgba = new byte[6 * 6 * 4];
+            for (var i = 0; i < rgba.Length; i += 4) { rgba[i] = 180; rgba[i + 3] = 255; }
+            var a = Path.Combine(dir, "a.png");
+            var b = Path.Combine(dir, "b.png");
+            File.WriteAllBytes(a, AssetGenerator.EncodePng(6, 6, rgba));
+            File.WriteAllBytes(b, AssetGenerator.EncodePng(6, 6, rgba));
+            var outPath = PolishPass.ComposeBeforeAfter(a, b, Path.Combine(dir, "ut.png"));
+            Assert.NotNull(outPath);
+            Assert.True(File.Exists(outPath));
+            Assert.True(new FileInfo(outPath!).Length > 0);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task ForeEfterVakten_SamreFallerUt_OkSlapperIgenom()
+    {
+        // Bara ett svar som BORJAR med SAMRE far falla rundan; allt annat
+        // (OK, tvekan, fel) slapper igenom - vakten far aldrig kassera bra
+        // arbete pa en gissning.
+        var dir = Directory.CreateTempSubdirectory("ailocal-bav-").FullName;
+        try
+        {
+            var rgba = new byte[4 * 4 * 4];
+            for (var i = 0; i < rgba.Length; i += 4) { rgba[i + 1] = 200; rgba[i + 3] = 255; }
+            var a = Path.Combine(dir, "ref.png");
+            var b = Path.Combine(dir, "nu.png");
+            File.WriteAllBytes(a, AssetGenerator.EncodePng(4, 4, rgba));
+            File.WriteAllBytes(b, AssetGenerator.EncodePng(4, 4, rgba));
+
+            Task<(bool, string)> Verdict(string verdict) => Task.FromResult((true, verdict));
+
+            Assert.True(await PolishPass.LooksWorseAsync(a, b, dir,
+                (_, _, _) => Verdict("SAMRE - hoger sida ar tommare"), CancellationToken.None));
+            Assert.False(await PolishPass.LooksWorseAsync(a, b, dir,
+                (_, _, _) => Verdict("OK - ny bana men samma niva"), CancellationToken.None));
+            // Saknad referens = ingen bedomning = inte samre.
+            Assert.False(await PolishPass.LooksWorseAsync(
+                Path.Combine(dir, "finns-ej.png"), b, dir,
+                (_, _, _) => Verdict("SAMRE"), CancellationToken.None));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
     public async Task CritiqueAsync_BildbevisenNarKritiken()
     {
         // v2.4: art director-passet - sondens skarmdumpar gar genom visionen

@@ -214,6 +214,13 @@ public static class AssignmentQualityGate
             foreach (var note in StudioAudioReview.Review(projectRoot))
                 okSummary.AppendLine(note);
 
+        // v2.13: release-checklistan for smaspel - radgivande fynd (omstart,
+        // volym, paus, sparat highscore, riktig fonstertitel) som utvecklings-
+        // rundornas kritiker laser och bygger bort. Aldrig ett hart fall.
+        if (gameExpected && engine is "godot" or "unity" or "html5")
+            foreach (var note in ReleaseChecklist.Review(projectRoot, engine))
+                okSummary.AppendLine(note);
+
         return issues.Count == 0
             ? new(true, false, okSummary.ToString().Trim(), projectRoot, engine)
             : new(false, hard, string.Join("\n", issues.Take(20)), projectRoot, engine);

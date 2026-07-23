@@ -1962,9 +1962,22 @@ var fade_rect: ColorRect
 var card_label: Label
 var overlay: Control
 var snd := {}
+# Autopilot (AILOCAL_AUTOPILOT=1): kvalitetsgrindens demospelare - startar
+# fran titeln och spelar sjalv sa sondens dumpar visar riktigt spelande.
+# Vanliga spelare har aldrig variabeln satt och markar ingenting.
+var autopilot := false
+var auto_t := 0.0
+var cam: Camera2D
 
 func _ready() -> void:
 	randomize()
+	autopilot = OS.get_environment("AILOCAL_AUTOPILOT") == "1"
+	# Kameran finns BARA for screenshake (offset ror renderingen, aldrig
+	# fysiken). Fixed-top-left vid (0,0) = exakt samma vy som utan kamera.
+	cam = Camera2D.new()
+	cam.anchor_mode = Camera2D.ANCHOR_MODE_FIXED_TOP_LEFT
+	add_child(cam)
+	cam.make_current()
 	for key in ["click","coin","hurt","win"]:
 		# Nullsakert fore forsta importen - se management-kitets kommentar.
 		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
@@ -2120,8 +2133,10 @@ func make_platform(r: Rect2) -> StaticBody2D:
 	var rect := RectangleShape2D.new()
 	rect.size = r.size
 	shape.shape = rect
-	# Genomhoppbar underifran (klassisk plattformare) - v1.93-fyndet.
-	shape.one_way_collision = true
+	# Genomhoppbar underifran (klassisk plattformare) - MEN BARA svavande
+	# plattor: one-way pa den tjocka MARKEN lat spelaren falla rakt igenom
+	# varlden nar golvkontakten tappades en frame (v2.13-autopilotfyndet).
+	shape.one_way_collision = r.position.y < 560.0
 	body.add_child(shape)
 	var spr := Sprite2D.new()
 	spr.texture = make_texture(8, Color(0.35, 0.25, 0.2), Color(0.5, 0.8, 0.3))
@@ -2363,16 +2378,32 @@ func _process(delta: float) -> void:
 		level_card -= delta
 		if level_card <= 0.0:
 			card_label.visible = false
+	# Autopilot: vanta forbi sondens titeldump (~3 s), starta sedan sjalv;
+	# efter game over startas en ny runda sa demon aldrig fastnar.
+	if autopilot:
+		if state == "playing":
+			auto_t = 0.0
+		else:
+			auto_t += delta
+		if state == "title" and auto_t > 5.0:
+			auto_t = 0.0
+			new_game(1)
+		elif state == "over" and auto_t > 2.5:
+			auto_t = 0.0
+			new_game(difficulty)
 	queue_redraw()
 
 func _physics_process(delta: float) -> void:
 	if state != "playing" or player == null:
 		return
+	# Screenshake pa KAMERAN, aldrig pa rot-noden: rotflytt teleporterar
+	# fysikkropparna varje frame och slog spelaren ur golvkontakt
+	# (v2.13-autopilotfyndet - genomfall genom marken vid varje skak).
 	if shake > 0.0:
 		shake = move_toward(shake, 0.0, 32.0 * delta)
-		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
-	elif position != Vector2.ZERO:
-		position = Vector2.ZERO
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+	elif cam.offset != Vector2.ZERO:
+		cam.offset = Vector2.ZERO
 	# ---- rorelse: acceleration ger tyngd, coyote + buffert ger valvilja ----
 	var ax := Input.get_axis("ui_left", "ui_right")
 	if ax == 0.0:
@@ -2380,12 +2411,34 @@ func _physics_process(delta: float) -> void:
 			ax = -1.0
 		elif Input.is_physical_key_pressed(KEY_D):
 			ax = 1.0
+	# Autopilot-styrningen: spring mot flaggan; strala fram/ner fran kanten -
+	# gap eller vagg (eller fastnad) => hoppa. Hallt hopp under stigningen
+	# sa variabla hopphojden inte kapar spranget vid -220.
+	var auto_jump := false
+	if autopilot and player.is_on_floor():
+		var dirx := 1.0
+		if goal != null and absf(goal.position.x - player.position.x) > 24.0:
+			dirx = signf(goal.position.x - player.position.x)
+		ax = dirx
+		var space := get_world_2d().direct_space_state
+		var edge := player.position + Vector2(dirx * 56.0, -4.0)
+		var gq := PhysicsRayQueryParameters2D.create(edge, edge + Vector2(0, 120.0))
+		gq.exclude = [player.get_rid()]
+		var wq := PhysicsRayQueryParameters2D.create(player.position + Vector2(0, -6.0),
+			player.position + Vector2(dirx * 46.0, -6.0))
+		wq.exclude = [player.get_rid()]
+		auto_jump = space.intersect_ray(gq).is_empty() \
+			or not space.intersect_ray(wq).is_empty() \
+			or absf(player.velocity.x) < 30.0
+	elif autopilot:
+		ax = 1.0 if goal == null else signf(goal.position.x - player.position.x)
+		auto_jump = player.velocity.y < -60.0
 	var accel := GROUND_ACCEL if player.is_on_floor() else AIR_ACCEL
 	player.velocity.x = move_toward(player.velocity.x, ax * MOVE_SPEED, accel * delta)
 	player.velocity.y = minf(player.velocity.y + GRAVITY * delta, 980.0)
 	var jump_down := Input.is_physical_key_pressed(KEY_SPACE) \
 		or Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP) \
-		or touch_jump
+		or touch_jump or auto_jump
 	if jump_down and not jump_was_down:
 		jump_buffer = 0.12
 	if not jump_down and jump_was_down and player.velocity.y < -220.0:
@@ -2611,7 +2664,8 @@ func show_title() -> void:
 	show_overlay("PIXEL RUSH", "Reach the flag across %d levels. Arrows/A-D: move, Space/W: jump.\nStomp enemies, ride the springs, mind the crumbling ledges.\nBest: %d      M: mute   -/+: volume" % [FINAL_LEVEL, load_highscore()], true)
 
 func show_overlay(title: String, message: String, with_buttons: bool) -> void:
-	position = Vector2.ZERO
+	if cam:
+		cam.offset = Vector2.ZERO
 	shake = 0.0
 	close_overlay()
 	overlay = Control.new()

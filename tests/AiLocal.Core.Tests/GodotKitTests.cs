@@ -128,6 +128,10 @@ public class GodotKitTests
             // v1.93: touchkontroller - runtime-gatade (datorspel oforandrade).
             Assert.Contains("TouchScreenButton", script);
             Assert.Contains("is_touchscreen_available", script);
+            // v2.13: autopiloten - kvalitetsgrindens demospelare, gatad bakom
+            // AILOCAL_AUTOPILOT sa vanliga spelare aldrig markar den.
+            Assert.Contains("AILOCAL_AUTOPILOT", script);
+            Assert.Contains("PhysicsRayQueryParameters2D", script);
             // Inga C#-filer kvar - mono-beroendet ar borta.
             Assert.Empty(Directory.GetFiles(root, "*.cs"));
             AssertKitComplete(root);

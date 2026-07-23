@@ -333,6 +333,35 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > DetectEngine säger unknown. Testlåst: godot-prompt utan golv får aldrig
 > js-råd. OBS: ägarens nod körde v2.3.0 under transkriptet - demorundor/
 > FPS/musik fanns inte där.
+>
+> **v2.7-v2.12 ROBUSTHET + PREMIUMGOLVET (sammanfattat).** Säkerhetsnätet
+> (varje grind-grönt läge snapshottas; misslyckad slutstatus levererar
+> senast godkända bygget), kostnadstak-defaulter, e2e-beviskedjan (isolerad
+> gratisnod → 84 MB spelbar exe), scaffold-wrapperns ljud-/konst-/sprite-
+> golv i ALLA kit, genrekontraktens mätbara antal ("15 minigames" räknas),
+> GENOMBROTTSFYNDET (spelläget importerar aldrig resurser - sonden kör
+> `--headless --import` först; alla tidigare sond-/visionsbedömningar såg
+> sprite-lösa spel) samt premium-Pixel Rush som arkadgolvets målnivå
+> (lagrad värld, 5 designade banor, vittrande plattformar, studsplattor,
+> medaljer, volym, övergångar).
+>
+> **v2.13 FÖRE/EFTER-VAKTEN + AUTOPILOTEN + RELEASE-CHECKLISTAN (steg 2-4
+> av "små spel som faktiskt är bra"-planen).** (1) Varje godkänt läge
+> sparar en referensdump; efter varje utvecklings-/demorunda dömer visionen
+> referens-mot-nu sida vid sida - "SAMRE" ⇒ rundan förkastas och senast
+> godkända bygget återställs (fail-open utan visionsnycklar). (2) Sonden
+> sätter AILOCAL_AUTOPILOT=1; plattformarkitet spelar sig självt (väntar
+> förbi titeldumpen, springer mot flaggan, strålkastar kanter, hoppar,
+> omstart efter game over) - sonddumparna visar RIKTIGT spelande (bevisat
+> nivå 4/5, 200 p på 19 s). Autopilotens FÖRSTA körning hittade en äkta
+> kitbugg: root-nod-screenshake teleporterade fysiken + one-way-mark ⇒
+> genomfall genom världen vid varje skak; fix = kameraskak + one-way bara
+> på svävande plattor (75 s autonom körning: 0 genomfall). (3) Release-
+> checklistan i grinden (rådgivande): omstart, volym/mute, paus, sparat
+> highscore, riktig fönstertitel - fynden matas in i kritikrundorna.
+> KVAR i planen: autopilot i fler kit (FPS/party har attract-lägen),
+> kameraskak i övriga kit med root-shake, CC0-assetpaket via pinnad
+> ToolProvisioner-katalog, språkväljare i settings.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
