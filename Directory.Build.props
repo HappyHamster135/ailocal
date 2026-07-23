@@ -9,6 +9,6 @@
     <!-- Bump this with every release tag - SelfUpdater compares it against
          GitHub's latest release tag to decide whether an update is available,
          so a stale value here means that check is wrong, not just cosmetic. -->
-    <Version>2.8.0</Version>
+    <Version>2.9.0</Version>
   </PropertyGroup>
 </Project>

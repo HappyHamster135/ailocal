@@ -74,8 +74,11 @@ public static class PolishPass
                         var (ok, text) = await visionReview(shot,
                             "You are a game studio's ART DIRECTOR reviewing a real screenshot of the game. " +
                             "In 3-5 short bullet points, name concretely what looks empty, unbalanced, unreadable " +
-                            "or unpolished (layout, palette, contrast, empty screen areas, missing visual identity) " +
-                            "and what to add/change. Be specific and buildable - never 'improve the graphics'.", ct);
+                            "or unpolished (layout, palette, contrast, empty screen areas, missing visual identity). " +
+                            "Watch specifically for PROGRAMMER ART: naked flat rectangles/circles without outlines, " +
+                            "shadows or depth, disconnected board tiles, dead/empty UI bars - call those out and say " +
+                            "which Art.gd helper fixes each (Art.orb/tile/panel/token/connect_path/bg). " +
+                            "Be specific and buildable - never 'improve the graphics'.", ct);
                         if (ok && !string.IsNullOrWhiteSpace(text))
                             evidence += "\n\nART DIRECTOR review of screenshot (" + Path.GetFileName(shot) + "):\n" + text.Trim();
                     }

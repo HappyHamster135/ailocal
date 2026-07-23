@@ -53,7 +53,8 @@ public class WindowProbeAndFeelTests
         var basic = new[] { "5 banor", "3 fiendetyper" };
 
         var godot = DirectorPass.EnsureEngineFeelCriteria(basic, "godot");
-        Assert.Equal(9, godot.Count); // 2 basic + 7 spelkänsla-/kvalitetskriterier
+        Assert.Equal(10, godot.Count); // 2 basic + 8 spelkänsla-/kvalitetskriterier
+        Assert.Contains(godot, c => c.Contains("Art.gd"));         // v2.9: grafisk finish via ritbiblioteket
         Assert.Contains(godot, c => c.Contains("Ljudeffekt"));
         Assert.Contains(godot, c => c.Contains("feedback", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(godot, c => c.Contains("övergångar"));
@@ -72,9 +73,10 @@ public class WindowProbeAndFeelTests
         var withSound = new[] { "ljudeffekter för hopp/mynt/träff", "5 banor" };
         var result = DirectorPass.EnsureEngineFeelCriteria(withSound, "godot");
 
-        // Ljud-punkten är redan täckt av regissören - bara de sex övriga
-        // (feedback, övergångar, replay, juice, prestanda, språk) läggs till.
-        Assert.Equal(8, result.Count);
+        // Ljud-punkten är redan täckt av regissören - bara de sju övriga
+        // (feedback, övergångar, replay, juice, prestanda, språk, grafisk
+        // finish) läggs till.
+        Assert.Equal(9, result.Count);
         Assert.Single(result, c => c.Contains("ljud", StringComparison.OrdinalIgnoreCase));
     }
 

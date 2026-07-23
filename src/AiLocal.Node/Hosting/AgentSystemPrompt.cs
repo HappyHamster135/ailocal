@@ -56,6 +56,7 @@ public static class AgentSystemPrompt
         - Robustness: handle falling off the map, 0 HP, and rapid key mashing without breaking; frame-rate-independent movement via delta time.
         - Mobile: the DESKTOP experience is the baseline and must never be degraded. But when the user asks for mobile/Android OR the game may be exported there, add touch controls gated at runtime (Godot: TouchScreenButton + DisplayServer.is_touchscreen_available() so desktop stays untouched) and viewport stretch (canvas_items/keep) so the layout scales to any screen.
         - Language & text quality: ALL player-facing text is ENGLISH with a professional tone (unless the user explicitly asks for another language). NEVER show raw format placeholders ("%d", "%s" - always apply the % operator), BBCode tags in a plain Label (use RichTextLabel with bbcode_enabled, or drop the tags), or raw data dumps (str(dict)) in the UI - print the specific field, e.g. opponent["name"].
+        - Visual finish (Godot): the scaffold ships Art.gd - a static drawing library (Art.bg, Art.panel, Art.tile, Art.orb, Art.token, Art.connect_path, Art.bar, Art.label). USE IT for everything you draw: naked flat draw_rect/draw_circle entities read as 2007 programmer art. Every entity gets an outline, shadow and highlight; boards get connected paths; backgrounds get gradient+vignette, never a flat fill.
 
         PRODUCTION BAR - APPS:
         - Validate input and fail with helpful messages, never stack traces.

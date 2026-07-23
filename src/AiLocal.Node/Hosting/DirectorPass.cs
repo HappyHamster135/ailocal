@@ -155,6 +155,12 @@ public static class DirectorPass
             // uttryckligen om ett annat språk vinner det via nyckelorden.
             (["engelsk", "english", "språk", "sprak", "language", "svenska på", "lokaliser"],
                 "All spelartext på ENGELSKA med professionell ton (om inte användaren uttryckligen bett om annat språk) - och ALDRIG råa formatsträngar (%d/%s), synliga BBCode-taggar eller rådumpade data i UI:t"),
+            // v2.9 (ägarens "första Bloons-spelet"-skärmdump): nakna
+            // draw_rect/draw_circle-entiteter läses som programmer-art.
+            // Art.gd skickas med i varje Godot-scaffold - kriteriet gör
+            // användningen till ett kontraktskrav för allt agentritat.
+            (["art.gd", "kontur", "outline", "skugga", "shadow", "programmer-art", "grafisk finish", "visuell finish"],
+                "Grafisk finish: allt agentritat använder Art.gd-hjälparna (Art.orb/tile/panel/token/bg - kontur, skugga, ljushighlight, djup) - ALDRIG nakna osminkade draw_rect/draw_circle för spelentiteter"),
         ];
 
         var result = new List<string>(criteria);

@@ -141,8 +141,105 @@ public sealed partial class GameScaffoldService
         // countdown...) i stället för att uppfinna den svagt från noll.
         var scaffolded = ScaffoldGodotCore(root, prompt);
         scaffolded = AppendMusic(root, prompt ?? "", scaffolded);
+        scaffolded = AppendArtLib(root, scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
     }
+
+    /// <summary>v2.9: Art.gd - AGENTERNAS RITBIBLIOTEK. Agenter ritar med
+    /// nakna draw_rect/draw_circle (enklast) och resultatet ser ut som
+    /// programmer-art fran 2007 (agarens "forsta Bloons-spelet"-skarmdump).
+    /// Biblioteket ger produktionsprimitiver: skugga+kontur+ljushighlight,
+    /// paneler, brickor med symbol, orbs/tokens, banor mellan punkter,
+    /// gradient+vinjett-bakgrund. Regissorskriteriet + bildkritiken tvingar
+    /// anvandningen for allt NYTT; golvkiten har egen intrimmad ritning.</summary>
+    static string[] AppendArtLib(string root, string[] files)
+    {
+        try
+        {
+            Write(root, "Art.gd", GodotArtLib);
+            return [.. files, "Art.gd"];
+        }
+        catch
+        {
+            return files;
+        }
+    }
+
+    const string GodotArtLib = """
+class_name Art
+# Art.gd - produktionsritning for agentbyggda spel. ANVAND DESSA i stallet
+# for nakna draw_rect/draw_circle: alla former far skugga, kontur och djup.
+# Alla funktioner ar statiska: Art.panel(self, rect, fargen) fran valfri
+# _draw(). BYT TEMA: skicka andra farger - formspraket ar konstant.
+
+const SHADOW := Color(0.0, 0.0, 0.0, 0.28)
+const OUTLINE_DARKEN := 0.45
+const HILITE := Color(1.0, 1.0, 1.0, 0.35)
+
+# Gradientbakgrund (vertikala band) med mork vinjett upptill/nedtill -
+# aldrig en platt enfargsyta bakom spelet.
+static func bg(c: CanvasItem, rect: Rect2, top: Color, bottom: Color) -> void:
+    var bands := 24
+    for i in range(bands):
+        var t := float(i) / float(bands - 1)
+        var r := Rect2(rect.position.x, rect.position.y + rect.size.y * float(i) / float(bands),
+            rect.size.x, rect.size.y / float(bands) + 1.0)
+        c.draw_rect(r, top.lerp(bottom, t))
+    c.draw_rect(Rect2(rect.position, Vector2(rect.size.x, 46.0)), Color(0, 0, 0, 0.10))
+    c.draw_rect(Rect2(rect.position + Vector2(0, rect.size.y - 46.0), Vector2(rect.size.x, 46.0)), Color(0, 0, 0, 0.14))
+
+# Panel/kort: skugga bakom, fyllning, ljuskant upptill, kontur.
+static func panel(c: CanvasItem, rect: Rect2, fill: Color) -> void:
+    c.draw_rect(Rect2(rect.position + Vector2(0, 4), rect.size), SHADOW)
+    c.draw_rect(rect, fill)
+    c.draw_rect(Rect2(rect.position, Vector2(rect.size.x, maxf(3.0, rect.size.y * 0.14))), HILITE)
+    c.draw_rect(rect, fill.darkened(OUTLINE_DARKEN), false, 2.0)
+
+# Spelbricka/ruta med valfri symboltext i mitten.
+static func tile(c: CanvasItem, rect: Rect2, fill: Color, symbol: String = "", symbol_col: Color = Color.WHITE) -> void:
+    panel(c, rect, fill)
+    if symbol != "":
+        var fs := int(rect.size.y * 0.5)
+        c.draw_string(ThemeDB.fallback_font,
+            Vector2(rect.position.x, rect.position.y + rect.size.y * 0.5 + float(fs) * 0.36),
+            symbol, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, symbol_col)
+
+# Orb: skuggad cirkel med ljushighlight och kontur - aldrig en platt cirkel.
+static func orb(c: CanvasItem, pos: Vector2, r: float, col: Color) -> void:
+    c.draw_circle(pos + Vector2(0, r * 0.18), r, SHADOW)
+    c.draw_circle(pos, r, col)
+    c.draw_circle(pos + Vector2(-r * 0.3, -r * 0.3), r * 0.35, HILITE)
+    c.draw_arc(pos, r, 0.0, TAU, 24, col.darkened(OUTLINE_DARKEN), 2.0)
+
+# Spelartoken: orb med vit ring sa den skiljer sig fran dekor.
+static func token(c: CanvasItem, pos: Vector2, r: float, col: Color) -> void:
+    orb(c, pos, r, col)
+    c.draw_arc(pos, r + 2.5, 0.0, TAU, 24, Color(1, 1, 1, 0.9), 2.0)
+
+# Bana/koppling mellan punkter (t.ex. bradrutor) - dubbellinje ger djup.
+static func connect_path(c: CanvasItem, points: PackedVector2Array, col: Color, closed: bool = true) -> void:
+    if points.size() < 2:
+        return
+    var n := points.size() if closed else points.size() - 1
+    for i in range(n):
+        var a := points[i]
+        var b := points[(i + 1) % points.size()]
+        c.draw_line(a, b, col.darkened(0.4), 5.0)
+        c.draw_line(a, b, col, 2.5)
+
+# Matare/progressbar med kontur.
+static func bar(c: CanvasItem, rect: Rect2, frac: float, back: Color, fill: Color) -> void:
+    c.draw_rect(Rect2(rect.position + Vector2(0, 2), rect.size), SHADOW)
+    c.draw_rect(rect, back)
+    c.draw_rect(Rect2(rect.position, Vector2(rect.size.x * clampf(frac, 0.0, 1.0), rect.size.y)), fill)
+    c.draw_rect(rect, back.darkened(OUTLINE_DARKEN), false, 2.0)
+
+# Rubriktext med mork kontur - lasbar mot alla bakgrunder.
+static func label(c: CanvasItem, pos: Vector2, text: String, size: int, col: Color, width: float = 1152.0) -> void:
+    var f := ThemeDB.fallback_font
+    c.draw_string_outline(f, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, size, 4, Color(0, 0, 0, 0.55))
+    c.draw_string(f, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, size, col)
+""";
 
     /// <summary>v2.4: BAKGRUNDSMUSIK i varje Godot-kit. ChiptuneComposer har
     /// funnits sedan v1.36 men inget kit SPELADE musik - ljudbilden var bara

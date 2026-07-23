@@ -35,8 +35,9 @@ public class GodotKitTests
     private static void AssertKitComplete(string root)
     {
         // v2.4: music.wav = bakgrundsmusiken (ChiptuneComposer) som ALLA kit
-        // numera loopar - ljudbilden är musik + effekter, inte bara pip.
-        foreach (var required in new[] { "project.godot", "Main.tscn", "Main.gd", "export_presets.cfg", "DESIGN.md", "README.md", "coin.wav", "win.wav", "music.wav" })
+        // numera loopar. v2.9: Art.gd = agenternas ritbibliotek (kontur/
+        // skugga/djup) - skickas med i varje Godot-scaffold.
+        foreach (var required in new[] { "project.godot", "Main.tscn", "Main.gd", "export_presets.cfg", "DESIGN.md", "README.md", "coin.wav", "win.wav", "music.wav", "Art.gd" })
             Assert.True(File.Exists(Path.Combine(root, required)), $"{required} saknas i kitet");
         Assert.Contains("music", File.ReadAllText(Path.Combine(root, "Main.gd")));
 
@@ -356,6 +357,37 @@ public class GodotKitTests
             // Utan begart antal racker kitgolvets 3.
             var (met2, total2, _) = GenreContracts.Verify(root, "party", "bygg ett partyspel");
             Assert.Equal(total2, met2);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public async Task ArtGd_ParsarMedRiktigGodot_CheckOnly()
+    {
+        // Art.gd laddas forst i RUNTIME av agentkod - --quit-parsen ser den
+        // aldrig (Mg-fil-laxan v2.3). Validera den explicit per fil.
+        var godot = ToolLocator.Find("godot");
+        if (godot is null || !File.Exists(godot)) return;
+
+        var (root, _) = ScaffoldTo("bygg ett litet plattformsspel i godot");
+        try
+        {
+            Assert.True(File.Exists(Path.Combine(root, "Art.gd")));
+            var psi = new System.Diagnostics.ProcessStartInfo(godot)
+            {
+                ArgumentList = { "--headless", "--path", root, "--check-only", "--script", "res://Art.gd" },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi)!;
+            var so = proc.StandardOutput.ReadToEndAsync();
+            var se = proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token);
+            var output = await so + "\n" + await se;
+            Assert.False(output.Contains("SCRIPT ERROR") || output.Contains("Parse Error"),
+                "Art.gd parsar inte:\n" + output);
         }
         finally { Cleanup(root); }
     }
