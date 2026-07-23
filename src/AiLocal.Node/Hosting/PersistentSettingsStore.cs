@@ -37,6 +37,7 @@ public sealed record SettingsUpdate(
     bool? AutoResume = null,
     int? PolishRounds = null,
     bool? DemoCheckpoints = null,
+    bool? PreBuildQuestions = null,
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
     bool? AutoMergeIsolatedTasks = null,
@@ -73,6 +74,7 @@ internal sealed class StoredNodeSettings
     public bool AutoResume { get; set; }
     public int PolishRounds { get; set; } = 1;
     public bool DemoCheckpoints { get; set; } = true;
+    public bool PreBuildQuestions { get; set; } = true;
     public bool AllowInternet { get; set; }
     public bool UseGitIsolation { get; set; }
     public bool AutoMergeIsolatedTasks { get; set; }
@@ -208,6 +210,8 @@ public sealed class PersistentSettingsStore
             settings.Worker.PolishRounds = Math.Clamp(stored.PolishRounds, 0, 3);
         if (Has("DemoCheckpoints"))
             settings.Worker.DemoCheckpoints = stored.DemoCheckpoints;
+        if (Has("PreBuildQuestions"))
+            settings.Worker.PreBuildQuestions = stored.PreBuildQuestions;
         if (Has("AllowInternet"))
             settings.Worker.AllowInternet = stored.AllowInternet;
         if (Has("UseGitIsolation"))
@@ -296,6 +300,7 @@ public sealed class PersistentSettingsStore
                 autoResume = _settings.Worker.AutoResume,
                 polishRounds = _settings.Worker.PolishRounds,
                 demoCheckpoints = _settings.Worker.DemoCheckpoints,
+                preBuildQuestions = _settings.Worker.PreBuildQuestions,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
                 autoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks,
@@ -404,6 +409,9 @@ public sealed class PersistentSettingsStore
 
             if (update.DemoCheckpoints.HasValue)
                 _settings.Worker.DemoCheckpoints = update.DemoCheckpoints.Value;
+
+            if (update.PreBuildQuestions.HasValue)
+                _settings.Worker.PreBuildQuestions = update.PreBuildQuestions.Value;
 
             if (update.AllowInternet.HasValue)
                 _settings.Worker.AllowInternet = update.AllowInternet.Value;
@@ -641,6 +649,7 @@ public sealed class PersistentSettingsStore
         _stored.AutoResume = _settings.Worker.AutoResume;
         _stored.PolishRounds = _settings.Worker.PolishRounds;
         _stored.DemoCheckpoints = _settings.Worker.DemoCheckpoints;
+        _stored.PreBuildQuestions = _settings.Worker.PreBuildQuestions;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;

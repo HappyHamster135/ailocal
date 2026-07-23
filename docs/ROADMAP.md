@@ -440,6 +440,25 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > nedskalningen blir ren). Skärmdumpsverifierat med zoom: konturerad
 > gubbe med frisyr/shading vid konturerad bricka. KVAR: samma bricklyft
 > i fler kit (Glade-tiles, 3D-partyt), AI-bakgrunder via pipelinen.
+>
+> **v2.18 FÖRHANDSVALEN + FÖRHANDSFRÅGORNA + STAFETTEN (ägarens tre:
+> "välj allting innan", "så frågar vi på mer", "automatiska handovers").**
+> (1) Composern: stilkort med SVG-miniatyrer (Auto/Pixelart/2.5D/3D/
+> Vektor) + Omfång (litet/standard/stort) + "Fråga först". Skickas som
+> ASCII-taggar i uppdragstexten ([STIL: x]) = inga API-ändringar;
+> BuildDirectives parsar och gör dem till HÅRDA kontraktspunkter FÖRST
+> i regissörens kontrakt (operatorCriteria-param). Omfånget styr pass-
+> (3/4/6) och polishbudgetar. (2) PreBuildQuestions: 2-3 riktade följd-
+> frågor FÖRE scaffold i demorundornas kort (title-fält återanvänder
+> demo-steget); svaren väger tyngst; 10 min = auto; inställning
+> PreBuildQuestions (8 kopplingspunkter). (3) RelayHandover-stafetten:
+> vid iterationstak skriver passet HANDOVER.md (KLART/ÅTERSTÅR/KÄNDA
+> PROBLEM/NÄSTA STEG - överlämningsturen körs med behörighet AV = ren
+> text) och ett FÄRSKT pass med tom kontext tar över - konstant
+> kontextstorlek i stället för 8M-token-svällningen; fail-open till
+> historik-fortsättningen. KVAR: stafett i teamspåren (delad hjälpare
+> finns), förhandsval även i Ny spel-dialogen, stil-förhandsbilder av
+> riktiga kit-skärmdumpar i korten.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

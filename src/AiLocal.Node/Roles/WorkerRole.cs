@@ -663,6 +663,13 @@ public static class WorkerRole
             // här tidpunkten - tagen FÖRE förskaffolden så även den räknas
             // som producerat arbete.
             var runStartUtc = DateTime.UtcNow;
+            // v2.18: FÖRHANDSVALEN - composerns stil/omfång/fråga-först-taggar
+            // parsas ut ur uppdragstexten (textinbakning = inga API-ändringar;
+            // gamla noder ser bara ofarlig text). Valen blir hårda kontrakts-
+            // punkter + styr pass- och polishbudgetarna.
+            var choices = BuildDirectives.Parse(req.Assignment);
+            req = req with { Assignment = choices.CleanAssignment };
+            var maxPasses = BuildDirectives.MaxPasses(choices.Scope);
             var buildIntent = HostRole.IsBuildRequest(req.Assignment);
             // Spel (Godot/HTML5/Unity) vs en ren app/verktyg. Bredare än "sager
             // det 'spel'": ett genrenamngivet uppdrag ("Football Manager Tycoon",
@@ -671,6 +678,49 @@ public static class WorkerRole
             // att godkanna en C#-konsolapp (rapporterat: fotbollsmanager blev en
             // textbaserad dotnet-app som grinden vinkade igenom).
             var wantsGame = GameScaffoldService.LooksLikeGame(req.Assignment);
+
+            // ---- v2.18: förhandsfrågorna - rätt riktning FÖRE första token --
+            // 2-3 riktade följdfrågor i demorundornas kort ("simulator eller
+            // arkad? öppen värld eller banor?"); svaren väger tyngst i hela
+            // bygget. 10 min tystnad = regissören väljer själv. Bara lokala
+            // körningar (samma gate som milstolpar/demorundor).
+            if (choices.AskFirst && settings.Worker.PreBuildQuestions && includePreview && buildIntent)
+            {
+                await EmitStep("tool_call", "förhandsfrågor (analyserar uppdraget innan bygget)");
+                var preQs = await PreBuildQuestions.GenerateAsync(
+                    req.Assignment, completeAccounted, ct,
+                    string.IsNullOrWhiteSpace(settings.Worker.ModelTiers.Medium) ? null : settings.Worker.ModelTiers.Medium);
+                if (preQs.Count > 0)
+                {
+                    var qId = Guid.NewGuid().ToString("n")[..8];
+                    await EmitStep("demo", JsonSerializer.Serialize(new
+                    {
+                        id = qId,
+                        stage = 0,
+                        title = "Förhandsfrågor - styr bygget innan det startar",
+                        questions = preQs,
+                        note = "Svara (eller hoppa över) - efter 10 minuter väljer studion själv och kör."
+                    }));
+                    var (_, preNote) = await MilestoneRegistry.WaitAsync(qId, TimeSpan.FromMinutes(10), ct);
+                    if (!string.IsNullOrWhiteSpace(preNote))
+                    {
+                        req = req with
+                        {
+                            Assignment = req.Assignment +
+                                "\n\nOPERATÖRENS FÖRHANDSVAL (styr bygget - väger tyngre än allt annat där de krockar):\n" + preNote
+                        };
+                        await EmitStep("thinking", "Förhandsvalen mottagna - bygget riktas efter dem.");
+                    }
+                    else
+                    {
+                        await EmitStep("thinking", "Inga förhandssvar inom 10 minuter - studion väljer själv (auto).");
+                    }
+                }
+                else
+                {
+                    await EmitStep("tool_result", "Uppdraget är tydligt nog - inga förhandsfrågor behövs.");
+                }
+            }
 
             // ---- Uppgiftsmedveten modellroutning (kostnadsfokus) ------------
             // ModelTiers kostnadstrappar fanns hela tiden (coding: billig
@@ -816,10 +866,18 @@ public static class WorkerRole
                         await EmitStep("thinking",
                             "Studiominne (" + directorGenre + "): " + string.Join(" · ", pastLessons));
                     await EmitStep("tool_call", "regissören (designkontrakt med mätbara kriterier)");
+                    // v2.18: operatörens stil-/omfångsval blir hårda kontrakts-
+                    // punkter FÖRST i kontraktet.
+                    var operatorCriteria = new List<string>();
+                    if (BuildDirectives.StyleCriterion(choices.Style) is { } styleCrit)
+                        operatorCriteria.Add(styleCrit);
+                    if (BuildDirectives.ScopeCriterion(choices.Scope) is { } scopeCrit)
+                        operatorCriteria.Add(scopeCrit);
                     var contract = await DirectorPass.RunAsync(
                         req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, completeAccounted, ct,
                         engine: GameBuilder.DetectEngine(directorRoot),
-                        inspirationSeeds: ideaSeeds, pastLessons: pastLessons);
+                        inspirationSeeds: ideaSeeds, pastLessons: pastLessons,
+                        operatorCriteria: operatorCriteria);
                     contractCriteria = contract.Criteria;
                     await EmitStep("tool_result", contract.ToMarkdown());
                     assignmentText += "\n\n" + contract.ToMarkdown() +
@@ -896,7 +954,7 @@ public static class WorkerRole
             {
                 var windowStart = DateTime.UtcNow;
                 var runResult = await loop.RunAsync(prompt, accessLevel, runModel, onStep: emitAgentStep, ct, system: system);
-                for (var round = 2; runResult.HitIterationCap && round <= 4; round++)
+                for (var round = 2; runResult.HitIterationCap && round <= maxPasses; round++)
                 {
                     if (ProjectRootDetector.NewestWriteUtc(workspaceRoot) < windowStart)
                     {
@@ -904,13 +962,47 @@ public static class WorkerRole
                             "Iterationstaket nåddes utan några filändringar i senaste rundan - avbryter här (runaway-skydd).");
                         break;
                     }
-                    await EmitStep("thinking",
-                        $"Iterationstaket nått men arbetet gör framsteg - fortsätter där det slutade (runda {round} av 4).");
+
+                    // v2.18 STAFETTEN (ägarens idé): i stället för att släpa
+                    // HELA konversationen vidare varje runda (svällde live till
+                    // 8M input-tokens) skriver passet en ÖVERLÄMNING och ett
+                    // FÄRSKT pass med tom kontext tar över. Överlämningsturen
+                    // körs med behörighet AV = ren text, inga verktyg. Fail-
+                    // open: oduglig överlämning => gamla historik-vägen.
+                    string? handover = null;
+                    try
+                    {
+                        var ho = await loop.RunAsync(RelayHandover.RequestPrompt, AgentAccessLevel.Off, runModel,
+                            onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                        if (RelayHandover.LooksUsable(ho.FinalAnswer)) handover = ho.FinalAnswer;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch { /* fail-open till historik-fortsättningen */ }
+
                     windowStart = DateTime.UtcNow;
-                    runResult = await loop.RunAsync(
-                        "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
-                        "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
-                        accessLevel, runModel, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                    if (handover is not null)
+                    {
+                        try
+                        {
+                            var hoRoot = ProjectRootDetector.Detect(workspaceRoot) ?? workspaceRoot;
+                            await File.WriteAllTextAsync(Path.Combine(hoRoot, "HANDOVER.md"), handover, ct);
+                        }
+                        catch { /* överlämningen finns ändå i prompten */ }
+                        await EmitStep("thinking",
+                            $"Stafettväxling: överlämning skriven (HANDOVER.md) - ett färskt pass med tom kontext tar över (pass {round} av {maxPasses}).");
+                        runResult = await loop.RunAsync(
+                            RelayHandover.RelayPrompt(prompt, handover, round, maxPasses),
+                            accessLevel, runModel, onStep: emitAgentStep, ct, system: system);
+                    }
+                    else
+                    {
+                        await EmitStep("thinking",
+                            $"Iterationstaket nått men arbetet gör framsteg - fortsätter där det slutade (runda {round} av {maxPasses}).");
+                        runResult = await loop.RunAsync(
+                            "Du nådde iterationstaket men uppdraget är inte klart än. Fortsätt EXAKT där du slutade - " +
+                            "slutför återstoden av arbetet, kör verify, och avsluta när allt är på plats.",
+                            accessLevel, runModel, onStep: emitAgentStep, ct, history: runResult.Messages, system: system);
+                    }
                 }
 
                 // Plan-i-stället-för-utförande-vakten: svaga modeller avslutar
@@ -1367,6 +1459,11 @@ public static class WorkerRole
             // ovanpå historiken. Snapshot före varje runda = en försämrande
             // runda ÅTERSTÄLLS i stället för att skeppas. Max$-taket gäller.
             var polishTotal = Math.Clamp(settings.Worker.PolishRounds, 0, 3);
+            // v2.18: omfångsvalet styr polishbudgeten - ett LITET arkadspel
+            // ska bli KLART och polerat snabbt; ett STORT projekt får fler
+            // utvecklingsrundor (kostnadstaket gäller alltid).
+            if (choices.Scope == "litet") polishTotal = Math.Min(polishTotal, 1);
+            else if (choices.Scope == "stort") polishTotal = Math.Max(polishTotal, 2);
             if (result.Success && findings is { Clean: true } && buildIntent && wantsGame && polishTotal > 0)
             {
                 for (var pr = 1; pr <= polishTotal; pr++)

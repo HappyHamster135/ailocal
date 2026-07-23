@@ -93,7 +93,8 @@ public static class DirectorPass
         CancellationToken ct,
         string? engine = null,
         IReadOnlyList<string>? inspirationSeeds = null,
-        IReadOnlyList<string>? pastLessons = null)
+        IReadOnlyList<string>? pastLessons = null,
+        IReadOnlyList<string>? operatorCriteria = null)
     {
         // v1.97: slumpad kreativ vinkel per körning - samma prompt två gånger
         // ska inte ge samma designangrepp (vinkeln styr HUR regissören tänker,
@@ -116,6 +117,11 @@ public static class DirectorPass
         // på INNEHÅLL (5 banor, 3 fiendetyper) men glömmer KÄNSLAN - och
         // grinden följer bara upp det som står i kontraktet. Punkterna läggs
         // FÖRE skrivningen till DESIGN.md så uppföljningar läser tillbaka dem.
+        // v2.18: operatörens förhandsval (stil/omfång från composern) läggs
+        // FÖRST i kontraktet - de är hårda krav som väger tyngre än allt
+        // regissören hittat på, och grinden följer upp dem som vanligt.
+        if (operatorCriteria is { Count: > 0 })
+            contract = contract with { Criteria = [.. operatorCriteria, .. contract.Criteria] };
         contract = contract with { Criteria = EnsureEngineFeelCriteria(contract.Criteria, engine) };
         TryAppendToDesign(projectRoot, contract);
         return contract;

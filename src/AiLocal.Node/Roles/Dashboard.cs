@@ -1087,6 +1087,14 @@ internal static class Dashboard
            label+fält radbryts som EN enhet i stället för att slitas isär. */
         .tool-group { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
         .tool-group + .tool-group { padding-left: 10px; border-left: 1px solid var(--line); }
+        .style-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0 2px; }
+        .style-lbl { font-size: 12px; opacity: .7; }
+        .style-card { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 10px 5px;
+          border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; cursor: pointer;
+          font-size: 11px; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+        .style-card:hover { transform: translateY(-1px); }
+        .style-card svg { width: 28px; height: 20px; fill: currentColor; opacity: .85; }
+        .style-card.selected { border-color: var(--accent, #5b8def); background: rgba(91, 141, 239, .12); }
         .composer-tools .check-field { min-height: 28px; gap: 6px; }
         .composer-tools select {
           min-height: 28px;
@@ -1754,6 +1762,33 @@ internal static class Dashboard
               <div class="composer-box">
                 <div class="attach-chips" id="delegateAttachChips"></div>
                 <textarea id="prompt" placeholder="Skriv vad du vill att klustret ska göra"></textarea>
+                <div class="style-row" id="styleRow" title="Förhandsvalen skickas med bygget (Agentläge) och blir hårda kontraktspunkter - studion slipper gissa grunderna.">
+                  <span class="style-lbl">Stil</span>
+                  <button type="button" class="style-card selected" data-style="" title="Auto - regissören väljer stil själv utifrån uppdraget">
+                    <svg viewBox="0 0 28 20"><path d="M14 2l2.2 5.6 5.8 2.4-5.8 2.4L14 18l-2.2-5.6L6 10l5.8-2.4z"/></svg><span>Auto</span>
+                  </button>
+                  <button type="button" class="style-card" data-style="pixelart" title="Äkta pixelart: sluten kontur, 2-3 nyanser per yta, skarpa pixlar (husstilen)">
+                    <svg viewBox="0 0 28 20"><rect x="10" y="1" width="8" height="6"/><rect x="8" y="7" width="12" height="7" opacity=".75"/><rect x="10" y="14" width="3" height="5" opacity=".55"/><rect x="15" y="14" width="3" height="5" opacity=".55"/></svg><span>Pixelart</span>
+                  </button>
+                  <button type="button" class="style-card" data-style="iso" title="2.5D: isometrisk pixelvy med djup (romb-tiles, y-sortering)">
+                    <svg viewBox="0 0 28 20"><polygon points="14,3 24,9 14,15 4,9"/><polygon points="14,15 24,9 24,13 14,19" opacity=".55"/><polygon points="14,15 4,9 4,13 14,19" opacity=".75"/></svg><span>2.5D</span>
+                  </button>
+                  <button type="button" class="style-card" data-style="3d" title="Riktig 3D: lågpoly med ljussättning och skuggor">
+                    <svg viewBox="0 0 28 20"><polygon points="14,1 23,5.5 14,10 5,5.5"/><polygon points="5,5.5 14,10 14,19 5,14.5" opacity=".7"/><polygon points="23,5.5 14,10 14,19 23,14.5" opacity=".45"/></svg><span>3D</span>
+                  </button>
+                  <button type="button" class="style-card" data-style="vektor" title="Ren vektor-2D: platta mjuka former via Art.gd-hjälparna">
+                    <svg viewBox="0 0 28 20"><circle cx="9" cy="10" r="7"/><rect x="17" y="4" width="10" height="12" rx="4" opacity=".6"/></svg><span>Vektor</span>
+                  </button>
+                  <span class="style-lbl" style="margin-left:10px">Omfång</span>
+                  <select id="scopeSelect" title="Litet = ett fokuserat arkadspel, polerat snabbt. Stort = fler system/banor, fler arbetspass och utvecklingsrundor (kostnadstaket gäller alltid).">
+                    <option value="">Standard</option>
+                    <option value="litet">Litet arkadspel</option>
+                    <option value="stort">Stort projekt</option>
+                  </select>
+                  <label class="check-field small" title="Studion ställer 2-3 klargörande frågor innan bygget startar (svara inom 10 min, annars väljer den själv). Kräver Agentläge, lokala körningar.">
+                    <input id="askFirst" type="checkbox" checked> Fråga först
+                  </label>
+                </div>
                 <div class="composer-toolbar">
                   <div class="composer-tools">
                     <div class="tool-group">
@@ -2206,6 +2241,14 @@ internal static class Dashboard
                   När prototypen är spelbar visas den som live-vy i bygget (webbexport) med riktade frågor -
                   dina svar blir en byggrunda med högsta prioritet. Runda 2 efter utvecklingsrundorna är
                   sista ändringspunkten. Bara lokala körningar pausar; auto-fortsätter efter 10 min utan svar.
+                </span>
+                <label class="check-field wide">
+                  <input id="settingPreBuildQuestions" type="checkbox" checked> Förhandsfrågor: 2-3 riktade frågor innan bygget startar
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  Med "Fråga först" i composern ställer studion klargörande frågor (simulator eller arkad?
+                  öppen värld eller banor?) INNAN första token bränns - rätt riktning från start är den
+                  billigaste kvalitetshöjningen. 10 minuter utan svar = studion väljer själv.
                 </span>
                 <span class="small" style="display:block;margin-top:-6px">
                   Grindens godkända leverans behandlas som PROTOTYP: studion kritiserar sitt eget spel
@@ -5192,6 +5235,7 @@ internal static class Dashboard
           $('settingAutoResume').checked = data.autoResume ?? false;
           $('settingPolishRounds').value = data.polishRounds ?? 1;
           $('settingDemoCheckpoints').checked = data.demoCheckpoints ?? true;
+          $('settingPreBuildQuestions').checked = data.preBuildQuestions ?? true;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
@@ -5528,6 +5572,7 @@ internal static class Dashboard
             autoResume: $('settingAutoResume').checked,
             polishRounds: Math.max(0, Math.min(3, parseInt($('settingPolishRounds').value, 10) || 0)),
             demoCheckpoints: $('settingDemoCheckpoints').checked,
+            preBuildQuestions: $('settingPreBuildQuestions').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
@@ -5969,6 +6014,25 @@ internal static class Dashboard
           };
         }
 
+        // v2.18: förhandsvalens taggprefix ([STIL: x]/[OMFANG: y]/[FORHANDSFRAGOR]).
+        function buildDirectivePrefix() {
+          const parts = [];
+          const st = document.querySelector('#styleRow .style-card.selected')?.dataset.style || '';
+          if (st) parts.push('[STIL: ' + st + ']');
+          const sc = $('scopeSelect')?.value || '';
+          if (sc) parts.push('[OMFANG: ' + sc + ']');
+          if ($('askFirst')?.checked) parts.push('[FORHANDSFRAGOR]');
+          return parts.length ? parts.join('\n') + '\n' : '';
+        }
+
+        // Stilkorten: ett val i taget, markering via .selected.
+        document.addEventListener('click', (e) => {
+          const card = e.target.closest('#styleRow .style-card');
+          if (!card) return;
+          document.querySelectorAll('#styleRow .style-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+        });
+
         function syncComposerLock() {
           const btn = $('sendBtn');
           if (!btn) return;
@@ -5988,18 +6052,22 @@ internal static class Dashboard
             return;
           }
           if ($('assignmentMode').checked) {
+            // v2.18: förhandsvalen (stil/omfång/fråga-först) skickas som
+            // ASCII-taggar först i uppdraget - noden parsar ut dem och gör
+            // dem till hårda kontraktspunkter. Gamla noder ser ofarlig text.
+            const tagged = buildDirectivePrefix() + prompt;
             // Team-läge kör målet som ETT uppdrag där NODEN gör uppdelningen
             // (arkitekt -> parallella worktree-agenter -> merge) - planeraren
             // hoppas över, den skulle bara duplicera arkitektens jobb.
             if ($('teamMode')?.checked) {
-              await runTeamAssignment(prompt);
+              await runTeamAssignment(tagged);
               return;
             }
             if ($('producerMode')?.checked) {
-              await runProducerAssignment(prompt);
+              await runProducerAssignment(tagged);
               return;
             }
-            await planAndRunGoal(prompt);
+            await planAndRunGoal(tagged);
             return;
           }
           const providerOrder = activeProviderOrder();
@@ -6173,7 +6241,7 @@ internal static class Dashboard
 
           const demo = (running && m.demo && m.demo.id)
             ? `<div class="milestone-card">
-                <strong>Demorunda ${esc(String(m.demo.stage || 1))} - spela demon här och svara</strong>
+                <strong>${esc(m.demo.title || ('Demorunda ' + String(m.demo.stage || 1) + ' - spela demon här och svara'))}</strong>
                 <div class="msg-text small">${esc(m.demo.note || '')}</div>
                 ${m.demo.previewPath
                   ? `<iframe class="demo-frame" src="${esc(m.demo.previewPath)}" allow="autoplay; fullscreen"></iframe>`

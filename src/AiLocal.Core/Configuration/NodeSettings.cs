@@ -94,6 +94,12 @@ public sealed class WorkerProfileSettings
     /// punkten. Bara lokala körningar pausar; 10 min auto-fortsätt.</summary>
     public bool DemoCheckpoints { get; set; } = true;
 
+    /// <summary>v2.18: förhandsfrågor - innan bygget startar ställer noden
+    /// 2-3 riktade följdfrågor om uppdraget (inriktning, skala, läge) i
+    /// demorundornas kort; svaren väger tyngst i hela bygget. Bara lokala
+    /// körningar pausar; 10 min tystnad = studion väljer själv.</summary>
+    public bool PreBuildQuestions { get; set; } = true;
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.
