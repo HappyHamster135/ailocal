@@ -222,7 +222,7 @@ public sealed class GamePlaytester
             // Samma felklass som CDP-sondens "reagerar inte": ser rätt ut men
             // svarar inte på spelaren - grindens fixrundor får jobba på det.
             if (probe is { Ran: true, Responded: false, ContinuouslyAnimating: false })
-                issues.Add("Interaktiv QA: spelet reagerar inte på spelarens tangenttryck - fönstret är oförändrat efter piltangenter/WASD/Enter/Space.");
+                issues.Add("Interaktiv QA: spelet reagerar inte på spelarens tangenttryck - fönstret är oförändrat efter piltangenter/WASD/Enter/Space. Spelaren KOMMER INTE FÖRBI STARTSKÄRMEN - koppla Enter/Space (eller ge startknappen fokus med grab_focus) så spelet faktiskt startar.");
 
             if (!string.IsNullOrWhiteSpace(stderr))
             {

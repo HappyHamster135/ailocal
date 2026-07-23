@@ -117,6 +117,49 @@ public static class GenreIdeaBank
         "kosmetiska upplasningar for spelarens figur (hattar/farger) vid milstolpar - syns pa bradan",
     ];
 
+    /// <summary>v2.10: GENRENS KVALITETSRIBBA - svaret på "hur vet den vad
+    /// som är ett bra spel?". Kuraterad kunskap om vad som skiljer BRA från
+    /// DÅLIGT per genre + vad toppspel gör. Injiceras i regissörsprompten
+    /// och i utvecklingsrundornas kritik - deterministisk, kostar noll.</summary>
+    public static string QualityBar(string genre) => genre switch
+    {
+        "platformer" =>
+            "BRA plattformare = KONTROLLKÄNSLAN: hoppet ska kännas exakt (coyote-tid, hoppbuffert, variabel hopphöjd). " +
+            "Toppspel (Celeste, Mario) bygger banor som LÄR en mekanik, testar den, och vrider den. " +
+            "Dåligt: banor som bara är utplacerade plattformar utan idé, fiender utan mönster, död luft utan risk/belöning.",
+        "party" =>
+            "BRA partyspel = VARIATION + JÄMNA CHANSER: minispelen ska ha OLIKA mekaniker (reaktion/minne/skicklighet/kaos), " +
+            "rundorna korta, och comeback möjlig (Mario Party: stjärnpriser, slumphändelser sent). " +
+            "Dåligt: minispel som känns likadana, en ledare som inte går att hinna ikapp, väntetid utan beslut.",
+        "fps" =>
+            "BRA FPS = TRÄFFKÄNSLA: varje skott hörs, syns (mynningsblixt, träffpartiklar) och känns (rekyl, hitmarker). " +
+            "Toppspel (Doom) håller spelaren i RÖRELSE: fiender som tvingar omflyttning, ammo/HP-ekonomi som styr risk. " +
+            "Dåligt: svampiga fiender utan feedback, tomma arenor, stillastående-är-bäst.",
+        "racing" =>
+            "BRA racing = KÄNSLAN AV FART OCH RISK: nära förbi-kanter, belönad perfekt kurvtagning, tydlig rytm i banan. " +
+            "Toppspel har banor med signaturögonblick och rival-AI som pressar utan att fuska. " +
+            "Dåligt: platta ovaler, AI på räls, ingen skillnad mellan bra och dålig körning.",
+        "artillery" =>
+            "BRA artilleri = LÄSBAR BALLISTIK: spelaren ska kunna RESONERA om vind/vinkel/kraft och bli bättre. " +
+            "Toppspel (Worms/ShellShock) gör terrängförstörelsen taktisk och vapenvalen till riktiga beslut. " +
+            "Dåligt: slumpkänsla i skotten, vind utan visning, vapen som bara är olika siffror.",
+        "management" or "simulator" or "idle" =>
+            "BRA management = MENINGSFULLA BESLUT varje omgång med synliga konsekvenser nästa omgång. " +
+            "Toppspel (Football Manager) gör AVVÄGNINGAR: kortsiktig vinst mot långsiktig uppbyggnad. " +
+            "Dåligt: klicka-vidare utan val, siffror som ändras utan att spelaren förstår varför.",
+        "rpg" or "roguelike" or "shooter" =>
+            "BRA arena/rpg = ESKALERING MED NYA HOT: varje våg/zon introducerar något som tvingar ny taktik. " +
+            "Toppspel ger builds/val som gör två genomspel olika. " +
+            "Dåligt: samma fiende i större mängd, belöningar som inte ändrar spelsättet.",
+        "puzzle" =>
+            "BRA pussel = AHA-ÖGONBLICK: reglerna enkla, djupet växer, varje bräde har en idé. " +
+            "Toppspel (2048, Tetris) belönar planering flera drag framåt. " +
+            "Dåligt: slumpavgjorda lägen, bräden utan tanke, ingen känsla av att bli skickligare.",
+        _ =>
+            "BRA spel = tydligt mål, omedelbar feedback pa varje handling, stigande utmaning och en anledning att spela EN gång till. " +
+            "Dåligt: otydligt vad spelaren ska göra, handlingar utan respons, samma upplevelse hela vägen.",
+    };
+
     /// <summary>Slumpar <paramref name="count"/> olika frön ur genrens bank.
     /// Random.Shared avsiktligt - två körningar SKA dra olika.</summary>
     public static IReadOnlyList<string> PickSeeds(string genre, int count = 3)

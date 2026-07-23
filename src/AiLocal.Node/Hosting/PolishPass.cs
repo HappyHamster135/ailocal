@@ -63,7 +63,11 @@ public static class PolishPass
             // via visionsmodellen i stället för att gissa utseendet ur koden
             // (ägarens skärmdumpar visade exakt det text-kritiken missar:
             // halvtomma layouter, oläslig kontrast). Fail-open per dump.
-            var evidence = gateReport;
+            // v2.10: genrens kvalitetsribba in i kritiken - kritikern vet
+            // vad BRA betyder i just den här genren, inte bara generellt.
+            var evidence = gateReport
+                + "\n\nGENRE QUALITY BAR (judge against this): "
+                + GenreIdeaBank.QualityBar(GameScaffoldService.DetectGenre(assignment));
             if (visionReview is not null && screenshots is { Count: > 0 })
             {
                 foreach (var shot in screenshots.Take(3))

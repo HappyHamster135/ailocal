@@ -142,7 +142,36 @@ public sealed partial class GameScaffoldService
         var scaffolded = ScaffoldGodotCore(root, prompt);
         scaffolded = AppendMusic(root, prompt ?? "", scaffolded);
         scaffolded = AppendArtLib(root, scaffolded);
+        scaffolded = AppendSfxBank(root, scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
+    }
+
+    /// <summary>v2.10: LJUDBANKEN - Art.gd-principen för ljud. Agenter
+    /// återanvänder annars ETT pip för alla nya händelser (enklaste vägen).
+    /// Varje scaffold får en palett av färdiga, OLIKA sfxr-ljud att koppla
+    /// till nya händelser; agentprompten kräver olika ljud per händelse.</summary>
+    static string[] AppendSfxBank(string root, string[] files)
+    {
+        try
+        {
+            var extra = new List<string>();
+            foreach (var (name, category, seed) in new[]
+            {
+                ("sfx_select.wav", "select", 31), ("sfx_powerup.wav", "powerup", 32),
+                ("sfx_explosion.wav", "explosion", 33), ("sfx_lose.wav", "lose", 34),
+                ("sfx_jump.wav", "jump", 35), ("sfx_shoot.wav", "shoot", 36),
+            })
+            {
+                if (File.Exists(Path.Combine(root, name))) continue;
+                Write(root, name, SfxrGenerator.Render(category, seed));
+                extra.Add(name);
+            }
+            return [.. files, .. extra];
+        }
+        catch
+        {
+            return files;
+        }
     }
 
     /// <summary>v2.9: Art.gd - AGENTERNAS RITBIBLIOTEK. Agenter ritar med

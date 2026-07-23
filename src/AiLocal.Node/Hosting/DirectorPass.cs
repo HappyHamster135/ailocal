@@ -103,9 +103,13 @@ public static class DirectorPass
         // ett konkret palettförslag per genre i stället för att "snygg
         // grafik" bli en from förhoppning. Förslaget är en SPRÅNGBRÄDA - en
         // egen sammanhållen riktning får ersätta det.
-        var style = VisualStyleLib.PickForGenre(GameScaffoldService.DetectGenre(userPrompt));
+        var promptGenre = GameScaffoldService.DetectGenre(userPrompt);
+        var style = VisualStyleLib.PickForGenre(promptGenre);
         var promptWithLens = userPrompt + "\n\nKREATIV VINKEL för just den här körningen: " + lens
-            + $"\n\nVISUELL RIKTNING (förslag - gör den eller en egen till ett kriterium): {style.Name} - {style.Description}";
+            + $"\n\nVISUELL RIKTNING (förslag - gör den eller en egen till ett kriterium): {style.Name} - {style.Description}"
+            // v2.10: genrens kvalitetsribba - vad som skiljer BRA från DÅLIGT
+            // och vad toppspel i genren gör. Kontraktet ska sikta på BRA.
+            + "\n\nGENRENS KVALITETSRIBBA (kontraktet ska sikta hit): " + GenreIdeaBank.QualityBar(promptGenre);
         var contract = await AskModelAsync(promptWithLens, strongModelHint, complete, ct, inspirationSeeds, pastLessons)
             ?? FallbackContract(userPrompt, inspirationSeeds);
         // Spelkänslan in i kontraktet för motorspel: regissörsmodeller är bra

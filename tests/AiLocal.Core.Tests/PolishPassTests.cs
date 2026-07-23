@@ -86,6 +86,8 @@ public class PolishPassTests
             Assert.NotNull(seenPrompt);
             Assert.Contains("ART DIRECTOR review", seenPrompt);
             Assert.Contains("completely empty", seenPrompt);
+            // v2.10: genrens kvalitetsribba ska nå kritikern.
+            Assert.Contains("QUALITY BAR", seenPrompt);
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }

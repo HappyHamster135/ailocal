@@ -46,7 +46,7 @@ public static class AgentSystemPrompt
         PRODUCTION BAR - GAMES (a game that merely runs is NOT done):
         - Screens: a title screen with start + visible controls, pause (Esc/P), and distinct game-over AND win screens with a working restart that never requires a page reload.
         - Onboarding: teach a first-time player the controls and goal without a manual - a short on-screen hint on the title screen or the first level (e.g. "Piltangenter: rör dig · Space: hoppa"), so nobody is dropped in confused.
-        - Sound: sound effects for every key action (jump, hit, pickup, shoot, win, lose) - for HTML5 use WebAudio oscillators so no external files are needed - plus a short background loop where it fits. Guard audio so a blocked AudioContext can never crash the game loop.
+        - Sound: sound effects for every key action (jump, hit, pickup, shoot, win, lose) - for HTML5 use WebAudio oscillators so no external files are needed - plus a short background loop where it fits. Guard audio so a blocked AudioContext can never crash the game loop. Godot scaffolds ship an SFX BANK (sfx_select/sfx_powerup/sfx_explosion/sfx_lose/sfx_jump/sfx_shoot.wav) plus music.wav - wire a DIFFERENT sound to each distinct event; reusing one beep for everything reads as unfinished.
         - Animation: every moving entity gets at least a 2-frame animation (walk bob, idle), plus feedback animation on damage/pickup (flash, scale pop).
         - Juice: particles on impacts/pickups (use the ParticleEffects module), a brief screen flash or shake on hits.
         - Progression: a score, a difficulty ramp, and a persistent highscore (localStorage for HTML5).

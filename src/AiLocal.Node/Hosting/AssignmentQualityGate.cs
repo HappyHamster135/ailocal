@@ -180,6 +180,13 @@ public static class AssignmentQualityGate
                     // HÅRT fynd - det får en designfixrunda, inte bara en rapportrad.
                     if (pt.Issues.Any(i => i.Contains("INTE spelbart")))
                         hard = true;
+                    // v2.10 (ägarens återkommande fynd: "går inte förbi start-
+                    // menyn"): ett spel vars fönster är OFÖRÄNDRAT efter
+                    // Enter/Space är levererat-men-ospelbart - HÅRT, aldrig en
+                    // rapportrad. Kontinuerligt animerande spel undantas redan
+                    // i sonden (fyndet skapas inte då).
+                    if (pt.Issues.Any(i => i.Contains("reagerar inte på spelarens")))
+                        hard = true;
                 }
                 else
                 {
