@@ -34,8 +34,11 @@ public class GodotKitTests
 
     private static void AssertKitComplete(string root)
     {
-        foreach (var required in new[] { "project.godot", "Main.tscn", "Main.gd", "export_presets.cfg", "DESIGN.md", "README.md", "coin.wav", "win.wav" })
+        // v2.4: music.wav = bakgrundsmusiken (ChiptuneComposer) som ALLA kit
+        // numera loopar - ljudbilden är musik + effekter, inte bara pip.
+        foreach (var required in new[] { "project.godot", "Main.tscn", "Main.gd", "export_presets.cfg", "DESIGN.md", "README.md", "coin.wav", "win.wav", "music.wav" })
             Assert.True(File.Exists(Path.Combine(root, required)), $"{required} saknas i kitet");
+        Assert.Contains("music", File.ReadAllText(Path.Combine(root, "Main.gd")));
 
         Assert.Equal(ProjectVerifier.ProjectKind.Godot, new ProjectVerifier().Detect(root));
 

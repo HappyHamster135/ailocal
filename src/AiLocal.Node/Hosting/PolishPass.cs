@@ -50,12 +50,40 @@ public static class PolishPass
         string gateReport,
         Func<ChatRequest, CancellationToken, Task<ProviderResponse>> complete,
         CancellationToken ct,
-        string? modelHint = null)
+        string? modelHint = null,
+        Func<string, string, CancellationToken, Task<(bool Ok, string Text)>>? visionReview = null,
+        IReadOnlyList<string>? screenshots = null)
     {
         try
         {
             var code = CodeReviewPass.BuildCodeSample(projectRoot);
             if (string.IsNullOrWhiteSpace(code)) return [];
+
+            // v2.4: BILDBEVIS i kritiken - kritikern LÄSER sondens skärmdumpar
+            // via visionsmodellen i stället för att gissa utseendet ur koden
+            // (ägarens skärmdumpar visade exakt det text-kritiken missar:
+            // halvtomma layouter, oläslig kontrast). Fail-open per dump.
+            var evidence = gateReport;
+            if (visionReview is not null && screenshots is { Count: > 0 })
+            {
+                foreach (var shot in screenshots.Take(2))
+                {
+                    try
+                    {
+                        if (!File.Exists(shot)) continue;
+                        var (ok, text) = await visionReview(shot,
+                            "You are a game studio's ART DIRECTOR reviewing a real screenshot of the game. " +
+                            "In 3-5 short bullet points, name concretely what looks empty, unbalanced, unreadable " +
+                            "or unpolished (layout, palette, contrast, empty screen areas, missing visual identity) " +
+                            "and what to add/change. Be specific and buildable - never 'improve the graphics'.", ct);
+                        if (ok && !string.IsNullOrWhiteSpace(text))
+                            evidence += "\n\nART DIRECTOR review of screenshot (" + Path.GetFileName(shot) + "):\n" + text.Trim();
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch { /* en trasig dump stoppar aldrig kritiken */ }
+                }
+            }
+            gateReport = evidence;
             var response = await complete(new ChatRequest
             {
                 System = "You are a demanding but constructive creative director reviewing a game prototype. " +

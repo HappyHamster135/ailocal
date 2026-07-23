@@ -1216,8 +1216,16 @@ public static class WorkerRole
                     await EmitStep("tool_call",
                         $"studiokritik (utvecklingsrunda {pr}/{polishTotal}): vad hade kunnat göras bättre?"
                         + (critiqueHint is null ? "" : $" - modell {critiqueHint}"));
+                    // v2.4: kritiken får BILDBEVIS - sondens titel- och
+                    // mittspelsdumpar går genom visionsmodellen (art director-
+                    // pass) så "ser tomt/oproffsigt ut" upptäcks ur riktiga
+                    // pixlar, inte gissas ur koden.
+                    var polishShots = new[] { "playtest-title.png", "playtest.png" }
+                        .Select(n => Path.Combine(polishRoot, "screenshots", n))
+                        .Where(File.Exists).ToList();
                     var improvements = await PolishPass.CritiqueAsync(
-                        polishRoot, req.Assignment, findings.Report, completeAccounted, ct, critiqueHint);
+                        polishRoot, req.Assignment, findings.Report, completeAccounted, ct, critiqueHint,
+                        BuildVisionReview(), polishShots);
                     if (improvements.Count == 0)
                     {
                         await EmitStep("tool_result",

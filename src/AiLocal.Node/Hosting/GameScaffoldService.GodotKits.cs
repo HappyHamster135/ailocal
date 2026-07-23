@@ -349,6 +349,16 @@ func _setup_audio() -> void:
             p.stream = s
         add_child(p)
         snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune-slinga, lag volym sa
+    # effekterna hors. finished->play = loop utan importinstallningar.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
 
 func _play(key: String) -> void:
     if snd.has(key) and snd[key].stream:
@@ -627,6 +637,16 @@ func _setup_audio() -> void:
             p.stream = s
         add_child(p)
         snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune-slinga, lag volym sa
+    # effekterna hors. finished->play = loop utan importinstallningar.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
 
 func _play(key: String) -> void:
     if snd.has(key) and snd[key].stream:
@@ -973,6 +993,16 @@ func _setup_audio() -> void:
             p.stream = s
         add_child(p)
         snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune-slinga, lag volym sa
+    # effekterna hors. finished->play = loop utan importinstallningar.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
 
 func _play(key: String) -> void:
     if snd.has(key) and snd[key].stream:
@@ -1242,6 +1272,15 @@ func _ready() -> void:
 			p.stream = stream
 			add_child(p)
 			snd[key] = p
+	# Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
 	show_title()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1537,6 +1576,15 @@ func _ready() -> void:
 			p.stream = stream
 			add_child(p)
 			snd[key] = p
+	# Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
 	hud = CanvasLayer.new()
 	add_child(hud)
 	hud_label = Label.new()
@@ -1900,6 +1948,15 @@ func _ready() -> void:
 			p.stream = stream
 			add_child(p)
 			snd[key] = p
+	# Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
 	hud = CanvasLayer.new()
 	add_child(hud)
 	hud_label = Label.new()
@@ -2425,6 +2482,15 @@ func _ready() -> void:
 			p.stream = stream
 			add_child(p)
 			snd[key] = p
+	# Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
 	terrain_sprite = Sprite2D.new()
 	terrain_sprite.centered = false
 	add_child(terrain_sprite)
@@ -3044,6 +3110,7 @@ var dot_tex: ImageTexture
 var flash_t := 0.0
 var ai_roll_timer := 0.0
 var resolve_timer := 0.0
+var attract_t := 0.0   # auto-rull efter 8s idle - spelet demonstrerar sig sjalvt
 
 # --- Minigame state ---
 var mg_timer := 0.0
@@ -3129,6 +3196,16 @@ func _setup_audio() -> void:
             p.stream = s
         add_child(p)
         snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune-slinga, lag volym sa
+    # effekterna hors. finished->play = loop utan importinstallningar.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
 
 func _play(key: String) -> void:
     if snd.has(key) and snd[key].stream:
@@ -3345,6 +3422,13 @@ func _physics_process(delta: float) -> void:
             ai_roll_timer -= delta
             if ai_roll_timer <= 0.0:
                 _do_roll()
+        elif turn_phase == "rolling":
+            # Attract-autopilot: efter 8s utan input rullar spelet sjalvt -
+            # partyt stannar aldrig, och grindens sond nar hela loopen.
+            attract_t += delta
+            if attract_t > 8.0:
+                attract_t = 0.0
+                _do_roll()
         elif turn_phase == "moving":
             move_timer -= delta
             if move_timer <= 0.0:
@@ -3363,6 +3447,7 @@ func _physics_process(delta: float) -> void:
     queue_redraw()
 
 func _do_roll() -> void:
+    attract_t = 0.0
     _play("click")
     dice_value = randi() % 6 + 1
     move_steps = dice_value
@@ -3963,6 +4048,7 @@ var rolling := false
 var moving_steps := 0
 var move_timer := 0.0
 var ai_timer := 0.0
+var attract_t := 0.0   # auto-rull efter 8s idle - spelet demonstrerar sig sjalvt
 var shake := 0.0
 var best_stars := 0
 
@@ -4005,6 +4091,15 @@ func _setup_audio() -> void:
             p.stream = s
             add_child(p)
             snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
 
 func play_sound(key: String) -> void:
     if snd.has(key):
@@ -4250,8 +4345,14 @@ func _physics_process(delta: float) -> void:
                 _resolve_tile()
         return
     if turn_idx == 0:
-        if not rolling and Input.is_action_just_pressed("ui_accept"):
-            _roll()
+        if not rolling:
+            # Attract-autopilot: efter 8s utan input rullar spelet sjalvt -
+            # partyt stannar aldrig, och kvalitetsgrindens sond nar hela
+            # loopen (brada -> minispel) utan att kunna reglerna.
+            attract_t += delta
+            if Input.is_action_just_pressed("ui_accept") or attract_t > 8.0:
+                attract_t = 0.0
+                _roll()
     else:
         ai_timer -= delta
         if ai_timer <= 0.0:

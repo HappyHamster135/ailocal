@@ -140,7 +140,35 @@ public sealed partial class GameScaffoldService
         // byggagenten KLISTRAR IN beprövad kod (double_jump, checkpoint,
         // countdown...) i stället för att uppfinna den svagt från noll.
         var scaffolded = ScaffoldGodotCore(root, prompt);
+        scaffolded = AppendMusic(root, prompt ?? "", scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
+    }
+
+    /// <summary>v2.4: BAKGRUNDSMUSIK i varje Godot-kit. ChiptuneComposer har
+    /// funnits sedan v1.36 men inget kit SPELADE musik - ljudbilden var bara
+    /// effekter. En loopbar slinga per genre-stämning skrivs centralt här;
+    /// kiten laddar music.wav och loopar den (finished->play, -14 dB).</summary>
+    static string[] AppendMusic(string root, string prompt, string[] files)
+    {
+        try
+        {
+            var mood = DetectGenre(prompt) switch
+            {
+                "party" => "victory",
+                "racing" or "shooter" => "action",
+                "artillery" => "action",
+                "platformer" or "rpg" or "roguelike" => "exploration",
+                "management" or "simulator" or "idle" => "calm",
+                "puzzle" or "memory" or "quiz" => "ambient",
+                _ => "calm",
+            };
+            Write(root, "music.wav", ChiptuneComposer.Render(mood, seed: 7));
+            return [.. files, "music.wav"];
+        }
+        catch
+        {
+            return files; // musiken är en bonus, aldrig ett krav
+        }
     }
 
     static string[] AppendMechanicsDoc(string root, string prompt, string[] files)

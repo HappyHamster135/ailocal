@@ -54,6 +54,43 @@ public class PolishPassTests
     }
 
     [Fact]
+    public async Task CritiqueAsync_BildbevisenNarKritiken()
+    {
+        // v2.4: art director-passet - sondens skarmdumpar gar genom visionen
+        // och OMDOMET ska sta i kritikerprompten (inte bara kod/textbevis).
+        var dir = Path.Combine(Path.GetTempPath(), "ailocal-polish-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Main.gd"), "func _ready():\n\tpass");
+            var shot = Path.Combine(dir, "playtest.png");
+            File.WriteAllBytes(shot, [1, 2, 3]);
+
+            string? seenPrompt = null;
+            Func<AiLocal.Core.Contracts.ChatRequest, CancellationToken, Task<AiLocal.Core.Providers.ProviderResponse>> complete = (req, _) =>
+            {
+                seenPrompt = req.Messages[^1].Content;
+                return Task.FromResult(AiLocal.Core.Providers.ProviderResponse.Ok(new AiLocal.Core.Contracts.ChatResponse
+                {
+                    Content = "{\"done\": true, \"improvements\": []}",
+                    Model = "m",
+                    Provider = "test"
+                }));
+            };
+            Func<string, string, CancellationToken, Task<(bool, string)>> vision = (_, _, _) =>
+                Task.FromResult((true, "- the right half of the screen is completely empty"));
+
+            await PolishPass.CritiqueAsync(dir, "bygg ett spel", "BUILD OK", complete,
+                CancellationToken.None, null, vision, [shot]);
+
+            Assert.NotNull(seenPrompt);
+            Assert.Contains("ART DIRECTOR review", seenPrompt);
+            Assert.Contains("completely empty", seenPrompt);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public void CritiquePrompt_BarDeFyraAxlarnaOchBevisen()
     {
         var p = PolishPass.CritiquePrompt("bygg ett artillerispel", "BUILD/VERIFY PASSED + playtest ok", "--- Main.gd ---\nextends Node2D");

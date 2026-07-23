@@ -283,6 +283,23 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > fullskala: 15-minispelskörningen är TEAM+RUNDOR-driven (golvet ger 3;
 > kontraktsräknaren + dekomposern + utvecklingsrundorna bygger resten) -
 > nästa naturliga steg är ett skarpt "15 minigames"-klusterbygge live.
+>
+> **v2.4 LJUD + SEENDE KRITIK (svar på "gör den bättre på att producera
+> spel").** (1) BAKGRUNDSMUSIK I ALLA 10 KIT: ChiptuneComposer fanns sedan
+> v1.36 men inget Godot-kit SPELADE musik - nu skrivs music.wav centralt i
+> scaffold-wrappern (stämning per genre: party=victory, racing/artilleri=
+> action, plattform/rpg=exploration, management=calm, pussel=ambient) och
+> varje kit loopar den (finished->play, -14 dB under effekterna); testlåst
+> i AssertKitComplete. (2) BILDKRITIK I UTVECKLINGSRUNDORNA: PolishPass tar
+> sondens titel-/mittspelsdumpar genom visionsmodellen med ett art
+> director-pass (tomma ytor, kontrast, saknad identitet) och lägger
+> omdömet i kritikerns bevisunderlag - "ser tomt ut" upptäcks ur riktiga
+> pixlar i stället för att gissas ur koden; testlåst (omdömet når
+> prompten). (3) ATTRACT-AUTOPILOT i båda party-kiten: 8s idle på
+> människans tur => spelet rullar självt - partyt stannar aldrig OCH
+> grindens sond når hela loopen (bräda -> minispel) utan att kunna
+> reglerna. KVAR: tredje sen sond-dump (mitt-i-minispel-bevis), banor/
+> kartor-antal ur prompten som mätbart krav (minigames har det redan).
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
