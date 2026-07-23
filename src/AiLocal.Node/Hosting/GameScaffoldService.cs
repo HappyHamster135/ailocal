@@ -143,7 +143,41 @@ public sealed partial class GameScaffoldService
         scaffolded = AppendMusic(root, prompt ?? "", scaffolded);
         scaffolded = AppendArtLib(root, scaffolded);
         scaffolded = AppendSfxBank(root, scaffolded);
+        scaffolded = AppendCharacterSprites(root, prompt ?? "", scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
+    }
+
+    /// <summary>v2.11: GUBBARNA - animerade karaktärssprites till ALLA Godot-
+    /// scaffolds (ägarens "utan gubbar, utan animationer"). Topdown/plattform
+    /// hade PixelAnimator-sprites; övriga kit och agentbyggen ritade cirklar.
+    /// Nu får varje projekt player/enemy-spritesheets + SpriteFrames (idle +
+    /// walk) att koppla i AnimatedSprite2D - och agentprompten förbjuder
+    /// platta cirklar som karaktärer.</summary>
+    static string[] AppendCharacterSprites(string root, string prompt, string[] files)
+    {
+        try
+        {
+            var extra = new List<string>();
+            if (!File.Exists(Path.Combine(root, "player_frames.tres")))
+            {
+                var playerSheet = PixelAnimator.Build(prompt);
+                Write(root, "player.png", playerSheet.Png);
+                Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", playerSheet));
+                extra.Add("player.png"); extra.Add("player_frames.tres");
+            }
+            if (!File.Exists(Path.Combine(root, "enemy_frames.tres")))
+            {
+                var enemySheet = PixelAnimator.Build(prompt + " fiende monster");
+                Write(root, "enemy.png", enemySheet.Png);
+                Write(root, "enemy_frames.tres", GodotSpriteFrames.Build("enemy.png", enemySheet));
+                extra.Add("enemy.png"); extra.Add("enemy_frames.tres");
+            }
+            return [.. files, .. extra];
+        }
+        catch
+        {
+            return files;
+        }
     }
 
     /// <summary>v2.10: LJUDBANKEN - Art.gd-principen för ljud. Agenter

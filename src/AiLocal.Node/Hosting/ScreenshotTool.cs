@@ -85,6 +85,21 @@ public sealed class ScreenshotTool
                         false,
                         $"No window found with title matching \"{windowTitle}\".",
                         null));
+                // v2.11 (live-sett): fönsterfångsten blev en SKÄRMSTOR blit -
+                // på multiskärm fångades hela 5120px-ytan och visionen
+                // granskade fel område (falska layoutfynd, bortkastade
+                // rundor). Ett namngivet fönster fångas nu SOM FÖNSTER via
+                // PrintWindow (WindowCapturer), exakt klientstorlek.
+                var (rgba, ww, wh) = WindowCapturer.TryCaptureRgba(hwnd);
+                if (rgba is not null && ww > 0 && wh > 0)
+                {
+                    var wsave = outputPath
+                        ?? Path.Combine(Path.GetTempPath(), "ailocal-screenshot-" + Guid.NewGuid().ToString("n") + ".png");
+                    Directory.CreateDirectory(Path.GetDirectoryName(wsave)!);
+                    File.WriteAllBytes(wsave, AssetGenerator.EncodePng(ww, wh, rgba));
+                    return Task.FromResult(new ScreenshotResult(true, $"Screenshot saved: {wsave}", wsave));
+                }
+                // PrintWindow gav inget - fall tillbaka till skärmblitten nedan.
             }
             else
             {

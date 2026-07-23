@@ -80,8 +80,9 @@ public static class PolishPass
                             "In 3-5 short bullet points, name concretely what looks empty, unbalanced, unreadable " +
                             "or unpolished (layout, palette, contrast, empty screen areas, missing visual identity). " +
                             "Watch specifically for PROGRAMMER ART: naked flat rectangles/circles without outlines, " +
-                            "shadows or depth, disconnected board tiles, dead/empty UI bars - call those out and say " +
-                            "which Art.gd helper fixes each (Art.orb/tile/panel/token/connect_path/bg). " +
+                            "shadows or depth, disconnected board tiles, dead/empty UI bars, and CHARACTERS shown as " +
+                            "plain circles instead of animated sprites (the project ships player_frames.tres/enemy_frames.tres) - " +
+                            "call those out and say which helper fixes each (Art.orb/tile/panel/token/connect_path/bg, AnimatedSprite2D). " +
                             "Be specific and buildable - never 'improve the graphics'.", ct);
                         if (ok && !string.IsNullOrWhiteSpace(text))
                             evidence += "\n\nART DIRECTOR review of screenshot (" + Path.GetFileName(shot) + "):\n" + text.Trim();

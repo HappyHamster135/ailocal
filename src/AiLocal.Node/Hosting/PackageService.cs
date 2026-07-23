@@ -38,6 +38,12 @@ public sealed class PackageService
                 return new PackageResult(false, $"Projektmappen finns inte: {projectRoot}", null, 0);
 
             outputDir ??= Path.Combine(projectRoot, "release");
+            // v2.11 (live-sett): relativ outputDir ("release") löstes mot
+            // NODENS cwd - zipen hamnade utanför projektet medan verktyget
+            // rapporterade lyckat och agenten hittade ingen fil. Ankra alltid
+            // relativa vägar under projektroten.
+            if (!Path.IsPathRooted(outputDir))
+                outputDir = Path.Combine(projectRoot, outputDir);
             Directory.CreateDirectory(outputDir);
 
             var packageName = SanitizeFileName(gameName);
@@ -110,8 +116,15 @@ public sealed class PackageService
             var size = new FileInfo(zipPath).Length;
             _logger?.LogInformation("Paket skapat: {Path} ({Size} bytes)", zipPath, size);
 
+            // v2.11: ärlighetsvakt - ett motorspelspaket UTAN exe är inte ett
+            // spelpaket (live-sett: 351 kB-zip med bara metadata rapporterades
+            // som lyckat). Varna synligt i stället för att se komplett ut.
+            var exeWarning = "";
+            if (engine is "godot" or "unity" && !files.Any(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(f)))
+                exeWarning = "\nVARNING: ingen körbar .exe hittades i build/ - paketet saknar spelet. Kör build_game först och paketera om.";
+
             return new PackageResult(true,
-                $"Paket skapat: {zipPath} ({FormatBytes(size)}, {files.Count} filer).\n" +
+                $"Paket skapat: {zipPath} ({FormatBytes(size)}, {files.Count} filer).{exeWarning}\n" +
                 $"- README: {readmePath}\n" +
                 $"- Butikssida: {storePath}\n" +
                 $"- Metadata: {metaPath}",
