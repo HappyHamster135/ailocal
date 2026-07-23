@@ -148,13 +148,42 @@ public static class TeamBuild
                         "iterationstaket nåddes utan filändringar i senaste rundan - spåret stannar här (runaway-skydd)."));
                     break;
                 }
-                await trackEmit(new AgentStep("thinking",
-                    $"iterationstaket nått men spåret gör framsteg - fortsätter där det slutade (runda {round} av 4)."));
+
+                // v2.19: STAFETTEN även i teamspåren - teamkörningar är precis
+                // de som sväller värst (8M-token-loggen var ett teambygge).
+                // Överlämningstur utan verktyg -> HANDOVER.md i worktreen ->
+                // färskt pass med tom kontext. Fail-open till historik-vägen.
+                string? handover = null;
+                try
+                {
+                    var ho = await loop.RunAsync(RelayHandover.RequestPrompt, AgentAccessLevel.Off, trackModel,
+                        onStep: trackEmit, ct, history: result.Messages, system: system);
+                    AddUsage(ho);
+                    if (RelayHandover.LooksUsable(ho.FinalAnswer)) handover = ho.FinalAnswer;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch { /* fail-open */ }
+
                 windowStart = DateTime.UtcNow;
-                result = await loop.RunAsync(
-                    "Du nådde iterationstaket men ditt spår är inte klart än. Fortsätt EXAKT där du slutade - " +
-                    "slutför återstoden av spåret, kör verify, och avsluta när allt är på plats.",
-                    accessLevel, trackModel, onStep: trackEmit, ct, history: result.Messages, system: system);
+                if (handover is not null)
+                {
+                    try { await File.WriteAllTextAsync(Path.Combine(run.Iso!.WorktreePath, "HANDOVER.md"), handover, ct); }
+                    catch { /* överlämningen finns ändå i prompten */ }
+                    await trackEmit(new AgentStep("thinking",
+                        $"stafettväxling: överlämning skriven - ett färskt pass med tom kontext tar över (pass {round} av 4)."));
+                    result = await loop.RunAsync(
+                        RelayHandover.RelayPrompt(TrackPrompt(assignment, run.Track, tracks.Count), handover, round, 4),
+                        accessLevel, trackModel, onStep: trackEmit, ct, system: system);
+                }
+                else
+                {
+                    await trackEmit(new AgentStep("thinking",
+                        $"iterationstaket nått men spåret gör framsteg - fortsätter där det slutade (runda {round} av 4)."));
+                    result = await loop.RunAsync(
+                        "Du nådde iterationstaket men ditt spår är inte klart än. Fortsätt EXAKT där du slutade - " +
+                        "slutför återstoden av spåret, kör verify, och avsluta när allt är på plats.",
+                        accessLevel, trackModel, onStep: trackEmit, ct, history: result.Messages, system: system);
+                }
                 AddUsage(result);
             }
 

@@ -293,6 +293,13 @@ public class GodotKitTests
             Assert.Contains("draw_texture_rect", script);
             Assert.Contains("TEXTURE_FILTER_NEAREST", script);
             Assert.Contains("default_texture_filter=0", File.ReadAllText(Path.Combine(root, "project.godot")));
+            // v2.19: partydjupet - 5 minispel + 3 tematiska braden.
+            Assert.Contains("BOARD_SPIRAL", script);
+            Assert.Contains("COIN GRAB", script);
+            Assert.Contains("QUICK DRAW", script);
+            Assert.Contains("mg_qd_wins", script);
+            Assert.Contains("mg_coin_score", script);
+            Assert.Contains("board_bg_top", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }

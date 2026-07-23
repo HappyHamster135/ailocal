@@ -456,9 +456,22 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > PROBLEM/NÄSTA STEG - överlämningsturen körs med behörighet AV = ren
 > text) och ett FÄRSKT pass med tom kontext tar över - konstant
 > kontextstorlek i stället för 8M-token-svällningen; fail-open till
-> historik-fortsättningen. KVAR: stafett i teamspåren (delad hjälpare
-> finns), förhandsval även i Ny spel-dialogen, stil-förhandsbilder av
-> riktiga kit-skärmdumpar i korten.
+> historik-fortsättningen. KVAR: förhandsval även i Ny spel-dialogen,
+> stil-förhandsbilder av riktiga kit-skärmdumpar i korten.
+>
+> **v2.19 PARTYDJUPET + TEAMSTAFETTEN.** (1) Stafetten även i teamspåren
+> (TeamBuild-continuation → RelayHandover; HANDOVER.md per worktree) -
+> teamkörningar var de som svällde värst. (2) Board Bash: 5 minispel
+> (nya: Coin Grab - AI jagar fallande mynt med per-svårighets-precision;
+> Quick Draw - reaktionsduell 3 omgångar med AI-reaktionstider), 3 bräden
+> med egna teman (nya Spiralen inåt mot mitten; bakgrundston per bräde:
+> natt-lila/djuphavs-teal/candy-rosa), practice-menyn med alla fem.
+> SKARPT FYND+FIX: fristående knappar på CanvasLayer får inga pålitliga
+> auto-fokusgrannar i Godot → piltangenter döda i setup/practice-menyer;
+> _button länkar nu fokuskedjan explicit (focus_neighbor_top/bottom).
+> Spiralvalet loggbevisat + skärmdumpar (menyn/Quick Draw/spiralbrädet).
+> KVAR mot partymålet: duell-/teleportrutor, bonusrundor, minigame-
+> intro-kort med regler, 2-4 mänskliga spelare hotseat.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

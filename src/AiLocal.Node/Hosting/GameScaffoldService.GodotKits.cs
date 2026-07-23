@@ -3407,8 +3407,9 @@ func close_overlay() -> void:
             "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbart party-bradspel i Mario Party-klassen: bradlage med\n" +
             "tarning, turer, 4 spelare (1 mansklig + 3 AI), 24 rutor med olika\n" +
-            "effekter (mynt, stjarnor, minispel), 3 minispelstyper (Tap Race,\n" +
-            "Dodge, Memory), 2 bradlayouter (Ring / Serpentine), 6 rundor,\n" +
+            "effekter (mynt, stjarnor, minispel), 5 minispelstyper (Tap Race,\n" +
+            "Dodge, Memory, Coin Grab, Quick Draw), 3 bradlayouter med egna\n" +
+            "teman (Ring / Serpentine / Spiral), 6 rundor,\n" +
             "3 svarighetsgrader, partiklar, screenshake och touchkontroller.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
             "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
@@ -3424,10 +3425,10 @@ func close_overlay() -> void:
         "**\n\nEtt turbaserat bradspel for 4 spelare (1 mansklig + 3 AI) dar man rullar\n" +
         "tarning, flyttar runt en brada med 24 rutor, samlar mynt och stjarnor,\n" +
         "och tacklar minispel efter varje runda.\n\n" +
-        "## Mekaniker (klara)\n- Bradlage: 24 rutor i loop, 2 layouter (Ring / Serpentine)\n" +
+        "## Mekaniker (klara)\n- Bradlage: 24 rutor i loop, 3 layouter med egna teman (Ring / Serpentine / Spiral)\n" +
         "- 4 spelare: tarning (1-6), turordning, AI med svarighetsbaserad logik\n" +
         "- Rutor: bla (+3 mynt), rod (-2 mynt), stjarna (kop for 15 mynt), minispel\n" +
-        "- 3 minispel: Tap Race (masha), Dodge (undvik fallande block), Memory (Simon)\n" +
+        "- 5 minispel: Tap Race (masha), Dodge (undvik block), Memory (Simon), Coin Grab (samla mynt), Quick Draw (reaktionsduell)\n" +
         "- 6 rundor, 3 svarighetsgrader, poang med stjarnor + mynt\n" +
         "- Titel/vinst-overlay, ljud, partiklar (CPUParticles2D), screenshake, touch\n\n" +
         "## Bygg vidare\n- Fler minispel: lagg till i _start_minigame och _minigame_process\n" +
@@ -3439,7 +3440,7 @@ func close_overlay() -> void:
     const string GodotPartyMain = """
 extends Node2D
 # Board Bash - Mario Party-like board game with minigames.
-# 4 players (1 human + 3 AI), dice, board tiles, 3 minigame types, 2 board layouts.
+# 4 players (1 human + 3 AI), dice, board tiles, 5 minigame types, 3 themed board layouts.
 # UI built in code. CHANGE THEME: colors in _draw, player names in PLAYERS.
 # Player text in ENGLISH (house rule since v1.99).
 
@@ -3449,6 +3450,7 @@ const Shell = preload("res://Shell.gd")
 
 const BOARD_RING := 0
 const BOARD_SERPENTINE := 1
+const BOARD_SPIRAL := 2
 const ROUNDS := 6
 const TILE_COUNT := 24
 const STAR_COST := 15
@@ -3514,6 +3516,9 @@ var attract_t := 0.0   # auto-rull efter 8s idle - spelet demonstrerar sig sjalv
 var tokens: Array = []        # AnimatedSprite2D per spelare (tom = cirkel-fallback)
 var token_pos: Array = []     # mjuk visningsposition per spelare
 var confetti: Array = []      # {x, y, s, sp, col, layer}
+# v2.19: tema per brade - varje layout har egen bakgrundston.
+var board_bg_top := Color(0.10, 0.08, 0.20)
+var board_bg_bottom := Color(0.17, 0.11, 0.27)
 
 # --- Minigame state ---
 var mg_timer := 0.0
@@ -3537,6 +3542,22 @@ var mg_mem_input_phase := false
 var mg_mem_flash_t := 0.0
 var mg_mem_lengths: Array[int] = []
 var mg_mem_ai_timer := 0.0
+
+# Minigame 4 (Coin Grab, v2.19) state - Dodges positiva spegel: SAMLA det
+# som faller i stallet for att undvika det.
+var mg_coin_items: Array = []          # {x, y, speed}
+var mg_coin_score: Array[int] = []
+var mg_coin_spawn_timer := 0.0
+
+# Minigame 5 (Quick Draw, v2.19) state - reaktionsduell i 3 omgangar:
+# vanta pa GRONT, forst att trycka vinner rundan; for tidigt = last runda.
+var mg_qd_phase := "wait"              # wait | go | between
+var mg_qd_timer := 0.0
+var mg_qd_round := 0
+var mg_qd_wins: Array[int] = []
+var mg_qd_locked: Array[bool] = []
+var mg_qd_ai_react: Array = []         # planerad reaktionstid per AI denna runda
+var mg_qd_round_done := false
 
 # Board tile positions (populated in _build_board)
 var tile_positions: Array[Vector2] = []
@@ -3699,6 +3720,7 @@ func _clear_ui() -> void:
     for c in ui.get_children():
         c.queue_free()
     focus_pending = true
+    _last_button = null
 
 func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     var l := Label.new()
@@ -3711,6 +3733,8 @@ func _label(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
     ui.add_child(l)
     return l
 
+var _last_button: Button = null   # v2.19: fokuskedja for pilnavigering
+
 func _button(txt: String, y: float, cb: Callable) -> void:
     var b := Button.new()
     b.text = txt
@@ -3718,6 +3742,13 @@ func _button(txt: String, y: float, cb: Callable) -> void:
     b.position = Vector2(426, y)
     b.pressed.connect(cb)
     ui.add_child(b)
+    # v2.19 (skarpt verifieringsfynd): FRISTAENDE knappar pa en CanvasLayer
+    # far inte palitliga automatiska fokusgrannar - pil-upp/ner gjorde
+    # ingenting i setup-/practice-menyerna. Lanka kedjan explicit.
+    if _last_button != null and is_instance_valid(_last_button):
+        _last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+        b.focus_neighbor_top = b.get_path_to(_last_button)
+    _last_button = b
     if focus_pending:
         focus_pending = false
         b.grab_focus()
@@ -3772,15 +3803,15 @@ func _show_setup() -> void:
     _clear_ui()
     _label("GAME SETUP", 70, 52, Color(1, 0.75, 0.2))
     _label("First to the most stars after %d rounds wins. Space/Enter rolls the dice." % ROUNDS, 150, 18)
-    _label("Board: Ring (circle loop)", 220, 20, Color(0.5, 0.9, 1))
-    _button("Ring", 250, func(): board_layout = BOARD_RING; _play("click"))
-    _label("Board: Serpentine (snake path)", 310, 20, Color(0.5, 1, 0.7))
-    _button("Serpentine", 340, func(): board_layout = BOARD_SERPENTINE; _play("click"))
+    _label("Pick a board - each has its own theme:", 205, 18)
+    _button("Ring (night sky)", 232, func(): board_layout = BOARD_RING; _play("click"))
+    _button("Serpentine (deep sea)", 290, func(): board_layout = BOARD_SERPENTINE; _play("click"))
+    _button("Spiral (candy dusk)", 348, func(): board_layout = BOARD_SPIRAL; _play("click"))
     var diffs := ["Start: Easy", "Start: Normal", "Start: Hard"]
     for i in range(3):
         var d := i
-        _button(diffs[i], 420 + i * 58, func(): _start_game(d, board_layout))
-    _button("Back", 600, func(): _show_title())
+        _button(diffs[i], 424 + i * 56, func(): _start_game(d, board_layout))
+    _button("Back", 594, func(): _show_title())
     # Fokus pa START (Easy) - Enter startar direkt; bradval nas med pil-upp.
     for c in ui.get_children():
         if c is Button and c.text == "Start: Easy":
@@ -3809,11 +3840,11 @@ func _show_minigame_menu() -> void:
     _play("click")
     _clear_ui()
     _label("MINIGAMES - practice any of them", 70, 40, Color(1, 0.75, 0.2))
-    var mgs := [["Tap Race - mash to fill first", 0], ["Dodge - last one standing", 1], ["Memory - repeat the pattern", 2]]
+    var mgs := [["Tap Race - mash to fill first", 0], ["Dodge - last one standing", 1], ["Memory - repeat the pattern", 2], ["Coin Grab - catch the most coins", 3], ["Quick Draw - react on green", 4]]
     for m in mgs:
         var mtype: int = m[1]
-        _button(str(m[0]), 200 + mtype * 70, func(): _start_practice(mtype))
-    _button("Back", 460, func(): _show_title())
+        _button(str(m[0]), 190 + mtype * 60, func(): _start_practice(mtype))
+    _button("Back", 510, func(): _show_title())
     for c in ui.get_children():
         if c is Button and str(c.text).begins_with("Tap"):
             c.grab_focus()
@@ -3838,6 +3869,17 @@ func _start_practice(mtype: int) -> void:
 func _start_game(d: int, layout: int) -> void:
     difficulty = d
     board_layout = layout
+    # Tema per brade: natt-lila ring, djuphavs-teal serpentin, candy-rosa spiral.
+    match board_layout:
+        BOARD_SERPENTINE:
+            board_bg_top = Color(0.05, 0.12, 0.15)
+            board_bg_bottom = Color(0.09, 0.19, 0.22)
+        BOARD_SPIRAL:
+            board_bg_top = Color(0.15, 0.07, 0.13)
+            board_bg_bottom = Color(0.23, 0.11, 0.19)
+        _:
+            board_bg_top = Color(0.10, 0.08, 0.20)
+            board_bg_bottom = Color(0.17, 0.11, 0.27)
     _play("click")
     round = 1
     turn_idx = 0
@@ -3892,6 +3934,14 @@ func _build_board() -> void:
         for i in range(TILE_COUNT):
             var a := TAU * i / TILE_COUNT - TAU * 0.25
             tile_positions.append(Vector2(cx + cos(a) * rx, cy + sin(a) * ry))
+    elif board_layout == BOARD_SPIRAL:
+        # v2.19: spiralen - 24 rutor som vandrar inat i drygt tva varv;
+        # slutrutan hamnar nara mitten (kansla av mal).
+        for i in range(TILE_COUNT):
+            var t := float(i) / float(TILE_COUNT)
+            var a := TAU * 2.3 * t - TAU * 0.25
+            var rr := 1.0 - t * 0.70
+            tile_positions.append(Vector2(cx + cos(a) * 390.0 * rr, cy + sin(a) * 245.0 * rr))
     else:
         # Serpentine: 4 rows of 6, snaking back and forth
         var rows := 4
@@ -4091,7 +4141,7 @@ func _start_minigame() -> void:
         minigame_type = practice_pick
         practice_pick = -1
     else:
-        minigame_type = (last + 1 + randi() % 2) % 3  # guaranteed different
+        minigame_type = (last + 1 + randi() % 4) % 5  # guaranteed different
 
     mg_rankings.clear()
     mg_player_progress.clear()
@@ -4116,7 +4166,7 @@ func _start_minigame() -> void:
         for i in range(4):
             mg_dodge_player_x.append(cx - 180 + i * 120)
         mg_dodge_spawn_timer = 0.0
-    else:
+    elif minigame_type == 2:
         _label("MEMORY - Repeat the arrow sequence!", 100, 24)
         _label("Watch the arrows flash, then press them in order.", 130, 18)
         mg_mem_sequence.clear()
@@ -4129,8 +4179,58 @@ func _start_minigame() -> void:
         mg_mem_flash_t = 0.0
         mg_mem_ai_timer = 0.0
         _mem_generate_sequence()
+    elif minigame_type == 3:
+        _label("COIN GRAB - Catch the falling coins!", 100, 24)
+        _label("Left/Right arrows to move. Most coins in 18 seconds wins!", 130, 18)
+        mg_coin_items.clear()
+        mg_coin_score.clear()
+        mg_dodge_player_x.clear()
+        var ccx := 576.0
+        for i in range(4):
+            mg_coin_score.append(0)
+            mg_dodge_player_x.append(ccx - 180 + i * 120)
+        mg_coin_spawn_timer = 0.0
+    else:
+        _label("QUICK DRAW - Wait for GREEN, then hit Space/Enter!", 100, 24)
+        _label("Too early = locked out. First of 3 rounds wins each point.", 130, 18)
+        mg_qd_round = 0
+        mg_qd_wins.clear()
+        mg_qd_locked.clear()
+        for i in range(4):
+            mg_qd_wins.append(0)
+            mg_qd_locked.append(false)
+        _qd_new_round()
 
     queue_redraw()
+
+func _qd_new_round() -> void:
+    mg_qd_phase = "wait"
+    mg_qd_timer = 1.0 + randf() * 2.2
+    mg_qd_round_done = false
+    mg_qd_ai_react = []
+    # AI-reaktionstider: snabbare pa hogre svarighet, med slump per runda.
+    var base_react: float = [0.55, 0.40, 0.28][difficulty]
+    for i in range(4):
+        mg_qd_locked[i] = false
+        mg_qd_ai_react.append(base_react + randf() * 0.35)
+
+func _qd_react(i: int) -> void:
+    if mg_qd_round_done or mg_qd_locked[i]:
+        return
+    if mg_qd_phase == "wait":
+        # For tidigt - last resten av rundan.
+        mg_qd_locked[i] = true
+        if i == 0:
+            _play("hurt")
+        return
+    if mg_qd_phase == "go":
+        mg_qd_round_done = true
+        mg_qd_wins[i] += 1
+        _play("coin")
+        shake = maxf(shake, 4.0)
+        _burst(Vector2(576, 360), PLAYERS[i]["col"], 20)
+        mg_qd_phase = "between"
+        mg_qd_timer = 1.4
 
 func _minigame_input(event: InputEvent) -> void:
     if state != "playing_minigame":
@@ -4148,6 +4248,9 @@ func _minigame_input(event: InputEvent) -> void:
             elif event.is_action_pressed("ui_down"): d = 3
             if d >= 0:
                 _mem_check_input(0, d)
+    elif minigame_type == 4:  # Quick Draw - human reaction
+        if event.is_action_pressed("ui_accept"):
+            _qd_react(0)
 
 func _minigame_process(delta: float) -> void:
     mg_timer += delta
@@ -4274,6 +4377,78 @@ func _minigame_process(delta: float) -> void:
         if all_done or mg_timer > 30.0:
             _end_minigame()
 
+    elif minigame_type == 3:  # Coin Grab (v2.19)
+        mg_coin_spawn_timer -= delta
+        if mg_coin_spawn_timer <= 0.0:
+            mg_coin_spawn_timer = 0.32 - difficulty * 0.04
+            mg_coin_items.append({"x": randf_range(120.0, 1030.0), "y": -16.0,
+                "speed": 170.0 + difficulty * 30.0 + randf() * 60.0})
+        var caught: Array = []
+        for c in mg_coin_items:
+            c["y"] = float(c["y"]) + float(c["speed"]) * delta
+            if float(c["y"]) > 700.0:
+                caught.append(c)
+                continue
+            for i in range(4):
+                if absf(float(c["x"]) - mg_dodge_player_x[i]) < 34.0 and float(c["y"]) > 575.0 and float(c["y"]) < 625.0:
+                    mg_coin_score[i] += 1
+                    caught.append(c)
+                    if i == 0:
+                        _play("coin")
+                    _burst(Vector2(float(c["x"]), 600), Color(1, 0.9, 0.3), 8)
+                    break
+        for c in caught:
+            mg_coin_items.erase(c)
+        # AI: jaga narmsta fallande mynt, med traffchans per svarighet.
+        var chase_speed: float = [140.0, 190.0, 240.0][difficulty]
+        for i in range(1, 4):
+            var best_x := -1.0
+            var best_d := 99999.0
+            for c in mg_coin_items:
+                if float(c["y"]) < 560.0:
+                    var dxc := absf(float(c["x"]) - mg_dodge_player_x[i])
+                    var eta := (600.0 - float(c["y"])) / float(c["speed"])
+                    var score := dxc + eta * 60.0
+                    if score < best_d:
+                        best_d = score
+                        best_x = float(c["x"])
+            if best_x >= 0.0:
+                var dir := signf(best_x - mg_dodge_player_x[i])
+                mg_dodge_player_x[i] = clampf(mg_dodge_player_x[i] + dir * chase_speed * delta, 100.0, 1050.0)
+        if Input.is_action_pressed("ui_left"):
+            mg_dodge_player_x[0] -= 280 * delta
+        if Input.is_action_pressed("ui_right"):
+            mg_dodge_player_x[0] += 280 * delta
+        mg_dodge_player_x[0] = clampf(mg_dodge_player_x[0], 100.0, 1050.0)
+        if mg_timer > 18.0:
+            _end_minigame()
+
+    elif minigame_type == 4:  # Quick Draw (v2.19)
+        mg_qd_timer -= delta
+        if mg_qd_phase == "wait" and mg_qd_timer <= 0.0:
+            mg_qd_phase = "go"
+            mg_qd_timer = 0.0
+            _play("click")
+        elif mg_qd_phase == "go":
+            mg_qd_timer += delta  # tid sedan GRONT - AI reagerar pa sina tider
+            for i in range(1, 4):
+                if not mg_qd_round_done and not mg_qd_locked[i] and mg_qd_timer >= float(mg_qd_ai_react[i]):
+                    _qd_react(i)
+            # Ingen kvar som kan reagera (alla for tidiga) => ny runda.
+            var anyone := false
+            for i in range(4):
+                if not mg_qd_locked[i]:
+                    anyone = true
+            if not anyone:
+                mg_qd_phase = "between"
+                mg_qd_timer = 1.0
+        elif mg_qd_phase == "between" and mg_qd_timer <= 0.0:
+            mg_qd_round += 1
+            if mg_qd_round >= 3:
+                _end_minigame()
+            else:
+                _qd_new_round()
+
 func _mem_generate_sequence() -> void:
     mg_mem_sequence.clear()
     var length := 3 + mg_mem_lengths[0]  # base 3, grows per round
@@ -4331,12 +4506,26 @@ func _end_minigame() -> void:
             if mg_alive[i] and not i in final_rankings:
                 final_rankings.append(i)
         final_rankings.reverse()
-    else:  # Memory: longest sequence first
+    elif minigame_type == 2:  # Memory: longest sequence first
         var scored2: Array[Dictionary] = []
         for i in range(4):
             scored2.append({"idx": i, "score": float(mg_mem_lengths[i])})
         scored2.sort_custom(func(a, b): return a["score"] > b["score"])
         for s in scored2:
+            final_rankings.append(s["idx"])
+    elif minigame_type == 3:  # Coin Grab: most coins first
+        var scored3: Array[Dictionary] = []
+        for i in range(4):
+            scored3.append({"idx": i, "score": float(mg_coin_score[i])})
+        scored3.sort_custom(func(a, b): return a["score"] > b["score"])
+        for s in scored3:
+            final_rankings.append(s["idx"])
+    else:  # Quick Draw: most round wins first
+        var scored4: Array[Dictionary] = []
+        for i in range(4):
+            scored4.append({"idx": i, "score": float(mg_qd_wins[i])})
+        scored4.sort_custom(func(a, b): return a["score"] > b["score"])
+        for s in scored4:
             final_rankings.append(s["idx"])
     mg_rankings = final_rankings
 
@@ -4413,7 +4602,7 @@ func _draw() -> void:
     for i in range(bands):
         var bt := float(i) / float(bands - 1)
         draw_rect(Rect2(0, 648.0 * float(i) / float(bands), 1152, 648.0 / float(bands) + 1.0),
-            Color(0.10, 0.08, 0.20).lerp(Color(0.17, 0.11, 0.27), bt))
+            board_bg_top.lerp(board_bg_bottom, bt))
     for c in confetti:
         var cs: float = float(c["s"]) * (0.7 if c["layer"] == 0 else 1.0)
         var cc: Color = c["col"]
@@ -4541,7 +4730,7 @@ func _draw_minigame() -> void:
         # Floor line
         draw_line(Vector2(0, 610), Vector2(1152, 610), Color(0.5, 0.5, 0.5), 2)
 
-    else:  # Memory
+    elif minigame_type == 2:  # Memory
         # Current sequence display
         var arrow_colors := [Color(0.4, 0.6, 1), Color(1, 0.4, 0.4), Color(0.4, 0.9, 0.4), Color(1, 0.9, 0.3)]
         var arrow_shapes: Array[PackedVector2Array] = [
@@ -4558,6 +4747,40 @@ func _draw_minigame() -> void:
             for v in arrow_shapes[d]:
                 pts.append(v * 3.0 + Vector2(576, 350))
             draw_colored_polygon(pts, arrow_colors[d])
+
+    elif minigame_type == 3:  # Coin Grab (v2.19)
+        for c in mg_coin_items:
+            var cpos := Vector2(float(c["x"]), float(c["y"]))
+            draw_circle(cpos, 11, Color(0.65, 0.5, 0.1))
+            draw_circle(cpos, 9, Color(1, 0.85, 0.25))
+            draw_circle(cpos + Vector2(-3, -3), 3, Color(1, 0.97, 0.7))
+        for i in range(4):
+            var px := mg_dodge_player_x[i] if i < mg_dodge_player_x.size() else 576.0
+            var pn := PLAYERS[i]
+            draw_rect(Rect2(px - 14, 583, 28, 8), Color(0.2, 0.16, 0.28))
+            draw_rect(Rect2(px - 12, 585, 24, 24), pn["col"])
+            var sc := mg_coin_score[i] if i < mg_coin_score.size() else 0
+            for s in range(mini(sc, 12)):
+                draw_circle(Vector2(px - 12 + (s % 6) * 5, 622 + (s / 6) * 7), 2.2, Color(1, 0.85, 0.25))
+        draw_line(Vector2(0, 610), Vector2(1152, 610), Color(0.5, 0.5, 0.5), 2)
+
+    else:  # Quick Draw (v2.19)
+        var sig_col := Color(0.8, 0.25, 0.25)
+        if mg_qd_phase == "go":
+            sig_col = Color(0.3, 0.95, 0.4)
+        elif mg_qd_phase == "between":
+            sig_col = Color(0.5, 0.5, 0.55)
+        draw_circle(Vector2(576, 330), 74, Color(0.1, 0.09, 0.16))
+        draw_circle(Vector2(576, 330), 64, sig_col)
+        for i in range(4):
+            var bx := 366.0 + i * 140.0
+            var pn := PLAYERS[i]
+            var col: Color = pn["col"]
+            if mg_qd_locked[i]:
+                col.a = 0.35
+            draw_rect(Rect2(bx - 20, 470, 40, 40), col)
+            for w in range(mg_qd_wins[i] if i < mg_qd_wins.size() else 0):
+                draw_circle(Vector2(bx - 12 + w * 12, 530), 4, Color(1, 0.85, 0.25))
 
 """;
 
