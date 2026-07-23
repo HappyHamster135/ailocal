@@ -754,7 +754,16 @@ public static class WorkerRole
                 (bool Success, string Output) scaffold;
                 if (wantsGame)
                 {
-                    var g = new GameScaffoldService().Scaffold("auto", req.Assignment, workspaceRoot);
+                    // v2.26: stilkortet styr aven GOLVET, inte bara kontraktet -
+                    // iso/3d valjer ratt kit aven nar prompten inte namner
+                    // dimensionen (hinten laggs bara pa scaffold-prompten).
+                    var scaffoldPrompt = req.Assignment + choices.Style switch
+                    {
+                        "iso" => " (isometrisk 2.5d-vy)",
+                        "3d" => " (3d)",
+                        _ => ""
+                    };
+                    var g = new GameScaffoldService().Scaffold("auto", scaffoldPrompt, workspaceRoot);
                     scaffold = (g.Success, g.Output);
                 }
                 else

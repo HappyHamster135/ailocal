@@ -594,6 +594,14 @@ static func label(c: CanvasItem, pos: Vector2, text: String, size: int, col: Col
         // "fps" och "3d fps" far first person-golvet (inte samlarspelet).
         if (DetectGenre(prompt) == "fps")
             return ScaffoldGodotFps(root, prompt);
+        // v2.26: 2.5D/isometri ar en 2D-TEKNIK (romb-tiles, y-sortering) -
+        // routas FORE 3d-signalen sa "isometrisk 3d-vy" far iso-kitet.
+        // Triggas av prompt-orden ELLER stilkortets hint fran WorkerRole.
+        if (prompt.Contains("isometri", StringComparison.OrdinalIgnoreCase)
+            || prompt.Contains("isometric", StringComparison.OrdinalIgnoreCase)
+            || prompt.Contains("2.5d", StringComparison.OrdinalIgnoreCase)
+            || prompt.Contains("2,5d", StringComparison.OrdinalIgnoreCase))
+            return ScaffoldGodotIso(root, prompt);
         if (prompt.Contains("3d", StringComparison.OrdinalIgnoreCase))
         {
             // v2.3: "3d mario party" ska INTE bli samlarspelet Kuben -

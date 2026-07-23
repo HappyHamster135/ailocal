@@ -393,6 +393,47 @@ public class GodotKitTests
     }
 
     [Fact]
+    public void IsoIGodot_FarIsleRaiderKittet()
+    {
+        // v2.26: 2.5D-stilkortets lofte infriat - isometri/2.5d i prompten
+        // (eller stilkortets hint fran WorkerRole) ger det riktiga iso-golvet:
+        // romb-tiles, y-sortering, pixelgubbar och PixelBackdrop-bakgrund.
+        foreach (var prompt in new[]
+        {
+            "bygg ett isometriskt aventyr dar man samlar skatter",
+            "bygg ett 2.5d spel i godot",
+            "make an isometric dungeon crawler in godot",
+        })
+        {
+            var (root, _) = ScaffoldTo(prompt);
+            try
+            {
+                Assert.Contains("Isle Raider", File.ReadAllText(Path.Combine(root, "project.godot")));
+                var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+                Assert.Contains("y_sort_enabled", script);            // iso-djupet
+                Assert.Contains("_iso(", script);                     // grid->skarm
+                Assert.Contains("TILE_W", script);
+                Assert.Contains("player_frames.tres", script);        // pixelgubben
+                Assert.Contains("background.png", script);            // PixelBackdrop-plattan
+                Assert.True(File.Exists(Path.Combine(root, "background.png")), "background.png saknas");
+                Assert.True(File.Exists(Path.Combine(root, "player_frames.tres")), "player_frames.tres saknas");
+                Assert.True(File.Exists(Path.Combine(root, "enemy_frames.tres")), "enemy_frames.tres saknas");
+                AssertKitComplete(root);
+            }
+            finally { Cleanup(root); }
+        }
+
+        // "3d" ensamt ska INTE ge iso-kitet (Kuben ager 3d-signalen)...
+        var (root3d, _) = ScaffoldTo("bygg ett 3d samlarspel i godot");
+        try { Assert.Contains("The Cube", File.ReadAllText(Path.Combine(root3d, "project.godot"))); }
+        finally { Cleanup(root3d); }
+        // ...men "isometrisk 3d-vy" ar en iso-prompt (2D-tekniken vinner).
+        var (rootIso3d, _) = ScaffoldTo("bygg ett spel med isometrisk 3d-vy i godot");
+        try { Assert.Contains("Isle Raider", File.ReadAllText(Path.Combine(rootIso3d, "project.godot"))); }
+        finally { Cleanup(rootIso3d); }
+    }
+
+    [Fact]
     public void BegartAntalMinispel_BlirMatbartKrav()
     {
         // Malprompten: "15 minigames" ska BLI kravet - och ett kit med 3
@@ -532,7 +573,8 @@ public class GodotKitTests
             "bygg ett pusselspel som 2048 i godot",
             "bygg ett mario party liknande spel i godot med minigames",
             "bygg ett 3d mario party spel i godot med minigames",
-            "bygg ett litet fps spel i godot"
+            "bygg ett litet fps spel i godot",
+            "bygg ett isometriskt aventyr i godot"
         })
         {
             var (root, _) = ScaffoldTo(prompt);

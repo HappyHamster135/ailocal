@@ -542,6 +542,20 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > horisonten lämnade alfa-hål → grundfyllnad med understa bandet.
 > Visuellt verifierat: 6 teman granskade med ögon. KVAR: CC0-asset-
 > paket, 2.5D-kit, kit-användning av bakgrunderna.
+>
+> **v2.26 2.5D-KITET (Isle Raider).** Composerns 2.5D-löfte infriat:
+> elfte Godot-kitet — isometriskt samlaräventyr med romb-tiles (2:1-
+> pixeldiamanter i kod, randtiles med sidor), y-sorterade pixelgubbar
+> (player/enemy_frames), 3 öar med teman (äng/öken/snö), mynt/stenar/
+> vakter/tid/liv, paus, Shell-skalet, PixelBackdrop-bakgrund (FÖRSTA
+> kitet som använder bakgrundsgeneratorn). Triggas på isometri/2.5d
+> FÖRE 3d-signalen; stilkortet styr nu även GOLVET (WorkerRole lägger
+> iso/3d-hint på scaffold-prompten). 2.5D-stilkortet visar riktig
+> skärmdump. Skarpa fynd under verifiering: ö-diamant i grid = FYRKANT
+> på skärm (cirkel i grid = skärm-ellips = ö-form); vaktens spegelmål
+> gick rakt över spelarens start (slumpmål + startodödlighet).
+> Autopilotbevis: Island 3/3 Score 482 på 28 s. KVAR: CC0-assetpaket,
+> bakgrunder i fler kit, kampanjläge.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
