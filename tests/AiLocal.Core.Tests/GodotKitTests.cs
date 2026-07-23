@@ -374,7 +374,17 @@ public class GodotKitTests
             Assert.Contains("MINIGAMES", script);
             Assert.Contains("minigame_done", script);
             Assert.Contains("CPUParticles3D", script);   // 3D-juice
-            Assert.Contains("CapsuleMesh", script);      // 3D-modeller i kod
+            Assert.Contains("CapsuleMesh", script);      // fallback-modell i kod
+            // v2.24 pixellyftet: pixelgubbar som billboard-sprites + pixel-
+            // brickor med NEAREST - och spriteresurserna pa disk.
+            Assert.Contains("AnimatedSprite3D", script);
+            Assert.Contains("make_actor", script);
+            Assert.Contains("_make_tile_tex", script);
+            Assert.Contains("TEXTURE_FILTER_NEAREST", script);
+            Assert.True(File.Exists(Path.Combine(root, "player.png")), "player.png saknas");
+            Assert.True(File.Exists(Path.Combine(root, "player_frames.tres")), "player_frames.tres saknas");
+            foreach (var mg in new[] { "MgRace3D.gd", "MgFall3D.gd", "MgCollect3D.gd" })
+                Assert.Contains("main.make_actor", File.ReadAllText(Path.Combine(root, mg)));
             // Raknaren ser flerfilskonventionen: 3 Mg*.gd = 3 minispel.
             Assert.True(GenreContracts.CountMinigames(root, script) >= 3);
             AssertKitComplete(root);

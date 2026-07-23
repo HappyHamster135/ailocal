@@ -5684,6 +5684,13 @@ func _save_best(v: int) -> void:
         files.Add("Main.tscn");
         Write(root, "Main.gd", GodotParty3DMain);
         files.Add("Main.gd");
+        // v2.24 pixellyftet: samma pixelgubbe som 2D-partyt, som billboard-
+        // sprite i 3D-varlden (SNES-Mario-Party-looken) - fargas per spelare
+        // via modulate i make_actor.
+        var tokenSheet = PixelAnimator.Build(prompt);
+        Write(root, "player.png", tokenSheet.Png);
+        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", tokenSheet));
+        files.Add("player.png"); files.Add("player_frames.tres");
         Write(root, "MgRace3D.gd", GodotParty3DMgRace);
         files.Add("MgRace3D.gd");
         Write(root, "MgFall3D.gd", GodotParty3DMgFall);
@@ -5722,8 +5729,10 @@ func _save_best(v: int) -> void:
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
             "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
             "Styrning: Space/Enter rullar tarningen; pilar/WASD i minispelen;\n" +
-            "Esc pausar. All grafik ar kodbyggda meshar - byt tema via\n" +
-            "material/farger i _build_world och minispelens filer.\n");
+            "Esc pausar. Grafiken ar pixelbrickor (_make_tile_tex) + animerade\n" +
+            "pixelgubbar som billboard-sprites (make_actor, player_frames.tres)\n" +
+            "i en kodbyggd 3D-varld - byt tema via _build_world, _make_tile_tex\n" +
+            "och minispelens filer.\n");
         files.Add("README.md");
         return [.. files];
     }
@@ -5878,6 +5887,88 @@ func _mat(c: Color) -> StandardMaterial3D:
     m.albedo_color = c
     return m
 
+# v2.24 pixellyftet: rutorna ar pixelbrickor (16x16-textur med kontur,
+# ljus topp, mork botten och symbol - samma sprak som 2D-partyt) och
+# NEAREST-filter sa pixlarna star skarpa aven i 3D.
+func _make_tile_tex(t: int) -> ImageTexture:
+    var base: Color
+    match t:
+        TILE_RED: base = Color8(198, 62, 62)
+        TILE_BONUS: base = Color8(228, 186, 56)
+        TILE_STAR: base = Color8(152, 64, 192)
+        _: base = Color8(58, 112, 200)
+    var light := base.lightened(0.30)
+    var dark := base.darkened(0.30)
+    var outline := Color8(27, 22, 36)
+    var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+    for y in range(16):
+        for x in range(16):
+            if (x == 0 or x == 15) and (y == 0 or y == 15):
+                img.set_pixel(x, y, outline)  # 3D-brickan har inga genomskinliga horn
+            elif x == 0 or x == 15 or y == 0 or y == 15:
+                img.set_pixel(x, y, outline)
+            elif y <= 2:
+                img.set_pixel(x, y, light)
+            elif y >= 13:
+                img.set_pixel(x, y, dark)
+            else:
+                img.set_pixel(x, y, base)
+    var sym := Color(1, 1, 1, 0.95)
+    match t:
+        TILE_BLUE:
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
+                img.set_pixel(7, 5 + i, sym)
+        TILE_RED:
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
+        TILE_STAR:
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
+                img.set_pixel(7, 5 + i, sym)
+            img.set_pixel(5, 5, sym)
+            img.set_pixel(9, 5, sym)
+            img.set_pixel(5, 9, sym)
+            img.set_pixel(9, 9, sym)
+        _:
+            img.set_pixel(6, 6, sym)
+            img.set_pixel(9, 6, sym)
+            img.set_pixel(6, 9, sym)
+            img.set_pixel(9, 9, sym)
+    return ImageTexture.create_from_image(img)
+
+func _tile_mat(t: int) -> StandardMaterial3D:
+    var m := StandardMaterial3D.new()
+    m.albedo_texture = _make_tile_tex(t)
+    m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+    return m
+
+# Pixelgubben som billboard-sprite (delas med minispelen via main.make_actor):
+# samma animerade figur som 2D-partyt, fargad per spelare. Fallback till
+# kapsel om player_frames.tres saknas i en aldre projektkopia.
+func make_actor(col: Color) -> Node3D:
+    if ResourceLoader.exists("res://player_frames.tres"):
+        var s := AnimatedSprite3D.new()
+        s.sprite_frames = load("res://player_frames.tres")
+        s.modulate = col.lerp(Color.WHITE, 0.35)
+        s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+        s.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+        s.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+        s.pixel_size = 0.07
+        s.play("idle")
+        return s
+    var n := MeshInstance3D.new()
+    var m := CapsuleMesh.new()
+    m.radius = 0.42
+    m.height = 1.5
+    n.mesh = m
+    n.material_override = _mat(col)
+    return n
+
+func set_actor_anim(node: Node3D, anim: String) -> void:
+    if node is AnimatedSprite3D:
+        node.play(anim)
+
 func _build_world() -> void:
     var light := DirectionalLight3D.new()
     light.rotation_degrees = Vector3(-58, -35, 0)
@@ -5904,7 +5995,9 @@ func _build_world() -> void:
     cam.position = Vector3(0, 16, 15)
     cam.rotation_degrees = Vector3(-48, 0, 0)
     add_child(cam)
-    # Bradan: 24 rutor i en ring av kodbyggda boxar.
+    # Bradan: 24 rutor i en ring av pixelbrickor (v2.24: alla ruttyper ar
+    # boxar med pixeltextur - stjarnrutan hojs och far storre bricka i
+    # stallet for den gamla sfaren, sa pixelspraket haller ihop).
     for i in range(TILE_COUNT):
         var ang := TAU * float(i) / float(TILE_COUNT)
         var pos := Vector3(cos(ang) * 11.0, 0.15, sin(ang) * 11.0)
@@ -5916,37 +6009,17 @@ func _build_world() -> void:
         elif i % 12 == 7:
             t = TILE_STAR
         var node := MeshInstance3D.new()
-        if t == TILE_STAR:
-            var sm := SphereMesh.new()
-            sm.radius = 0.75
-            sm.height = 1.5
-            node.mesh = sm
-        else:
-            var bm := BoxMesh.new()
-            bm.size = Vector3(1.6, 0.3, 1.6)
-            node.mesh = bm
-        node.material_override = _mat(_tile_color(t))
-        node.position = pos
+        var bm := BoxMesh.new()
+        bm.size = Vector3(1.9, 0.5, 1.9) if t == TILE_STAR else Vector3(1.6, 0.3, 1.6)
+        node.mesh = bm
+        node.material_override = _tile_mat(t)
+        node.position = pos + (Vector3(0, 0.1, 0) if t == TILE_STAR else Vector3.ZERO)
         add_child(node)
         tiles.append({"type": t, "pos": pos})
         tile_nodes.append(node)
 
-func _tile_color(t: int) -> Color:
-    if t == TILE_RED:
-        return Color(0.85, 0.25, 0.25)
-    if t == TILE_BONUS:
-        return Color(0.95, 0.8, 0.25)
-    if t == TILE_STAR:
-        return Color(0.75, 0.4, 0.95)
-    return Color(0.25, 0.5, 0.9)
-
-func _make_player_token(col: Color) -> MeshInstance3D:
-    var n := MeshInstance3D.new()
-    var m := CapsuleMesh.new()
-    m.radius = 0.42
-    m.height = 1.5
-    n.mesh = m
-    n.material_override = _mat(col)
+func _make_player_token(col: Color) -> Node3D:
+    var n := make_actor(col)
     add_child(n)
     return n
 
@@ -6084,6 +6157,7 @@ func _physics_process(delta: float) -> void:
             play_sound("click")
             moving_steps -= 1
             if moving_steps == 0:
+                set_actor_anim(p["node"], "idle")
                 _resolve_tile()
         return
     if turn_idx == 0:
@@ -6105,6 +6179,7 @@ func _roll() -> void:
     play_sound("dice")
     moving_steps = 1 + randi() % 6
     move_timer = 0.35
+    set_actor_anim(players[turn_idx]["node"], "walk")
     phase_label.text = "Round %d/%d   %s rolled %d!" % [round_no, ROUNDS, ("You" if turn_idx == 0 else str(players[turn_idx]["name"])), moving_steps]
 
 func _resolve_tile() -> void:
@@ -6232,16 +6307,11 @@ var finished: Array = []
 func setup(m: Node3D) -> void:
     main = m
     for i in range(4):
-        var body := MeshInstance3D.new()
-        var cm := CapsuleMesh.new()
-        cm.radius = 0.4
-        cm.height = 1.4
-        body.mesh = cm
-        var mat := StandardMaterial3D.new()
-        mat.albedo_color = main.players[i]["color"]
-        body.material_override = mat
+        # v2.24: pixelgubben fran main (billboard-sprite) i stallet for kapsel.
+        var body: Node3D = main.make_actor(main.players[i]["color"])
         body.position = Vector3(-9.0, 1.0, float(i) * 1.6 - 2.4)
         add_child(body)
+        main.set_actor_anim(body, "walk")
         runners.append({"idx": i, "node": body, "x": -9.0, "speed": 0.0})
     var goal := MeshInstance3D.new()
     var gm := BoxMesh.new()
@@ -6317,16 +6387,11 @@ func setup(m: Node3D) -> void:
             add_child(pad)
             pads.append({"node": pad, "alive": true, "warn": 0.0})
     for i in range(4):
-        var body := MeshInstance3D.new()
-        var cm := CapsuleMesh.new()
-        cm.radius = 0.4
-        cm.height = 1.4
-        body.mesh = cm
-        var mat2 := StandardMaterial3D.new()
-        mat2.albedo_color = main.players[i]["color"]
-        body.material_override = mat2
+        # v2.24: pixelgubben fran main (billboard-sprite) i stallet for kapsel.
+        var body: Node3D = main.make_actor(main.players[i]["color"])
         body.position = Vector3(float(i % 2) * 2.7 - 1.35, 1.2, float(i / 2) * 2.7 - 1.35)
         add_child(body)
+        main.set_actor_anim(body, "walk")
         actors.append({"idx": i, "node": body, "alive": true})
 
 func _pad_at(pos: Vector3) -> int:
@@ -6425,16 +6490,11 @@ var done := false
 func setup(m: Node3D) -> void:
     main = m
     for i in range(4):
-        var body := MeshInstance3D.new()
-        var cm := CapsuleMesh.new()
-        cm.radius = 0.4
-        cm.height = 1.4
-        body.mesh = cm
-        var mat := StandardMaterial3D.new()
-        mat.albedo_color = main.players[i]["color"]
-        body.material_override = mat
+        # v2.24: pixelgubben fran main (billboard-sprite) i stallet for kapsel.
+        var body: Node3D = main.make_actor(main.players[i]["color"])
         body.position = Vector3(float(i % 2) * 4.0 - 2.0, 1.0, float(i / 2) * 4.0 - 2.0)
         add_child(body)
+        main.set_actor_anim(body, "walk")
         actors.append({"idx": i, "node": body})
     for c in range(14):
         _spawn_coin()

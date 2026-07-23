@@ -516,6 +516,18 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > miniatyrer 112x70, pixelart med image-rendering pixelated; Auto/2.5D
 > behåller SVG (inget iso-kit att visa ärligt än). KVAR: 3D-partyts
 > pixellyft, AI-bakgrunder via pipelinen, CC0-assetpaket, 2.5D-kit.
+>
+> **v2.24 3D-PARTYTS PIXELLYFT.** SNES-Mario-Party-looken: pixelgubbar
+> som AnimatedSprite3D-billboards (player_frames.tres i scaffolden,
+> modulate-färgade per spelare, NEAREST + ALPHA_CUT_DISCARD, walk vid
+> flytt/idle vid stopp) via delad make_actor/set_actor_anim i Main.gd —
+> alla tre minispelen använder samma hjälpare (kapsel-fallback kvar om
+> .tres saknas). Brädet: pixelbrickor (_make_tile_tex 16x16 kontur/
+> ljus-topp/mörk-botten/symbol, port av 2D-partyts) på alla ruttyper —
+> stjärnrutan större box i stället för sfär. Skarpt verifierat: 6 gd-
+> filer --check-only rena, fönsterkörning med 4 dumpar (bräde + Falling
+> Floor med 4 pixelgubbar mid-walk, zoom bekräftar kontur+ramper).
+> KVAR: AI-bakgrunder via pipelinen, CC0-assetpaket, 2.5D-kit.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
