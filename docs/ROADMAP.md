@@ -556,6 +556,19 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > gick rakt över spelarens start (slumpmål + startodödlighet).
 > Autopilotbevis: Island 3/3 Score 482 på 28 s. KVAR: CC0-assetpaket,
 > bakgrunder i fler kit, kampanjläge.
+>
+> **v2.27 SCENPLATTOR I SIDOVY-KITEN.** PixelBackdrop in i kiten där
+> passformen är äkta: Kanonaden får background.png (tema från prompt)
+> bakom den förstörbara terrängen — plattans avlägsna kullar sticker
+> upp bakom terrängen = gratis parallaxdjup; platt himmel+sol är
+> fallback. Partyt får en platta PER BRÄDE med FASTA teman som matchar
+> brädesnamnen (Ring=night, Serpentine=deep sea, Spiral=candy dusk —
+> användarprompten utelämnas medvetet så ett användartema inte kapar
+> alla tre till samma bild), dämpad modulate 0.52 för brickläsbarhet,
+> gradientband som fallback. MEDVETET ORÖRD: Pixel Rush (har redan
+> tematiska himlar per bana — byte vore regression, inte förbättring).
+> Fönsterverifierat båda kiten. KVAR: CC0-assetpaket, kampanjläge,
+> HTML5-kitens svenska.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

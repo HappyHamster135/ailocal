@@ -163,6 +163,10 @@ public partial class GameScaffoldService
         files.Add("Main.tscn");
         Write(root, "Main.gd", GodotArtilleryMain);
         files.Add("Main.gd");
+        // v2.27: scenisk bakgrund (PixelBackdrop) bakom den forstorbara
+        // terrangen - temat foljer prompten (meadow som default).
+        Write(root, "background.png", PixelBackdrop.Build(prompt, 288, 162));
+        files.Add("background.png");
         foreach (var (name, category) in new[] { ("click.wav", "shoot"), ("coin.wav", "powerup"), ("hurt.wav", "explosion"), ("win.wav", "win") })
         {
             Write(root, name, SfxrGenerator.Render(category, seed: 7));
@@ -3068,10 +3072,14 @@ var hud: CanvasLayer
 var hud_label: Label
 var overlay: Control
 var snd := {}
+# v2.27: scenisk pixelbakgrund (PixelBackdrop-plattan fran scaffolden) -
+# ritas bakom den forstorbara terrangen; platt himmel + sol ar fallback.
+var backdrop: Texture2D = null
 
 func _ready() -> void:
 	randomize()
 	Shell.startup()
+	backdrop = load("res://background.png") as Texture2D
 	for key in ["click", "coin", "hurt", "win"]:
 		# Nullsakert fore forsta importen - se management-kitets kommentar.
 		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
@@ -3422,8 +3430,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # ---------- ritning ----------
 func _draw() -> void:
-	draw_rect(Rect2(0, 0, W, H), Color(0.45, 0.65, 0.85))
-	draw_circle(Vector2(1010, 90), 42.0, Color(1, 0.92, 0.6))
+	if backdrop != null:
+		# Scenplattan (NEAREST-uppskalad 4x) - dess avlagsna kullar sticker
+		# upp bakom den forstorbara terrangen och ger gratis parallaxdjup.
+		draw_texture_rect(backdrop, Rect2(0, 0, W, H), false)
+	else:
+		draw_rect(Rect2(0, 0, W, H), Color(0.45, 0.65, 0.85))
+		draw_circle(Vector2(1010, 90), 42.0, Color(1, 0.92, 0.6))
 	if state == "title":
 		return
 	# Vindpil
@@ -3643,6 +3656,16 @@ func close_overlay() -> void:
         files.Add("Main.tscn");
         Write(root, "Main.gd", GodotPartyMain);
         files.Add("Main.gd");
+        // v2.27: en scenisk PixelBackdrop-platta per brade. Temana ar FASTA
+        // (bradesknapparna heter night sky/deep sea/candy dusk) - anvandar-
+        // prompten utelamnas medvetet sa ett anvandartema ("rymdparty") inte
+        // kapar alla tre till samma bild.
+        Write(root, "bg_night.png", PixelBackdrop.Build("calm night sky over rolling hills", 288, 162));
+        files.Add("bg_night.png");
+        Write(root, "bg_sea.png", PixelBackdrop.Build("deep sea underwater ocean floor", 288, 162));
+        files.Add("bg_sea.png");
+        Write(root, "bg_dusk.png", PixelBackdrop.Build("candy sunset dusk sky", 288, 162));
+        files.Add("bg_dusk.png");
         foreach (var (name, category) in new[] { ("click.wav", "jump"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
         {
             Write(root, name, SfxrGenerator.Render(category, seed: 7));
@@ -3780,6 +3803,9 @@ var confetti: Array = []      # {x, y, s, sp, col, layer}
 # v2.19: tema per brade - varje layout har egen bakgrundston.
 var board_bg_top := Color(0.10, 0.08, 0.20)
 var board_bg_bottom := Color(0.17, 0.11, 0.27)
+# v2.27: scenisk PixelBackdrop-platta per brade (dampad sa brickorna ar
+# lasbara) - gradientbanden ar fallback fore forsta importen.
+var board_backdrops := {}
 
 # --- Minigame state ---
 var mg_timer := 0.0
@@ -3836,6 +3862,11 @@ func _ready() -> void:
     # Pixelart = skarpa pixlar: nearest-filter pa allt ritat/alla barn
     # (gamla projekt utan mallens default_texture_filter far det anda).
     texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+    # v2.27: bradenas scenplattor (null-sakert fore forsta importen).
+    for pair in [[BOARD_RING, "bg_night"], [BOARD_SERPENTINE, "bg_sea"], [BOARD_SPIRAL, "bg_dusk"]]:
+        var tex = load("res://%s.png" % pair[1])
+        if tex:
+            board_backdrops[pair[0]] = tex
     var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
     img.fill(Color(1, 1, 1))
     dot_tex = ImageTexture.create_from_image(img)
@@ -4973,13 +5004,18 @@ func _show_results() -> void:
 # ---------- DRAW ----------
 
 func _draw() -> void:
-    # Levande bakgrund: gradientband + konfetti i tva djuplager + vinjett -
+    # Levande bakgrund: scenplatta per brade (v2.27, dampad for lasbarhet)
+    # med gradientband som fallback + konfetti i tva djuplager + vinjett -
     # aldrig en platt yta med "bollar som bara flyter" (agarens dom v2.16).
-    var bands := 14
-    for i in range(bands):
-        var bt := float(i) / float(bands - 1)
-        draw_rect(Rect2(0, 648.0 * float(i) / float(bands), 1152, 648.0 / float(bands) + 1.0),
-            board_bg_top.lerp(board_bg_bottom, bt))
+    if board_backdrops.has(board_layout):
+        draw_texture_rect(board_backdrops[board_layout], Rect2(0, 0, 1152, 648), false,
+            Color(0.52, 0.52, 0.62))
+    else:
+        var bands := 14
+        for i in range(bands):
+            var bt := float(i) / float(bands - 1)
+            draw_rect(Rect2(0, 648.0 * float(i) / float(bands), 1152, 648.0 / float(bands) + 1.0),
+                board_bg_top.lerp(board_bg_bottom, bt))
     for c in confetti:
         var cs: float = float(c["s"]) * (0.7 if c["layer"] == 0 else 1.0)
         var cc: Color = c["col"]

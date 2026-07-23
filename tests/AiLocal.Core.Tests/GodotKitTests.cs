@@ -235,6 +235,9 @@ public class GodotKitTests
             // Touchkontroller - runtime-gatade (datorspel oforandrade).
             Assert.Contains("TouchScreenButton", script);
             Assert.Contains("is_touchscreen_available", script);
+            // v2.27: scenisk PixelBackdrop-bakgrund bakom terrangen.
+            Assert.Contains("background.png", script);
+            Assert.True(File.Exists(Path.Combine(root, "background.png")), "background.png saknas");
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -316,6 +319,10 @@ public class GodotKitTests
             Assert.Contains("human_count", script);
             Assert.Contains("MASH_KEYS", script);
             Assert.Contains("MOVE_KEYS", script);
+            // v2.27: scenplattor per brade (night/sea/dusk) med gradient-fallback.
+            Assert.Contains("board_backdrops", script);
+            foreach (var bg in new[] { "bg_night.png", "bg_sea.png", "bg_dusk.png" })
+                Assert.True(File.Exists(Path.Combine(root, bg)), $"{bg} saknas");
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
