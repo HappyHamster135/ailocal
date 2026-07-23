@@ -94,7 +94,8 @@ public static class DirectorPass
         string? engine = null,
         IReadOnlyList<string>? inspirationSeeds = null,
         IReadOnlyList<string>? pastLessons = null,
-        IReadOnlyList<string>? operatorCriteria = null)
+        IReadOnlyList<string>? operatorCriteria = null,
+        string? gameLanguage = null)
     {
         // v1.97: slumpad kreativ vinkel per körning - samma prompt två gånger
         // ska inte ge samma designangrepp (vinkeln styr HUR regissören tänker,
@@ -122,7 +123,7 @@ public static class DirectorPass
         // regissören hittat på, och grinden följer upp dem som vanligt.
         if (operatorCriteria is { Count: > 0 })
             contract = contract with { Criteria = [.. operatorCriteria, .. contract.Criteria] };
-        contract = contract with { Criteria = EnsureEngineFeelCriteria(contract.Criteria, engine) };
+        contract = contract with { Criteria = EnsureEngineFeelCriteria(contract.Criteria, engine, gameLanguage) };
         TryAppendToDesign(projectRoot, contract);
         return contract;
     }
@@ -132,10 +133,18 @@ public static class DirectorPass
     /// that actually differ, game-feel/juice (C1), and smooth performance (C3).
     /// Only criteria whose topic the contract does not already cover are added -
     /// the director's own wording wins.</summary>
-    internal static IReadOnlyList<string> EnsureEngineFeelCriteria(IReadOnlyList<string> criteria, string? engine)
+    internal static IReadOnlyList<string> EnsureEngineFeelCriteria(IReadOnlyList<string> criteria, string? engine, string? gameLanguage = null)
     {
         if (engine is not ("godot" or "unity"))
             return criteria;
+
+        // v2.23: språkväljaren (ägarens önskan sedan v1.99) - nodinställningen
+        // GameLanguage styr det stående språkkriteriet. Engelska förblir
+        // standard; "sv" ger riktig svenska med å/ä/ö (kiten är engelska, så
+        // kriteriet tvingar agenten att översätta spelartexten den rör).
+        var languageCriterion = string.Equals(gameLanguage, "sv", StringComparison.OrdinalIgnoreCase)
+            ? "All spelartext på SVENSKA med korrekta å/ä/ö och professionell ton (operatörens nodinställning - översätt kitets engelska spelartexter) - och ALDRIG råa formatsträngar (%d/%s), synliga BBCode-taggar eller rådumpade data i UI:t"
+            : "All spelartext på ENGELSKA med professionell ton (om inte användaren uttryckligen bett om annat språk) - och ALDRIG råa formatsträngar (%d/%s), synliga BBCode-taggar eller rådumpade data i UI:t";
 
         (string[] Keywords, string Criterion)[] feel =
         [
@@ -164,7 +173,7 @@ public static class DirectorPass
             // standard - professionellt OCH encodingsäkert. Ber användaren
             // uttryckligen om ett annat språk vinner det via nyckelorden.
             (["engelsk", "english", "språk", "sprak", "language", "svenska på", "lokaliser"],
-                "All spelartext på ENGELSKA med professionell ton (om inte användaren uttryckligen bett om annat språk) - och ALDRIG råa formatsträngar (%d/%s), synliga BBCode-taggar eller rådumpade data i UI:t"),
+                languageCriterion),
             // v2.9 (ägarens "första Bloons-spelet"-skärmdump): nakna
             // draw_rect/draw_circle-entiteter läses som programmer-art.
             // Art.gd skickas med i varje Godot-scaffold - kriteriet gör

@@ -100,6 +100,12 @@ public sealed class WorkerProfileSettings
     /// körningar pausar; 10 min tystnad = studion väljer själv.</summary>
     public bool PreBuildQuestions { get; set; } = true;
 
+    /// <summary>v2.23: spelens SPELARTEXT-språk (ägarens önskan sedan v1.99:
+    /// "egentligen ska man ha en språkväljare i settings"). "en" (standard,
+    /// professionellt + encodingsäkert) eller "sv" (riktig svenska med åäö -
+    /// regissörens språkkriterium och grinden följer valet).</summary>
+    public string GameLanguage { get; set; } = "en";
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.

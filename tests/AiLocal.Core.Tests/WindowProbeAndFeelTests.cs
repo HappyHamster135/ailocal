@@ -81,6 +81,27 @@ public class WindowProbeAndFeelTests
         Assert.Single(result, c => c.Contains("ljud", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void EnsureEngineFeelCriteria_V223_SprakvalStyrKriteriet()
+    {
+        var basic = new[] { "5 banor" };
+
+        // Standard (null/en): engelska-kriteriet som förr.
+        Assert.Contains(DirectorPass.EnsureEngineFeelCriteria(basic, "godot"),
+            c => c.Contains("ENGELSKA"));
+        Assert.Contains(DirectorPass.EnsureEngineFeelCriteria(basic, "godot", "en"),
+            c => c.Contains("ENGELSKA"));
+
+        // Språkväljaren på svenska: kriteriet byts till riktig svenska med
+        // å/ä/ö och kravet att kitets engelska texter översätts.
+        var sv = DirectorPass.EnsureEngineFeelCriteria(basic, "godot", "sv");
+        Assert.Contains(sv, c => c.Contains("SVENSKA") && c.Contains("å/ä/ö") && c.Contains("översätt"));
+        Assert.DoesNotContain(sv, c => c.Contains("ENGELSKA"));
+
+        // Textdefekt-förbudet (råa formatsträngar/BBCode) gäller båda språken.
+        Assert.Contains(sv, c => c.Contains("%d/%s"));
+    }
+
     // ---- Livesond mot riktig Godot (gated - skarp där godot finns) ---------
 
     [Fact]

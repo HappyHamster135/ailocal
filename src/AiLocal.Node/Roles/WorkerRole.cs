@@ -835,6 +835,14 @@ public static class WorkerRole
                 assignmentText = req.Assignment + projectBrief;
             }
 
+            // v2.23: språkväljaren - nodinställningen GameLanguage lägger en
+            // uttrycklig språkrad i uppdraget (gäller även uppföljningar och
+            // teambyggen som inte får ett nytt regissörskontrakt). Engelska
+            // är standard och behöver ingen rad - kiten och det stående
+            // kriteriet täcker det redan.
+            if (buildIntent && string.Equals(settings.Worker.GameLanguage, "sv", StringComparison.OrdinalIgnoreCase))
+                assignmentText += "\n\nSPRÅK (operatörens nodinställning): ALL spelartext på SVENSKA med korrekta å/ä/ö och professionell ton. Kitets engelska spelartexter översätts i de skärmar du rör.";
+
             // ---- Regissören: designkontrakt med mätbara kriterier -----------
             // En stark-modell-tur gör den svaga prompten till ett leverans-
             // kontrakt ("5 banor", "3 fiendetyper") som grinden följer upp.
@@ -877,7 +885,8 @@ public static class WorkerRole
                         req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, completeAccounted, ct,
                         engine: GameBuilder.DetectEngine(directorRoot),
                         inspirationSeeds: ideaSeeds, pastLessons: pastLessons,
-                        operatorCriteria: operatorCriteria);
+                        operatorCriteria: operatorCriteria,
+                        gameLanguage: settings.Worker.GameLanguage);
                     contractCriteria = contract.Criteria;
                     await EmitStep("tool_result", contract.ToMarkdown());
                     assignmentText += "\n\n" + contract.ToMarkdown() +

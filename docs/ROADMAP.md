@@ -504,6 +504,18 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > options_panel + quit i Main.gd. KVAR: 3D-partyts pixellyft (tokens/
 > tiles), stilkort med riktiga skärmdumpar, AI-bakgrunder via pipelinen,
 > CC0-assetpaket, språkväljare.
+>
+> **v2.23 SPRÅKVÄLJAREN + RIKTIGA STILKORT.** Nodinställning "Spelens
+> språk" (en standard / sv): regissörens språkkriterium byts dynamiskt
+> (SVENSKA med å/ä/ö + översätt kitets texter), en uttrycklig språkrad
+> läggs i uppdraget vid sv (når även uppföljningar/teambyggen), grinden
+> följer kontraktet som vanligt. Alla 8 kopplingspunkter + select i
+> dashboarden. Stilkorten pixelart/3D/vektor visar nu RIKTIGA kit-
+> skärmdumpar (spiralbrädet, Kuben in-game, Kanonadens sikte - Kuben+
+> Kanonaden scaffoldades och kördes skarpt för dumparna) som base64-
+> miniatyrer 112x70, pixelart med image-rendering pixelated; Auto/2.5D
+> behåller SVG (inget iso-kit att visa ärligt än). KVAR: 3D-partyts
+> pixellyft, AI-bakgrunder via pipelinen, CC0-assetpaket, 2.5D-kit.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

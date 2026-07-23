@@ -38,6 +38,7 @@ public sealed record SettingsUpdate(
     int? PolishRounds = null,
     bool? DemoCheckpoints = null,
     bool? PreBuildQuestions = null,
+    string? GameLanguage = null,
     bool? AllowInternet = null,
     bool? UseGitIsolation = null,
     bool? AutoMergeIsolatedTasks = null,
@@ -75,6 +76,7 @@ internal sealed class StoredNodeSettings
     public int PolishRounds { get; set; } = 1;
     public bool DemoCheckpoints { get; set; } = true;
     public bool PreBuildQuestions { get; set; } = true;
+    public string GameLanguage { get; set; } = "en";
     public bool AllowInternet { get; set; }
     public bool UseGitIsolation { get; set; }
     public bool AutoMergeIsolatedTasks { get; set; }
@@ -212,6 +214,8 @@ public sealed class PersistentSettingsStore
             settings.Worker.DemoCheckpoints = stored.DemoCheckpoints;
         if (Has("PreBuildQuestions"))
             settings.Worker.PreBuildQuestions = stored.PreBuildQuestions;
+        if (Has("GameLanguage"))
+            settings.Worker.GameLanguage = stored.GameLanguage == "sv" ? "sv" : "en";
         if (Has("AllowInternet"))
             settings.Worker.AllowInternet = stored.AllowInternet;
         if (Has("UseGitIsolation"))
@@ -301,6 +305,7 @@ public sealed class PersistentSettingsStore
                 polishRounds = _settings.Worker.PolishRounds,
                 demoCheckpoints = _settings.Worker.DemoCheckpoints,
                 preBuildQuestions = _settings.Worker.PreBuildQuestions,
+                gameLanguage = _settings.Worker.GameLanguage,
                 allowInternet = _settings.Worker.AllowInternet,
                 useGitIsolation = _settings.Worker.UseGitIsolation,
                 autoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks,
@@ -412,6 +417,9 @@ public sealed class PersistentSettingsStore
 
             if (update.PreBuildQuestions.HasValue)
                 _settings.Worker.PreBuildQuestions = update.PreBuildQuestions.Value;
+
+            if (update.GameLanguage is not null)
+                _settings.Worker.GameLanguage = update.GameLanguage == "sv" ? "sv" : "en";
 
             if (update.AllowInternet.HasValue)
                 _settings.Worker.AllowInternet = update.AllowInternet.Value;
@@ -650,6 +658,7 @@ public sealed class PersistentSettingsStore
         _stored.PolishRounds = _settings.Worker.PolishRounds;
         _stored.DemoCheckpoints = _settings.Worker.DemoCheckpoints;
         _stored.PreBuildQuestions = _settings.Worker.PreBuildQuestions;
+        _stored.GameLanguage = _settings.Worker.GameLanguage;
         _stored.AllowInternet = _settings.Worker.AllowInternet;
         _stored.UseGitIsolation = _settings.Worker.UseGitIsolation;
         _stored.AutoMergeIsolatedTasks = _settings.Worker.AutoMergeIsolatedTasks;
