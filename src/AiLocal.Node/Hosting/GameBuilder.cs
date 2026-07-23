@@ -88,6 +88,11 @@ public sealed class GameBuilder
         // is named after the project folder rather than a hardcoded PixelRush.
         var preset = "Windows Desktop";
         var outExe = Path.Combine(root, "build", DeriveExeName(root) + ".exe");
+        // v2.7 (skarpt e2e-fynd): Godot SKAPAR INTE exportmappen - utan den
+        // faller exporten med "Prepare Template: The given export path
+        // doesn't exist" (exit 1). Forklarar aven partytranskriptets tomma
+        // exportfel.
+        Directory.CreateDirectory(Path.GetDirectoryName(outExe)!);
         var cmd = MakeGodotCommand(godot, preset, outExe);
         var (exit, output) = await runCommand(cmd, root, ct);
         if (exit != 0)

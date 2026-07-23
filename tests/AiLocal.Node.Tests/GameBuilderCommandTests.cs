@@ -230,6 +230,29 @@ public class GameBuilderCommandTests
     }
 
     [Fact]
+    public async Task BuildAsync_Godot_SkaparExportmappenForeKorningen()
+    {
+        // v2.7, skarpt e2e-fynd: Godot skapar INTE build/-mappen sjalv -
+        // exporten foll alltid med "The given export path doesn't exist".
+        var root = Path.Combine(Path.GetTempPath(), "ailocal-gb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "project.godot"), "");
+
+        var dirExistedAtRun = false;
+        Func<string, string, CancellationToken, Task<(int, string)>> run = (c, dir, ct) =>
+        {
+            dirExistedAtRun = Directory.Exists(Path.Combine(root, "build"));
+            return Task.FromResult((1, "stub"));
+        };
+
+        var builder = new GameBuilder();
+        await builder.BuildAsync("auto", root, run, CancellationToken.None, godotFinder: () => "C:/Godot/godot.exe");
+
+        Assert.True(dirExistedAtRun, "build/-mappen fanns inte nar godot kordes");
+        Directory.Delete(root, recursive: true);
+    }
+
+    [Fact]
     public async Task BuildAsync_Godot_ExportFailureUtanUtskrift_FarDiagnos()
     {
         // v1.99, live-sett: exporten föll med exit 1 och HELT TOM utskrift -
