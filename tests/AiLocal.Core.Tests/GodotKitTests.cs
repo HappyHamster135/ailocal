@@ -99,6 +99,11 @@ public class GodotKitTests
             // v1.93: touchkontroller - runtime-gatade (datorspel oforandrade).
             Assert.Contains("TouchScreenButton", script);
             Assert.Contains("is_touchscreen_available", script);
+            // v2.20 pixelspraket: gras-tiles, dekor, pixelmynt, skarpa pixlar.
+            Assert.Contains("_make_grass_tex", script);
+            Assert.Contains("_make_decor_tex", script);
+            Assert.Contains("_make_coin_tex", script);
+            Assert.Contains("TEXTURE_FILTER_NEAREST", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
@@ -300,6 +305,11 @@ public class GodotKitTests
             Assert.Contains("mg_qd_wins", script);
             Assert.Contains("mg_coin_score", script);
             Assert.Contains("board_bg_top", script);
+            // v2.20: duell-/warprutor + bonusrundor.
+            Assert.Contains("TILE_DUEL", script);
+            Assert.Contains("TILE_WARP", script);
+            Assert.Contains("_is_bonus", script);
+            Assert.Contains("BONUS x2", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }

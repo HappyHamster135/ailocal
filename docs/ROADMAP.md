@@ -472,6 +472,17 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > Spiralvalet loggbevisat + skärmdumpar (menyn/Quick Draw/spiralbrädet).
 > KVAR mot partymålet: duell-/teleportrutor, bonusrundor, minigame-
 > intro-kort med regler, 2-4 mänskliga spelare hotseat.
+>
+> **v2.20 GLÄNTAN I PIXELSPRÅK + PARTYRUTORNA.** (1) The Glade: schack-
+> rutigt pixelgräs (två nyanser, jordfläckar, grässtrån), 14 kontur-
+> dekorer (blommor/stenar/buskar) deterministiskt utplacerade, mörk
+> kontur runt gläntan, riktiga pixelmynt (kontur/glans), nearest i
+> _ready, PRESET_CENTER-fixen även här. (2) Board Bash: TILE_DUEL
+> (tärningsduell, vinnaren tar ≤5 mynt, resultat i HUD via event_text)
+> + TILE_WARP (teleport 5-9 framåt, dubbelburst) - minst 2+2 per bräde;
+> BONUSRUNDA var 3:e runda (_is_bonus: HUD-tagg, blå ×2, minigame-
+> awards ×2; aldrig i practice). KVAR: 3D-partyts pixellyft, minigame-
+> intro-kort, hotseat 2-4 spelare, Options/Quit i Gläntan.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

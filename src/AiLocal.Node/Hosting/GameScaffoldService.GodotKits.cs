@@ -1569,9 +1569,25 @@ var hud: CanvasLayer
 var hud_label: Label
 var overlay: Control
 var snd := {}
+# v2.20 pixelspraket: gras-tiles i tva varianter + dekor (blommor/stenar)
+# pa deterministiska platser - aldrig en platt enfargad yta.
+var grass_a: ImageTexture
+var grass_b: ImageTexture
+var decor: Array = []   # {pos, tex}
 
 func _ready() -> void:
 	randomize()
+	# Pixelart = skarpa pixlar aven i gamla projekt utan mallens filterrad.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	grass_a = _make_grass_tex(0)
+	grass_b = _make_grass_tex(1)
+	var decor_seed := 12345
+	for i in range(14):
+		decor_seed = (decor_seed * 1103515245 + 12345) % 2147483647
+		var dx := ARENA.position.x + 24.0 + float(decor_seed % 984)
+		decor_seed = (decor_seed * 1103515245 + 12345) % 2147483647
+		var dy := ARENA.position.y + 24.0 + float(decor_seed % 480)
+		decor.append({"pos": Vector2(dx, dy), "tex": _make_decor_tex(i % 3)})
 	for key in ["click","coin","hurt","win"]:
 		# Nullsakert fore forsta importen - se management-kitets kommentar.
 		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
@@ -1722,11 +1738,31 @@ func next_wave() -> void:
 		enemies.append(e)
 	for i in range(4 + wave):
 		var c := Sprite2D.new()
-		c.texture = make_texture(7, Color(0.95, 0.8, 0.2), Color(1, 1, 0.7))
+		c.texture = _make_coin_tex()
 		c.scale = Vector2(2, 2)
 		c.position = random_point()
 		add_child(c)
 		coins.append(c)
+
+func _make_coin_tex() -> ImageTexture:
+	# v2.20: riktigt pixelmynt - kontur, guldkropp, mork undersida, glans.
+	var img := Image.create(10, 10, false, Image.FORMAT_RGBA8)
+	var outline := Color8(27, 22, 36)
+	var gold := Color8(240, 196, 60)
+	var dark := Color8(190, 140, 40)
+	var shine := Color8(255, 246, 190)
+	for y in range(10):
+		for x in range(10):
+			var dx := x - 4.5
+			var dy := y - 4.5
+			var d2 := dx * dx + dy * dy
+			if d2 <= 12.5:
+				img.set_pixel(x, y, gold if y < 6 else dark)
+			elif d2 <= 20.0:
+				img.set_pixel(x, y, outline)
+	img.set_pixel(3, 3, shine)
+	img.set_pixel(4, 2, shine)
+	return ImageTexture.create_from_image(img)
 
 func random_point() -> Vector2:
 	return Vector2(ARENA.position.x + randf() * ARENA.size.x, ARENA.position.y + randf() * ARENA.size.y)
@@ -1837,8 +1873,78 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_overlay()
 
 func _draw() -> void:
-	draw_rect(ARENA, Color(0.10, 0.16, 0.10))
-	draw_rect(ARENA, Color(0.4, 0.6, 0.4), false, 4.0)
+	# v2.20 pixelspraket: schackrutigt pixelgras i tva nyanser, mork kontur
+	# runt gladan och pixeldekor - samma formsprak som gubbarna/brickorna.
+	var ts := 48.0
+	var cols := int(ARENA.size.x / ts) + 1
+	var rows := int(ARENA.size.y / ts) + 1
+	for r in range(rows):
+		for c in range(cols):
+			var px := ARENA.position.x + c * ts
+			var py := ARENA.position.y + r * ts
+			var w := minf(ts, ARENA.end.x - px)
+			var h := minf(ts, ARENA.end.y - py)
+			if w <= 0.0 or h <= 0.0:
+				continue
+			var tex := grass_a if (r + c) % 2 == 0 else grass_b
+			draw_texture_rect(tex, Rect2(px, py, w, h), false)
+	for d in decor:
+		draw_texture_rect(d["tex"], Rect2(d["pos"] - Vector2(12, 12), Vector2(24, 24)), false)
+	draw_rect(Rect2(ARENA.position - Vector2(4, 4), ARENA.size + Vector2(8, 8)), Color(0.09, 0.07, 0.12), false, 4.0)
+	draw_rect(ARENA, Color(0.32, 0.48, 0.28), false, 2.0)
+
+func _make_grass_tex(variant: int) -> ImageTexture:
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	var base := Color8(44, 74, 42) if variant == 0 else Color8(40, 68, 38)
+	img.fill(base)
+	# morka jordflackar + ljusa grasstran i fasta monster (deterministiskt)
+	var dark := base.darkened(0.22)
+	var light := base.lightened(0.28)
+	for i in range(6):
+		var fx := (i * 5 + variant * 3) % 14 + 1
+		var fy := (i * 7 + variant * 5) % 14 + 1
+		img.set_pixel(fx, fy, dark)
+	for i in range(4):
+		var sx := (i * 4 + variant * 6 + 2) % 14 + 1
+		var sy := (i * 9 + variant * 2 + 3) % 12 + 2
+		img.set_pixel(sx, sy, light)
+		img.set_pixel(sx, sy - 1, light)
+	return ImageTexture.create_from_image(img)
+
+func _make_decor_tex(kind: int) -> ImageTexture:
+	var img := Image.create(12, 12, false, Image.FORMAT_RGBA8)
+	var outline := Color8(27, 22, 36)
+	if kind == 0:
+		# blomma: gul mitt + vita kronblad + kontur
+		img.set_pixel(5, 5, Color8(240, 200, 60))
+		img.set_pixel(6, 5, Color8(240, 200, 60))
+		img.set_pixel(5, 6, Color8(240, 200, 60))
+		img.set_pixel(6, 6, Color8(240, 200, 60))
+		for p in [Vector2i(5, 3), Vector2i(6, 3), Vector2i(3, 5), Vector2i(3, 6), Vector2i(8, 5), Vector2i(8, 6), Vector2i(5, 8), Vector2i(6, 8)]:
+			img.set_pixel(p.x, p.y, Color8(245, 240, 235))
+	elif kind == 1:
+		# sten: gra klump med ljus topp och kontur
+		for y in range(5, 10):
+			for x in range(3, 9):
+				img.set_pixel(x, y, Color8(120, 118, 132))
+		for x in range(4, 8):
+			img.set_pixel(x, 4, Color8(120, 118, 132))
+			img.set_pixel(x, 5, Color8(158, 156, 170))
+		for x in range(3, 9):
+			img.set_pixel(x, 10, outline)
+		img.set_pixel(2, 9, outline)
+		img.set_pixel(9, 9, outline)
+	else:
+		# buske: tva grona klumpar med mork bas
+		for y in range(5, 10):
+			for x in range(2, 10):
+				img.set_pixel(x, y, Color8(52, 96, 48))
+		for x in range(3, 9):
+			img.set_pixel(x, 4, Color8(52, 96, 48))
+			img.set_pixel(x, 5, Color8(74, 128, 64))
+		for x in range(2, 10):
+			img.set_pixel(x, 10, outline)
+	return ImageTexture.create_from_image(img)
 
 # ---------- overlays ----------
 func show_title() -> void:
@@ -1858,22 +1964,31 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(bg)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
+	# FULL_RECT + centrerad alignment - PRESET_CENTER satter bara pivoten
+	# och hogerforskjuter innehallet (v2.12-fyndet, fixat har v2.20).
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 12)
 	overlay.add_child(box)
 	var t := Label.new()
 	t.text = title
 	t.add_theme_font_size_override("font_size", 42)
+	t.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	t.add_theme_constant_override("outline_size", 10)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(t)
 	var m := Label.new()
 	m.text = message
 	m.add_theme_font_size_override("font_size", 16)
+	m.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(m)
 	if with_buttons:
 		var first := true
 		for entry in [["Easy", 0], ["Normal", 1], ["Hard", 2]]:
 			var b := Button.new()
 			b.text = "Start: " + str(entry[0])
+			b.custom_minimum_size = Vector2(320, 46)
+			b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			var diff: int = entry[1]
 			b.pressed.connect(func():
 				play_sound("click")
@@ -3460,6 +3575,8 @@ const TILE_BLUE := 0   # +3 coins
 const TILE_RED := 1    # -2 coins
 const TILE_STAR := 2   # buy star (15 coins)
 const TILE_MG := 3     # minigame trigger
+const TILE_DUEL := 4   # v2.20: duell - bada rullar, vinnaren tar 5 mynt
+const TILE_WARP := 5   # v2.20: teleport 5-9 rutor framat
 
 var PLAYERS: Array[Dictionary] = [
     {"name":"You","col":Color(0.3,0.7,1), "ai":false},
@@ -3511,6 +3628,7 @@ var flash_t := 0.0
 var ai_roll_timer := 0.0
 var resolve_timer := 0.0
 var attract_t := 0.0   # auto-rull efter 8s idle - spelet demonstrerar sig sjalvt
+var event_text := ""   # v2.20: duell-/warphandelser som visas i HUD-raden
 # v2.16 levande varld: riktiga animerade gubbar (AnimatedSprite2D fran
 # player_frames.tres, fargade per spelare) + konfettibakgrund i djuplager.
 var tokens: Array = []        # AnimatedSprite2D per spelare (tom = cirkel-fallback)
@@ -3925,6 +4043,18 @@ func _build_board() -> void:
         if mg_count < 3 and board_tiles[i] == TILE_BLUE:
             board_tiles[i] = TILE_MG
             mg_count += 1
+    # v2.20: duell- och warprutor - 2 av varje, spridda pa jamna/udda index.
+    var duels := 0
+    var warps := 0
+    for i in range(TILE_COUNT):
+        if board_tiles[i] != TILE_BLUE:
+            continue
+        if duels < 2 and i % 2 == 0:
+            board_tiles[i] = TILE_DUEL
+            duels += 1
+        elif warps < 2 and i % 2 == 1:
+            board_tiles[i] = TILE_WARP
+            warps += 1
     # Compute tile positions
     var cx := 576.0
     var cy := 324.0
@@ -3989,7 +4119,10 @@ func _update_hud() -> void:
         phase_text = "Moving... (rolled " + str(dice_value) + ")"
     else:
         phase_text = PLAYERS[turn_idx]["name"] + " resolving..."
-    var rd := _label("Round %d/%d   %s" % [round, ROUNDS, phase_text], 10, 18, Color(1, 0.9, 0.5))
+    if event_text != "":
+        phase_text = event_text
+    var bonus_tag := "  BONUS x2!" if _is_bonus() else ""
+    var rd := _label("Round %d/%d%s   %s" % [round, ROUNDS, bonus_tag, phase_text], 10, 18, Color(1, 0.9, 0.5))
     rd.set_meta("hud", true)
     rd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     rd.position.x = 752
@@ -4085,15 +4218,21 @@ func _step_move() -> void:
     move_timer = 0.12
     _update_hud()
 
+func _is_bonus() -> bool:
+    # v2.20: var tredje runda ar BONUSRUNDA - dubbla mynt pa bla rutor
+    # och dubbla minispelsbeloningar. Aldrig i practice-laget.
+    return not practice_mode and round > 0 and round % 3 == 0
+
 func _resolve_tile() -> void:
     var ps := pstate[turn_idx]
     var tile_type := board_tiles[ps["tile"]]
     var pos: Vector2 = tile_positions[ps["tile"]]
 
     if tile_type == TILE_BLUE:
-        ps["coins"] += 3
+        var gain := 3 * (2 if _is_bonus() else 1)
+        ps["coins"] += gain
         _play("coin")
-        _burst(pos, Color(0.3, 0.7, 1), 12)
+        _burst(pos, Color(0.3, 0.7, 1), 12 * (2 if _is_bonus() else 1))
     elif tile_type == TILE_RED:
         ps["coins"] = max(0, ps["coins"] - 2)
         _play("hurt")
@@ -4106,13 +4245,41 @@ func _resolve_tile() -> void:
         _burst(pos, Color(1, 0.85, 0.2), 25)
     elif tile_type == TILE_MG:
         round_minigame = true
+    elif tile_type == TILE_DUEL:
+        # v2.20 DUELLEN: slumpad motstandare, bada rullar tarning -
+        # vinnaren tar upp till 5 mynt av forloraren. Resultatet visas
+        # i HUD-raden (event_text) och rundan pausar lite langre.
+        var foe := (turn_idx + 1 + randi() % 3) % 4
+        var my_roll := randi() % 6 + 1
+        var foe_roll := randi() % 6 + 1
+        while foe_roll == my_roll:
+            foe_roll = randi() % 6 + 1
+        var winner := turn_idx if my_roll > foe_roll else foe
+        var loser := foe if winner == turn_idx else turn_idx
+        var pot: int = mini(5, int(pstate[loser]["coins"]))
+        pstate[loser]["coins"] = int(pstate[loser]["coins"]) - pot
+        pstate[winner]["coins"] = int(pstate[winner]["coins"]) + pot
+        event_text = "DUEL! %s rolls %d, %s rolls %d - %s takes %d coins!" % [
+            PLAYERS[turn_idx]["name"], my_roll, PLAYERS[foe]["name"], foe_roll, PLAYERS[winner]["name"], pot]
+        _play("win" if winner == turn_idx else "hurt")
+        shake = maxf(shake, 5.0)
+        _burst(pos, Color(1, 0.6, 0.2), 18)
+    elif tile_type == TILE_WARP:
+        # v2.20 WARPEN: teleport 5-9 rutor framat med dubbel burst.
+        var jump := 5 + randi() % 5
+        _burst(pos, Color(0.3, 0.9, 0.9), 14)
+        ps["tile"] = (int(ps["tile"]) + jump) % TILE_COUNT
+        event_text = "%s warps %d tiles ahead!" % [PLAYERS[turn_idx]["name"], jump]
+        _play("click")
+        _burst(tile_positions[int(ps["tile"])], Color(0.3, 0.9, 0.9), 14)
     # else: TILE_STAR without enough coins = no effect
 
     turn_phase = "resolving"
-    resolve_timer = 0.6
+    resolve_timer = 1.4 if event_text != "" else 0.6
     _update_hud()
 
 func _next_player() -> void:
+    event_text = ""
     turn_idx += 1
     if turn_idx >= 4:
         turn_idx = 0
@@ -4537,11 +4704,14 @@ func _end_minigame() -> void:
     var y := 110.0
     for rank in range(4):
         var pi: int = mg_rankings[rank]
-        var award: int = awards[rank]
+        var award: int = awards[rank] * (2 if _is_bonus() else 1)
         pstate[pi]["coins"] += award
         var txt := "%d. %s  +%d coins" % [rank + 1, PLAYERS[pi]["name"], award]
         _label(txt, y, 22, PLAYERS[pi]["col"])
         y += 30
+    if _is_bonus():
+        _label("BONUS ROUND - double rewards!", y + 4, 18, Color(1, 0.85, 0.2))
+        y += 26
     # Practice-lage: tillbaka till menyn, inte in i ett bradspel som inte pagar.
     if practice_mode:
         _button("Back to menu", y + 20, func(): _show_title())
@@ -4653,6 +4823,8 @@ func _make_tile_tex(ttype: int) -> ImageTexture:
         TILE_BLUE: base = Color8(58, 112, 200)
         TILE_RED: base = Color8(198, 62, 62)
         TILE_STAR: base = Color8(228, 186, 56)
+        TILE_DUEL: base = Color8(224, 122, 46)
+        TILE_WARP: base = Color8(48, 176, 170)
         _: base = Color8(152, 64, 192)
     var light := base.lightened(0.30)
     var dark := base.darkened(0.30)
@@ -4687,6 +4859,22 @@ func _make_tile_tex(ttype: int) -> ImageTexture:
             img.set_pixel(9, 5, sym)
             img.set_pixel(5, 9, sym)
             img.set_pixel(9, 9, sym)
+        TILE_DUEL:
+            # korsade svard: tva diagonaler
+            for i in range(5):
+                img.set_pixel(5 + i, 5 + i, sym)
+                img.set_pixel(9 - i, 5 + i, sym)
+        TILE_WARP:
+            # virvel: ring av pixlar + centrum
+            img.set_pixel(7, 4, sym)
+            img.set_pixel(9, 5, sym)
+            img.set_pixel(10, 7, sym)
+            img.set_pixel(9, 9, sym)
+            img.set_pixel(7, 10, sym)
+            img.set_pixel(5, 9, sym)
+            img.set_pixel(4, 7, sym)
+            img.set_pixel(5, 5, sym)
+            img.set_pixel(7, 7, sym)
         _:
             img.set_pixel(6, 6, sym)
             img.set_pixel(9, 6, sym)
