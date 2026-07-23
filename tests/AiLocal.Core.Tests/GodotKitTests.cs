@@ -288,6 +288,11 @@ public class GodotKitTests
             Assert.Contains("_ensure_tokens", script);
             Assert.Contains("_update_tokens", script);
             Assert.Contains("confetti", script);
+            // v2.17: pixelart-brickor + skarpa pixlar.
+            Assert.Contains("_make_tile_tex", script);
+            Assert.Contains("draw_texture_rect", script);
+            Assert.Contains("TEXTURE_FILTER_NEAREST", script);
+            Assert.Contains("default_texture_filter=0", File.ReadAllText(Path.Combine(root, "project.godot")));
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }

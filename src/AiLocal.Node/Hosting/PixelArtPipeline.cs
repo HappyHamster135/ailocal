@@ -40,9 +40,48 @@ public static class PixelArtPipeline
         var (cx, cy, cw, ch) = ContentBounds(work, w, h);
         var (small, sw, sh) = Downsample(work, w, h, cx, cy, cw, ch, targetSize);
         Quantize(small, paletteSize);
+        Despeckle(small, sw, sh);
         if (outline)
             AddOutline(small, sw, sh);
         return (small, sw, sh);
+    }
+
+    /// <summary>v2.17: klusterstädning - riktig pixelart har STORA samman-
+    /// hängande färgkluster, inte brus. En pixel vars 4-grannar alla har
+    /// annan färg tar vanligaste grannfärgen; en ensam ö i transparens tas
+    /// bort helt.</summary>
+    internal static void Despeckle(byte[] rgba, int w, int h)
+    {
+        var src = (byte[])rgba.Clone();
+        int Rgb(int i) => (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                var i = (y * w + x) * 4;
+                if (src[i + 3] == 0) continue;
+                var mine = Rgb(i);
+                var neighbours = new List<int>();
+                var same = false;
+                foreach (var (nx, ny) in new[] { (x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1) })
+                {
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    var ni = (ny * w + nx) * 4;
+                    if (src[ni + 3] == 0) continue;
+                    var c = Rgb(ni);
+                    neighbours.Add(c);
+                    if (c == mine) same = true;
+                }
+                if (same) continue;
+                if (neighbours.Count == 0)
+                {
+                    rgba[i + 3] = 0; // ensam ö-pixel
+                    continue;
+                }
+                var winner = neighbours.GroupBy(c => c).OrderByDescending(g => g.Count()).First().Key;
+                rgba[i] = (byte)(winner >> 16);
+                rgba[i + 1] = (byte)(winner >> 8 & 0xFF);
+                rgba[i + 2] = (byte)(winner & 0xFF);
+            }
     }
 
     /// <summary>Flood-fill från hörnen: allt som liknar hörnens färger blir

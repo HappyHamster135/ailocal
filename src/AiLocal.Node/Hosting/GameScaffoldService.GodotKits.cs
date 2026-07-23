@@ -1208,7 +1208,11 @@ func _save_best(v: int) -> void:
         // mot 4.3-kallkoden: should_import_etc2_astc -> valid=false utan text).
         // Ofarligt for desktop/webb - bara ett extra texturformat vid import.
         "[rendering]\n" +
-        "textures/vram_compression/import_etc2_astc=true\n";
+        "textures/vram_compression/import_etc2_astc=true\n" +
+        // v2.17: NEAREST som standardfilter - pixelart-sprites renderades
+        // LINJART filtrerade (suddiga gubbar vid scale 2+) i alla kit; skarpa
+        // pixlar ar sjalva stilen. Vektorritning i _draw paverkas inte.
+        "textures/canvas_textures/default_texture_filter=0\n";
 
     static string GodotKitMainScene(string rootType) =>
         "[gd_scene load_steps=2 format=3 uid=\"uid://ailocalkitmain\"]\n\n" +
@@ -1978,6 +1982,8 @@ func _ready() -> void:
 	autopilot = OS.get_environment("AILOCAL_AUTOPILOT") == "1"
 	# Spelskalet: sparade installningar (volym/mute/fullskarm) galler direkt.
 	Shell.startup()
+	# Pixelart = skarpa pixlar (nearest aven i gamla projekt utan mallraden).
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# Kameran finns BARA for screenshake (offset ror renderingen, aldrig
 	# fysiken). Fixed-top-left vid (0,0) = exakt samma vy som utan kamera.
 	cam = Camera2D.new()
@@ -3545,6 +3551,9 @@ func _ready() -> void:
     var saved := Shell.startup()
     _apply_character(int(saved.get("bb_character", 0)))
     autopilot = OS.get_environment("AILOCAL_AUTOPILOT") == "1"
+    # Pixelart = skarpa pixlar: nearest-filter pa allt ritat/alla barn
+    # (gamla projekt utan mallens default_texture_filter far det anda).
+    texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
     var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
     img.fill(Color(1, 1, 1))
     dot_tex = ImageTexture.create_from_image(img)
@@ -4444,33 +4453,62 @@ func _draw() -> void:
     elif state == "playing_minigame":
         _draw_minigame()
 
-func _draw_tile(pos: Vector2, ttype: int) -> void:
-    var col: Color
-    var label: String
+# v2.17: PIXELART-BRICKOR - rundad kvadrat med kontur, ljus topp, mork
+# botten och pixelsymbol (samma formsprak som gubbarna) i stallet for
+# nakna cirklar. Byggs EN gang per typ (ImageTexture, nearest-skalad).
+var tile_texs: Dictionary = {}
+
+func _make_tile_tex(ttype: int) -> ImageTexture:
+    var base: Color
+    match ttype:
+        TILE_BLUE: base = Color8(58, 112, 200)
+        TILE_RED: base = Color8(198, 62, 62)
+        TILE_STAR: base = Color8(228, 186, 56)
+        _: base = Color8(152, 64, 192)
+    var light := base.lightened(0.30)
+    var dark := base.darkened(0.30)
+    var outline := Color8(27, 22, 36)
+    var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+    for y in range(16):
+        for x in range(16):
+            if (x == 0 or x == 15) and (y == 0 or y == 15):
+                continue  # rundade horn
+            if x == 0 or x == 15 or y == 0 or y == 15:
+                img.set_pixel(x, y, outline)
+            elif y <= 2:
+                img.set_pixel(x, y, light)
+            elif y >= 13:
+                img.set_pixel(x, y, dark)
+            else:
+                img.set_pixel(x, y, base)
+    var sym := Color(1, 1, 1, 0.95)
     match ttype:
         TILE_BLUE:
-            col = Color(0.2, 0.4, 0.8)
-            label = "+3"
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
+                img.set_pixel(7, 5 + i, sym)
         TILE_RED:
-            col = Color(0.8, 0.2, 0.2)
-            label = "-2"
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
         TILE_STAR:
-            col = Color(0.9, 0.8, 0.2)
-            label = "*"
-        TILE_MG:
-            col = Color(0.6, 0.2, 0.8)
-            label = "MG"
-    draw_circle(pos, 16, col)
-    draw_circle(pos, 16, Color.WHITE, false, 1)
-    # Use small colored rect as label indicator (avoids draw_string complexity)
-    if label == "+3":
-        draw_rect(Rect2(pos.x - 6, pos.y - 6, 12, 12), Color(0.3, 0.7, 1, 0.8))
-    elif label == "-2":
-        draw_rect(Rect2(pos.x - 5, pos.y - 3, 10, 6), Color(1, 0.3, 0.3, 0.8))
-    elif label == "*":
-        draw_rect(Rect2(pos.x - 7, pos.y - 7, 14, 14), Color(1, 0.9, 0.2, 0.9))
-    elif label == "MG":
-        draw_rect(Rect2(pos.x - 8, pos.y - 5, 16, 10), Color(1, 0.5, 1, 0.8))
+            for i in range(5):
+                img.set_pixel(5 + i, 7, sym)
+                img.set_pixel(7, 5 + i, sym)
+            img.set_pixel(5, 5, sym)
+            img.set_pixel(9, 5, sym)
+            img.set_pixel(5, 9, sym)
+            img.set_pixel(9, 9, sym)
+        _:
+            img.set_pixel(6, 6, sym)
+            img.set_pixel(9, 6, sym)
+            img.set_pixel(6, 9, sym)
+            img.set_pixel(9, 9, sym)
+    return ImageTexture.create_from_image(img)
+
+func _draw_tile(pos: Vector2, ttype: int) -> void:
+    if not tile_texs.has(ttype):
+        tile_texs[ttype] = _make_tile_tex(ttype)
+    draw_texture_rect(tile_texs[ttype], Rect2(pos - Vector2(16, 16), Vector2(32, 32)), false)
 
 func _draw_minigame() -> void:
     if minigame_type == 0:  # Tap Race

@@ -421,6 +421,25 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > med huvud/kropp/ben på sin ruta. KVAR: samma token-lyft i 3D-partyt,
 > AI-bakgrunder via pipelinen (type 'background' + palettlås mot
 > AssetStyle), CC0-paket.
+>
+> **v2.17 RIKTIG PIXELART (ägarens referensbilder: "bara några färgade
+> rutor - mindre likt gubbarna vi har nu; ser ut som 2004-webbspel").**
+> Tre hantverkstekniker in i ritkoden: (1) PixelAnimator 2.0 - 24px-canvas,
+> RAMPER (2-3 nyanser per material: hud/tröja/byxor/hår), hår med mörk
+> kant, skor, ögon med vitor, bälte, INNERLINE-pass (solid pixel som
+> grannar transparens → mörk konturfärg = sluten silhuettlinje), benen
+> står på marken (bob flyttar bara överkroppen). (2) NEAREST-filter:
+> default_texture_filter=0 i projektmallen + texture_filter i party/
+> plattformar-_ready - sprites renderades LINJÄRT suddiga i alla kit
+> (stor del av billig-looken). (3) Board Bash: PIXELART-BRICKOR
+> (_make_tile_tex: rundad kvadrat, kontur, ljus topp/mörk botten,
+> pixelsymboler +/−/gnista/prickar) via draw_texture_rect i stället för
+> nakna cirklar. Pipelinen: despeckle-pass (kluster-städning: brusig
+> pixel tar vanligaste grannfärgen, öar rensas) + molnprompten begär
+> pixelart-STIL direkt (modellerna är bra på stilen i hög upplösning -
+> nedskalningen blir ren). Skärmdumpsverifierat med zoom: konturerad
+> gubbe med frisyr/shading vid konturerad bricka. KVAR: samma bricklyft
+> i fler kit (Glade-tiles, 3D-partyt), AI-bakgrunder via pipelinen.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

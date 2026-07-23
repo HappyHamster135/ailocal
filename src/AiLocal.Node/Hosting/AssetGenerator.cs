@@ -141,8 +141,12 @@ public sealed class AssetGenerator
         {
             // Pixelart-läget styr molnprompten mot det pipen behöver: EN
             // figur, centrerad, enfärgad bakgrund (flood-fillens förutsättning).
+            // v2.17: be molnet om PIXELART-STIL direkt - modellerna är bra på
+            // stilen i hög upplösning (platta kluster, konturer) och då blir
+            // nedskalningen ren i stället för en formlös klump.
             var cloudPrompt = pixelart
-                ? prompt + ", single subject centered, full body visible, plain solid light background, no text, no watermark"
+                ? prompt + ", 16-bit pixel art style, chunky pixels, limited color palette, dark outlines, "
+                  + "flat cel shading, single subject centered, full body visible, plain solid light background, no text, no watermark"
                 : prompt;
             var png = await _cloudImages.TryGenerateAsync(cloudPrompt, ct);
             if (png is not null)

@@ -71,6 +71,52 @@ public class PixelArtTests
     }
 
     [Fact]
+    public void Despeckle_EnsammaPixlarStadas_KlusterBehalls()
+    {
+        // 6x6: rod platta med EN gron brusig pixel i mitten + en ensam
+        // o-pixel i ett transparent horn. Bruset ska ta grannfargen,
+        // on ska forsvinna, plattan ska besta.
+        const int W = 6;
+        var rgba = new byte[W * W * 4];
+        void Set(int x, int y, byte r, byte g, byte b, byte a = 255)
+        {
+            var i = (y * W + x) * 4;
+            rgba[i] = r; rgba[i + 1] = g; rgba[i + 2] = b; rgba[i + 3] = a;
+        }
+        for (var y = 1; y < 5; y++)
+            for (var x = 1; x < 5; x++)
+                Set(x, y, 200, 40, 40);
+        Set(3, 3, 40, 200, 40);   // brus mitt i plattan
+        Set(0, 5, 40, 40, 200);   // ensam o i transparens (hornet)
+
+        PixelArtPipeline.Despeckle(rgba, W, W);
+
+        var mid = (3 * W + 3) * 4;
+        Assert.Equal(200, rgba[mid]);          // bruset tog plattans farg
+        Assert.Equal(0, rgba[(5 * W + 0) * 4 + 3]); // on rensades
+        Assert.Equal(255, rgba[(1 * W + 1) * 4 + 3]); // plattan bestar
+    }
+
+    [Fact]
+    public void PixelAnimator_V217_HarKonturOchRamper()
+    {
+        // Riktig pixelart = sluten mork kontur + ramper (2-3 nyanser per
+        // material), inte fyra platta farger (agarens "2004-webbspel"-dom).
+        var frames = PixelAnimator.Frames("hjalte");
+        var frame = frames[0];
+        var colors = new HashSet<int>();
+        var outline = false;
+        for (var i = 0; i < frame.Length; i += 4)
+        {
+            if (frame[i + 3] == 0) continue;
+            colors.Add((frame[i] << 16) | (frame[i + 1] << 8) | frame[i + 2]);
+            if (frame[i] == 27 && frame[i + 1] == 22 && frame[i + 2] == 36) outline = true;
+        }
+        Assert.True(outline, "innerline-konturen ska finnas");
+        Assert.True(colors.Count >= 9, $"ramperna ska ge minst 9 farger (fick {colors.Count})");
+    }
+
+    [Fact]
     public void SpriteAnimator_EnBild_BlirIdlePlusWalk()
     {
         var (rgba, w, h) = FakeCloudImage(64);
