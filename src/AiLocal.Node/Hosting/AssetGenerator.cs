@@ -37,6 +37,7 @@ public sealed class AssetGenerator
         ["texture"]    = "black-forest-labs/flux-schnell",
         ["sprite"]     = "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
         ["ui"]         = "black-forest-labs/flux-schnell",
+        ["background"] = "black-forest-labs/flux-schnell",
     };
 
     private static readonly Dictionary<string, string> AudioModels = new(StringComparer.OrdinalIgnoreCase)
@@ -137,22 +138,41 @@ public sealed class AssetGenerator
         // ---- Bilder: appens EGNA nycklar (OpenRouter/Gemini) först ---------
         // Riktig spelgrafik i stället för procedurell pixel-art så fort en
         // nyckel finns; varje fel faller tyst vidare till nästa nivå.
-        if (type is "image" or "texture" or "sprite" or "ui" && _cloudImages is { HasAnyKey: true })
+        if (type is "image" or "texture" or "sprite" or "ui" or "background" && _cloudImages is { HasAnyKey: true })
         {
             // Pixelart-läget styr molnprompten mot det pipen behöver: EN
             // figur, centrerad, enfärgad bakgrund (flood-fillens förutsättning).
             // v2.17: be molnet om PIXELART-STIL direkt - modellerna är bra på
             // stilen i hög upplösning (platta kluster, konturer) och då blir
             // nedskalningen ren i stället för en formlös klump.
+            // v2.25: bakgrunder får en EGEN promptriktning - hel scen utan
+            // figurer (bakgrundsvägen behåller hela bilden, ingen flood-fill).
             var cloudPrompt = pixelart
-                ? prompt + ", 16-bit pixel art style, chunky pixels, limited color palette, dark outlines, "
-                  + "flat cel shading, single subject centered, full body visible, plain solid light background, no text, no watermark"
+                ? (type == "background"
+                    ? prompt + ", 16-bit pixel art style game background, chunky pixels, limited color palette, "
+                      + "flat cel shading, layered scenery with parallax depth, wide landscape view, no characters, no text, no watermark"
+                    : prompt + ", 16-bit pixel art style, chunky pixels, limited color palette, dark outlines, "
+                      + "flat cel shading, single subject centered, full body visible, plain solid light background, no text, no watermark")
                 : prompt;
             var png = await _cloudImages.TryGenerateAsync(cloudPrompt, ct);
             if (png is not null)
             {
                 var pngPath = Path.ChangeExtension(Path.GetFullPath(outputPath), ".png");
-                if (pixelart)
+                if (pixelart && type == "background")
+                {
+                    var targetW = Math.Clamp(width ?? 240, 64, 480);
+                    var plate = PixelArtPipeline.ToPixelArtBackground(png, targetW);
+                    if (plate is not null)
+                    {
+                        await File.WriteAllBytesAsync(pngPath, plate, ct);
+                        return new AssetResult(true,
+                            $"Pixelart-BAKGRUND genererad (molnbild -> helbilds-pixelplatta, {targetW}px bred, opak). "
+                            + "Ladda fullskärm via TextureRect (STRETCH_KEEP_ASPECT_COVERED) eller Sprite2D (centered=false + skala) - NEAREST-filtret i kitet håller pixlarna skarpa.",
+                            pngPath);
+                    }
+                    _logger?.LogInformation("Bakgrunds-efterbehandlingen föll - sparar råbilden i stället");
+                }
+                else if (pixelart)
                 {
                     var target = Math.Clamp(Math.Max(width ?? 48, height ?? 0), 8, 256);
                     var processed = PixelArtPipeline.ToPixelArt(png, target);
@@ -172,6 +192,22 @@ public sealed class AssetGenerator
                     $"Bild genererad via molnmodell med appens API-nyckel ({png.Length / 1024} kB png).", pngPath);
             }
             _logger?.LogInformation("Molnbildgenerering gav inget resultat - faller vidare för '{Type}'", type);
+        }
+
+        // v2.25: bakgrund UTAN molnbild - den procedurella pixelscenen
+        // (PixelBackdrop) i stället för identicon-plattan. Pixelart-läget
+        // föredrar alltid backdropen; utan Replicate-token gäller den för
+        // alla bakgrunder (deterministisk: samma prompt = samma bild).
+        if (type == "background" && (pixelart || string.IsNullOrWhiteSpace(ResolveApiToken())))
+        {
+            var bg = PixelBackdrop.Build(prompt,
+                Math.Clamp(width ?? 240, 64, 480), Math.Clamp(height ?? 135, 36, 270));
+            var bgPath = Path.ChangeExtension(Path.GetFullPath(outputPath), ".png");
+            await File.WriteAllBytesAsync(bgPath, bg, ct);
+            return new AssetResult(true,
+                "Procedurell pixelart-bakgrund (deterministisk scen per prompt - tema väljs på nyckelord som skog/natt/rymd/öken/stad). "
+                + "Ladda fullskärm via TextureRect (STRETCH_KEEP_ASPECT_COVERED) eller Sprite2D (centered=false + skala) - NEAREST-filtret i kitet håller pixlarna skarpa.",
+                bgPath);
         }
 
         // Pixelart-sprite UTAN molnbild: den procedurella riggen (PixelAnimator)
@@ -199,7 +235,7 @@ public sealed class AssetGenerator
         // for unsupported types.
         var result = type switch
         {
-            "image" or "texture" or "sprite" or "ui"
+            "image" or "texture" or "sprite" or "ui" or "background"
                 => await GenerateImageAsync(apiKey, type, prompt, width, height, outputPath, ct),
 
             "audio" or "music" or "sfx"

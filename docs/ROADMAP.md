@@ -528,6 +528,20 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > filer --check-only rena, fönsterkörning med 4 dumpar (bräde + Falling
 > Floor med 4 pixelgubbar mid-walk, zoom bekräftar kontur+ramper).
 > KVAR: AI-bakgrunder via pipelinen, CC0-assetpaket, 2.5D-kit.
+>
+> **v2.25 AI-BAKGRUNDER VIA PIPELINEN.** Bakgrundstypen väcks till liv:
+> PixelArtPipeline.ToPixelArtBackground (helbild, opak, 24-palett, inga
+> sprite-steg), molnvägen släpper igenom 'background' med egen scen-
+> prompt (no characters, layered scenery), och NY PixelBackdrop —
+> deterministisk procedurell pixelscen per prompt (LCG, bitidentisk
+> över noder) med 10 teman på nyckelord (äng/skog/natt/rymd/öken/snö/
+> stad/solnedgång/hav/grotta): posteriserade himmelsband med dither,
+> sol/måne/planet-med-ring, moln, stjärnor, 2-3 parallaxlager (kullar/
+> granar/stalaktiter/husrader med tända fönster). Nyckellösa noder får
+> scen i stället för identicon. Buggfix under bygget: kullager under
+> horisonten lämnade alfa-hål → grundfyllnad med understa bandet.
+> Visuellt verifierat: 6 teman granskade med ögon. KVAR: CC0-asset-
+> paket, 2.5D-kit, kit-användning av bakgrunderna.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

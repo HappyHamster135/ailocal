@@ -26,6 +26,27 @@ public static class PixelArtPipeline
         return AssetGenerator.EncodePng(ow, oh, outRgba);
     }
 
+    /// <summary>v2.25: bakgrundsvagen - HELA bilden blir en opak pixelplatta.
+    /// Ingen bakgrundsborttagning, beskarning eller kontur (det ar sprite-
+    /// stegen); i stallet helbilds-downsample till target pa langsta sidan,
+    /// storre palett an sprites och forcerad opacitet. NEAREST-uppskalning
+    /// i motorn gor resten (kiten satter default_texture_filter=0).</summary>
+    public static byte[]? ToPixelArtBackground(byte[] pngBytes, int targetWidth = 240, int paletteSize = 24)
+    {
+        var decoded = DecodePng(pngBytes);
+        if (decoded is null) return null;
+        var (rgba, w, h) = decoded.Value;
+        targetWidth = Math.Clamp(targetWidth, 32, 480);
+        paletteSize = Math.Clamp(paletteSize, 4, 64);
+        var (small, sw, sh) = Downsample(rgba, w, h, 0, 0, w, h, targetWidth);
+        // Bakgrund = per definition opak: alfa-kanter fran molnbilden ska
+        // inte lamna hal i plattan.
+        for (var i = 3; i < small.Length; i += 4)
+            small[i] = 255;
+        Quantize(small, paletteSize);
+        return AssetGenerator.EncodePng(sw, sh, small);
+    }
+
     /// <summary>Kärnan på råa RGBA-buffertar (testbar). Returnerar ny buffert.</summary>
     public static (byte[] Rgba, int W, int H) Process(byte[] rgba, int w, int h,
         int targetSize = 48, int paletteSize = 16, bool transparentBackground = true, bool outline = true)

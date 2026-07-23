@@ -135,6 +135,71 @@ public class PixelArtTests
     }
 
     [Fact]
+    public void ToPixelArtBackground_V225_HelbildOpakMedPalett()
+    {
+        // Bakgrundsvagen ar sprite-vagens motsats: HELA bilden behalls,
+        // ingen transparens (hornen ar kvar), ingen kontur - bara grid+palett.
+        var (rgba, w, h) = FakeCloudImage(256);
+        var png = AssetGenerator.EncodePng(w, h, rgba);
+        var plate = PixelArtPipeline.ToPixelArtBackground(png, targetWidth: 240, paletteSize: 24);
+        Assert.NotNull(plate);
+        var decoded = PixelArtPipeline.DecodePng(plate!);
+        Assert.NotNull(decoded);
+        var (outRgba, ow, oh) = decoded!.Value;
+        Assert.True(ow is >= 230 and <= 244, $"bredden ska landa vid target ({ow})");
+        Assert.True(oh is >= 230 and <= 244, $"kvadratisk kalla ger kvadratiskt resultat ({oh})");
+        var colors = new HashSet<int>();
+        for (var i = 0; i < outRgba.Length; i += 4)
+        {
+            Assert.Equal(255, outRgba[i + 3]); // OPAK overallt - inga hal i plattan
+            colors.Add((outRgba[i] << 16) | (outRgba[i + 1] << 8) | outRgba[i + 2]);
+        }
+        Assert.True(colors.Count is >= 2 and <= 24, $"paletten ska vara begransad (fick {colors.Count})");
+    }
+
+    [Fact]
+    public void PixelBackdrop_V225_DeterministiskOchTemastyrd()
+    {
+        // Samma prompt = exakt samma bytes (LCG, inte System.Random) -
+        // bakgrunden ska vara reproducerbar pa alla noder.
+        var a = PixelBackdrop.Build("a spooky forest clearing", 240, 135);
+        var b = PixelBackdrop.Build("a spooky forest clearing", 240, 135);
+        Assert.Equal(a, b);
+
+        // Olika teman ger olika bilder.
+        var space = PixelBackdrop.Build("space nebula with planets", 240, 135);
+        Assert.NotEqual(a, space);
+
+        // Ratt dimensioner och helt opak.
+        var decoded = PixelArtPipeline.DecodePng(space);
+        Assert.NotNull(decoded);
+        Assert.Equal(240, decoded!.Value.W);
+        Assert.Equal(135, decoded.Value.H);
+        for (var i = 3; i < decoded.Value.Rgba.Length; i += 4)
+            Assert.Equal(255, decoded.Value.Rgba[i]);
+    }
+
+    [Fact]
+    public async Task GenerateAsset_PixelartBackground_UtanNycklar_GerProcedurellScen()
+    {
+        // Utan molnnycklar ska background:pixelart ge PixelBackdrop-scenen -
+        // aldrig identicon-plattan, och ingen _frames.tres (bakgrund animeras inte).
+        var dir = Directory.CreateTempSubdirectory("ailocal-bg-").FullName;
+        try
+        {
+            var gen = new AssetGenerator();
+            var result = await gen.GenerateAsync("background:pixelart", "forest at dusk",
+                null, null, Path.Combine(dir, "assets", "bg.png"), CancellationToken.None);
+            Assert.True(result.Success, result.Output);
+            Assert.True(File.Exists(Path.Combine(dir, "assets", "bg.png")));
+            Assert.False(File.Exists(Path.Combine(dir, "assets", "bg_frames.tres")));
+            Assert.Contains("bakgrund", result.Output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("TextureRect", result.Output);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
     public async Task GenerateAsset_PixelartSprite_UtanNycklar_GerAnimeradTres()
     {
         // Utan molnnycklar ska pixelart-laget ALDRIG ge en stum platta -
