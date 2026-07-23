@@ -107,6 +107,12 @@ public sealed class AssetGenerator
         type = type.Trim().ToLowerInvariant();
         outputPath = outputPath.Trim();
 
+        // v2.16: pixelart-läget (":pixelart"-suffix från verktyget) - moln-
+        // bilden efterbehandlas till ÄKTA pixelart + animerad .tres.
+        var pixelart = type.EndsWith(":pixelart", StringComparison.Ordinal);
+        if (pixelart)
+            type = type[..type.LastIndexOf(':')];
+
         // Ensure output directory exists.
         var outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrEmpty(outDir))
@@ -133,15 +139,48 @@ public sealed class AssetGenerator
         // nyckel finns; varje fel faller tyst vidare till nästa nivå.
         if (type is "image" or "texture" or "sprite" or "ui" && _cloudImages is { HasAnyKey: true })
         {
-            var png = await _cloudImages.TryGenerateAsync(prompt, ct);
+            // Pixelart-läget styr molnprompten mot det pipen behöver: EN
+            // figur, centrerad, enfärgad bakgrund (flood-fillens förutsättning).
+            var cloudPrompt = pixelart
+                ? prompt + ", single subject centered, full body visible, plain solid light background, no text, no watermark"
+                : prompt;
+            var png = await _cloudImages.TryGenerateAsync(cloudPrompt, ct);
             if (png is not null)
             {
                 var pngPath = Path.ChangeExtension(Path.GetFullPath(outputPath), ".png");
+                if (pixelart)
+                {
+                    var target = Math.Clamp(Math.Max(width ?? 48, height ?? 0), 8, 256);
+                    var processed = PixelArtPipeline.ToPixelArt(png, target);
+                    if (processed is not null)
+                    {
+                        await File.WriteAllBytesAsync(pngPath, processed, ct);
+                        var tres = type == "sprite" ? TryWriteAnimatedFrames(processed, pngPath) : null;
+                        return new AssetResult(true,
+                            $"Äkta pixelart genererad (molnbild -> transparens/grid/palett/kontur, {target}px)."
+                            + (tres is null ? "" : $" ANIMERAD: {tres} (idle+walk) - ladda i AnimatedSprite2D via load(\"res://...{tres}\")."),
+                            pngPath);
+                    }
+                    _logger?.LogInformation("Pixelart-efterbehandlingen föll - sparar råbilden i stället");
+                }
                 await File.WriteAllBytesAsync(pngPath, png, ct);
                 return new AssetResult(true,
                     $"Bild genererad via molnmodell med appens API-nyckel ({png.Length / 1024} kB png).", pngPath);
             }
             _logger?.LogInformation("Molnbildgenerering gav inget resultat - faller vidare för '{Type}'", type);
+        }
+
+        // Pixelart-sprite UTAN molnbild: den procedurella riggen (PixelAnimator)
+        // ger en riktig animerad gubbe direkt - aldrig en stum platta.
+        if (pixelart && type == "sprite")
+        {
+            var sheet = PixelAnimator.Build(prompt, Math.Clamp(width ?? 24, 12, 64));
+            var pngPath = Path.ChangeExtension(Path.GetFullPath(outputPath), ".png");
+            await File.WriteAllBytesAsync(pngPath, sheet.Png, ct);
+            var tresName = TryWriteFramesTres(sheet, pngPath);
+            return new AssetResult(true,
+                "Procedurell animerad pixelart-sprite (idle+walk)."
+                + (tresName is null ? "" : $" ANIMERAD: {tresName} - ladda i AnimatedSprite2D."), pngPath);
         }
 
         // Resolve the API key.
@@ -177,6 +216,53 @@ public sealed class AssetGenerator
             type, result?.Output ?? "unsupported type");
 
         return GenerateProcedural(type, prompt, width, height, outputPath);
+    }
+
+    /// <summary>v2.16: EN pixelart-sprite -> animerad .tres via puppet-frames
+    /// (SpriteAnimator). Returnerar .tres-filnamnet, eller null när sprite-
+    /// PNG:n inte kan dekodas eller inget godot-projekt hittas.</summary>
+    static string? TryWriteAnimatedFrames(byte[] spritePng, string spritePngPath)
+    {
+        try
+        {
+            var decoded = PixelArtPipeline.DecodePng(spritePng);
+            if (decoded is null) return null;
+            var (rgba, w, h) = decoded.Value;
+            return TryWriteFramesTres(SpriteAnimator.BuildSheet(rgba, w, h), spritePngPath);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Skriver sheet-PNG + .tres bredvid spriten. res://-vägen kräver
+    /// projektroten (project.godot letas uppåt, max 6 nivåer) - utanför ett
+    /// godot-projekt hoppas .tres:en tyst över.</summary>
+    static string? TryWriteFramesTres(AnimatedSpriteSheet sheet, string spritePngPath)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(spritePngPath))!;
+            var baseName = Path.GetFileNameWithoutExtension(spritePngPath);
+            var sheetPath = Path.Combine(dir, baseName + "_sheet.png");
+            File.WriteAllBytes(sheetPath, sheet.Png);
+
+            string? rel = null;
+            var probe = dir;
+            for (var i = 0; i < 6 && probe is not null; i++)
+            {
+                if (File.Exists(Path.Combine(probe, "project.godot")))
+                {
+                    rel = Path.GetRelativePath(probe, sheetPath).Replace('\\', '/');
+                    break;
+                }
+                probe = Path.GetDirectoryName(probe);
+            }
+            if (rel is null) return null;
+
+            var tresPath = Path.Combine(dir, baseName + "_frames.tres");
+            File.WriteAllText(tresPath, GodotSpriteFrames.Build(rel, sheet));
+            return Path.GetFileName(tresPath);
+        }
+        catch { return null; }
     }
 
     // ── Replicate: Image ────────────────────────────────────────────────────

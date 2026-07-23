@@ -3503,6 +3503,11 @@ var flash_t := 0.0
 var ai_roll_timer := 0.0
 var resolve_timer := 0.0
 var attract_t := 0.0   # auto-rull efter 8s idle - spelet demonstrerar sig sjalvt
+# v2.16 levande varld: riktiga animerade gubbar (AnimatedSprite2D fran
+# player_frames.tres, fargade per spelare) + konfettibakgrund i djuplager.
+var tokens: Array = []        # AnimatedSprite2D per spelare (tom = cirkel-fallback)
+var token_pos: Array = []     # mjuk visningsposition per spelare
+var confetti: Array = []      # {x, y, s, sp, col, layer}
 
 # --- Minigame state ---
 var mg_timer := 0.0
@@ -3543,10 +3548,68 @@ func _ready() -> void:
     var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
     img.fill(Color(1, 1, 1))
     dot_tex = ImageTexture.create_from_image(img)
+    var conf_cols := [Color(1, 0.5, 0.7, 0.5), Color(0.5, 0.8, 1, 0.5), Color(1, 0.9, 0.4, 0.5), Color(0.6, 1, 0.6, 0.5)]
+    for i in range(26):
+        confetti.append({"x": randf() * 1152.0, "y": randf() * 648.0,
+            "s": 2.0 + randf() * 4.0, "sp": 4.0 + randf() * 10.0,
+            "col": conf_cols[i % 4], "layer": 0 if i % 3 == 0 else 1})
     ui = CanvasLayer.new()
     add_child(ui)
     _setup_touch()
     _show_title()
+
+func _ensure_tokens() -> void:
+    for t in tokens:
+        if is_instance_valid(t):
+            t.queue_free()
+    tokens = []
+    token_pos = []
+    # Nullsakert fore forsta importen - da ritar cirkel-fallbacken i _draw.
+    var frames: SpriteFrames = load("res://player_frames.tres") as SpriteFrames
+    if frames == null:
+        return
+    for i in range(4):
+        var spr := AnimatedSprite2D.new()
+        spr.sprite_frames = frames
+        # lerp mot vitt behaller gubbens ljus nar spelarfarger multipliceras in
+        spr.modulate = Color(PLAYERS[i]["col"]).lerp(Color.WHITE, 0.35)
+        spr.scale = Vector2(2.2, 2.2)
+        spr.play("idle")
+        add_child(spr)
+        tokens.append(spr)
+        token_pos.append(Vector2(576.0, 324.0))
+
+func _update_tokens(delta: float) -> void:
+    if tokens.is_empty():
+        return
+    var offsets := [Vector2(-12, -14), Vector2(12, -14), Vector2(-12, 8), Vector2(12, 8)]
+    var show := state in ["playing_board", "results"] and pstate.size() >= 4
+    for i in range(4):
+        var t: AnimatedSprite2D = tokens[i]
+        if not is_instance_valid(t):
+            continue
+        t.visible = show
+        if not show:
+            continue
+        var ps := pstate[i]
+        var target := Vector2(576.0, 324.0)
+        if int(ps["tile"]) < tile_positions.size():
+            target = tile_positions[int(ps["tile"])] + offsets[i]
+        var prev: Vector2 = token_pos[i]
+        token_pos[i] = prev.lerp(target, minf(1.0, 10.0 * delta))
+        var moving := prev.distance_to(target) > 3.0
+        # hopp-bob nar den aktiva gubben flyttar; alla svavar latt over rutan
+        var bob := 0.0
+        if moving and i == turn_idx:
+            bob = absf(sin(Time.get_ticks_msec() * 0.02)) * 6.0
+        t.position = token_pos[i] + Vector2(0, -10.0 - bob)
+        if absf(target.x - prev.x) > 1.0:
+            t.flip_h = target.x < prev.x
+        var want_walk := moving and i == turn_idx and turn_phase == "moving"
+        if want_walk and t.animation != "walk":
+            t.play("walk")
+        elif not want_walk and t.animation != "idle":
+            t.play("idle")
 
 func _apply_character(i: int) -> void:
     character_idx = clampi(i, 0, CHARACTERS.size() - 1)
@@ -3774,6 +3837,7 @@ func _start_game(d: int, layout: int) -> void:
     resolve_timer = 0.0
     _build_board()
     _init_players()
+    _ensure_tokens()
     _clear_ui()
     state = "playing_board"
     turn_phase = "rolling"
@@ -3904,6 +3968,15 @@ func _physics_process(delta: float) -> void:
                 _show_title()
         else:
             auto_t = 0.0
+
+    # Levande varld: gubbarna foljer sina rutor, konfettin driver.
+    _update_tokens(delta)
+    for c in confetti:
+        c["y"] = float(c["y"]) + float(c["sp"]) * delta * (0.5 if c["layer"] == 0 else 1.0)
+        c["x"] = float(c["x"]) + sin(Time.get_ticks_msec() * 0.001 + float(c["y"]) * 0.01) * 0.3
+        if float(c["y"]) > 660.0:
+            c["y"] = -12.0
+            c["x"] = randf() * 1152.0
 
     if state == "playing_board":
         if turn_phase == "rolling" and PLAYERS[turn_idx]["ai"]:
@@ -4325,8 +4398,21 @@ func _show_results() -> void:
 # ---------- DRAW ----------
 
 func _draw() -> void:
-    # Background
-    draw_rect(Rect2(Vector2.ZERO, Vector2(1152, 648)), Color(0.08, 0.1, 0.18))
+    # Levande bakgrund: gradientband + konfetti i tva djuplager + vinjett -
+    # aldrig en platt yta med "bollar som bara flyter" (agarens dom v2.16).
+    var bands := 14
+    for i in range(bands):
+        var bt := float(i) / float(bands - 1)
+        draw_rect(Rect2(0, 648.0 * float(i) / float(bands), 1152, 648.0 / float(bands) + 1.0),
+            Color(0.10, 0.08, 0.20).lerp(Color(0.17, 0.11, 0.27), bt))
+    for c in confetti:
+        var cs: float = float(c["s"]) * (0.7 if c["layer"] == 0 else 1.0)
+        var cc: Color = c["col"]
+        if c["layer"] == 0:
+            cc.a = 0.22
+        draw_circle(Vector2(float(c["x"]), float(c["y"])), cs, cc)
+    draw_rect(Rect2(0, 0, 1152, 64), Color(0, 0, 0, 0.16))
+    draw_rect(Rect2(0, 584, 1152, 64), Color(0, 0, 0, 0.16))
 
     if state in ["playing_board", "results"]:
         # Draw board tiles
@@ -4338,15 +4424,18 @@ func _draw() -> void:
             var j := (i + 1) % TILE_COUNT
             if i < tile_positions.size() and j < tile_positions.size():
                 draw_line(tile_positions[i], tile_positions[j], Color(0.25, 0.25, 0.35), 2)
-        # Draw player tokens
+        # Spelartokens: riktiga AnimatedSprite2D-gubbar (_update_tokens) med
+        # cirkel-fallback fore forsta importen. Pulsringen markerar alltid
+        # den aktiva spelaren.
         var offsets := [Vector2(-10, -10), Vector2(10, -10), Vector2(-10, 10), Vector2(10, 10)]
         for i in range(4):
             var ps := pstate[i]
             if ps["tile"] < tile_positions.size():
                 var pos: Vector2 = tile_positions[ps["tile"]] + offsets[i]
-                var pn := PLAYERS[i]
-                draw_circle(pos, 8, pn["col"])
-                draw_circle(pos, 8, Color.WHITE, false, 2)
+                if tokens.is_empty():
+                    var pn := PLAYERS[i]
+                    draw_circle(pos, 8, pn["col"])
+                    draw_circle(pos, 8, Color.WHITE, false, 2)
                 # Highlight current player with pulsing ring
                 if i == turn_idx and state == "playing_board":
                     var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.005) * 0.3

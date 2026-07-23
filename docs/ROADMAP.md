@@ -401,6 +401,26 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > KVAR mot "spel folk vill spela": flera BRÄDEN med olika layout/tema i
 > partygolvet, fler minigames i golvet (3 idag - kontraktet skalar med
 > prompten), CC0-assetpaket, språkväljare.
+>
+> **v2.16 KONSTEN (ägarens riktning: "förbättra vår art - kan AI göra
+> pixelart? animerade gubbar?").** SVARET INBYGGT: bildmodeller är bra på
+> form/karaktär men kan INTE exakt pixelart (1024² RGB utan alfa, pseudo-
+> pixlar) och INTE konsekventa animationsframes - så AI:n gör designen och
+> deterministisk kod resten. (1) PixelArtPipeline: molnbild → ÄKTA pixelart
+> (flood-fill-bakgrund→alfa, bounding-box, boxfilter-downsample till exakt
+> grid, palettkvantisering N färger, 1px kontur). (2) SpriteAnimator: EN
+> stillbild → idle(2)+walk(4) via puppet-transformer (bob/squash/lutning
+> kring fot-ankare) → GodotSpriteFrames .tres. (3) generate_asset
+> style:'pixelart': moln→pipeline→sheet+_frames.tres; UTAN nycklar
+> levererar PixelAnimator-riggen animerat ändå - aldrig en stum platta;
+> verktygsbeskrivningen varnar för AI-spritesheets. (4) Board Bash:
+> riktiga AnimatedSprite2D-GUBBAR på brädet (player_frames.tres, färgade
+> per spelare, lerp-rörelse + hopp-bob + flip + walk/idle; cirkel-fallback
+> före import) och levande bakgrund (gradientband + konfetti i två
+> djuplager + vinjett). Skärmdumpsverifierat med zoom: riktig pixelgubbe
+> med huvud/kropp/ben på sin ruta. KVAR: samma token-lyft i 3D-partyt,
+> AI-bakgrunder via pipelinen (type 'background' + palettlås mot
+> AssetStyle), CC0-paket.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

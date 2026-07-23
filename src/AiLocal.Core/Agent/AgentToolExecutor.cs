@@ -273,8 +273,8 @@ public sealed class AgentToolExecutor
                 // ---- P0: Asset pipeline -----------------------------------------------
                 if (hasAssetGen)
                     tools.Add(new("generate_asset",
-                        "Generate a game/app asset using AI. Creates images (sprites, textures, backgrounds, UI), audio (sound effects, music), or 3D models. Saves directly to the project files. type: 'image'/'sprite'/'texture'/'background'/'ui'/'sfx'/'music'/'model3d'. width/height default to 512x512 for images. prompt describes what to generate. Returns the saved file path.",
-                        """{"type":"object","properties":{"type":{"type":"string","description":"Asset type: 'image', 'sprite', 'texture', 'background', 'ui', 'sfx', 'music', 'model3d'."},"prompt":{"type":"string","description":"Description of the asset to generate, e.g. 'a pixel-art hero character, 64x64'."},"width":{"type":"integer","description":"Image width (default 512)."},"height":{"type":"integer","description":"Image height (default 512)."},"output":{"type":"string","description":"Relative path for the output file (default: auto-generated name in assets/)."}},"required":["type","prompt"]}"""));
+                        "Generate a game/app asset using AI. Creates images (sprites, textures, backgrounds, UI), audio (sound effects, music), or 3D models. Saves directly to the project files. type: 'image'/'sprite'/'texture'/'background'/'ui'/'sfx'/'music'/'model3d'. IMPORTANT for game sprites: pass style:'pixelart' - the raw model output is NOT usable as a sprite (wrong size, no transparency); pixelart mode post-processes it into true pixel art (exact grid via width/height, limited palette, transparent background, outline) AND writes <name>_frames.tres with idle/walk animations ready for AnimatedSprite2D. Never ask the model for multi-frame sprite sheets - it cannot keep the character consistent; animation comes from the pipeline. Returns the saved file path.",
+                        """{"type":"object","properties":{"type":{"type":"string","description":"Asset type: 'image', 'sprite', 'texture', 'background', 'ui', 'sfx', 'music', 'model3d'."},"prompt":{"type":"string","description":"Description of the asset to generate, e.g. 'a cute round candy hero character'."},"style":{"type":"string","description":"'pixelart' = post-process into true pixel art (exact grid, palette, transparency, outline) + animated _frames.tres. Recommended for all game sprites."},"width":{"type":"integer","description":"Image width; in pixelart mode this is the TARGET sprite size in pixels (e.g. 48)."},"height":{"type":"integer","description":"Image height (default 512)."},"output":{"type":"string","description":"Relative path for the output file (default: auto-generated name in assets/)."}},"required":["type","prompt"]}"""));
 
                 // ---- P0: Visual feedback ----------------------------------------------
                 if (hasScreenshot)
@@ -1364,6 +1364,11 @@ public sealed class AgentToolExecutor
             var width = args.TryGetProperty("width", out var w) && w.ValueKind == JsonValueKind.Number ? (int?)w.GetInt32() : null;
             var height = args.TryGetProperty("height", out var h) && h.ValueKind == JsonValueKind.Number ? (int?)h.GetInt32() : null;
             var output = args.TryGetProperty("output", out var o) && o.ValueKind == JsonValueKind.String ? o.GetString()! : "";
+            // v2.16: pixelart-läget skickas som type-suffix så delegatsignaturen
+            // (Node-sidans AssetGenerator) inte behöver ändras.
+            if (args.TryGetProperty("style", out var st) && st.ValueKind == JsonValueKind.String
+                && string.Equals(st.GetString(), "pixelart", StringComparison.OrdinalIgnoreCase))
+                type += ":pixelart";
             // The tool promises "default: auto-generated name in assets/" -
             // resolve it HERE so the generated file lands inside the agent's
             // workspace (and respects sandbox confinement), not wherever this

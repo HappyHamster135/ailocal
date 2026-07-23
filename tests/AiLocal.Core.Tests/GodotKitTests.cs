@@ -283,6 +283,11 @@ public class GodotKitTests
             Assert.Contains("get_tree().quit()", script);
             // v2.13-monstret: sondens demospelare aven i partyt.
             Assert.Contains("AILOCAL_AUTOPILOT", script);
+            // v2.16: riktiga animerade gubbar + levande bakgrund.
+            Assert.Contains("player_frames.tres", script);
+            Assert.Contains("_ensure_tokens", script);
+            Assert.Contains("_update_tokens", script);
+            Assert.Contains("confetti", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }
