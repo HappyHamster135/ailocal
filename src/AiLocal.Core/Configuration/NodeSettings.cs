@@ -109,8 +109,10 @@ public sealed class WorkerProfileSettings
 
     /// <summary>Daily USD spend cap (A4). When today's accumulated task cost
     /// reaches this, the dispatcher routes new work to the local Ollama model
-    /// instead of paid providers. 0 = no cap.</summary>
-    public decimal BudgetLimitUsd { get; set; }
+    /// instead of paid providers. 0 = no cap. v2.8: default 5 USD för NYA
+    /// installationer - obegränsat som default lät en enda körning bränna
+    /// hela kreditsaldot (live). Befintliga lagrade val respekteras.</summary>
+    public decimal BudgetLimitUsd { get; set; } = 5m;
 
     /// <summary>When on, the agent gets a fetch_url tool (http/https, text
     /// extraction) so it can look things up on the internet. Independent of

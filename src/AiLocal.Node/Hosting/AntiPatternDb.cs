@@ -68,12 +68,18 @@ public static class AntiPatternDb
             0),
 
         // ──── CODE QUALITY ───────────────────────────────────────────────────
+        // v2.8: "%s" % [args] AR korrekt GDScript-formatering - det gamla
+        // monstret (%s|%d|%f rakt av) flaggade ALL riktig formatering och
+        // fick en agent att sanera bort fungerande kod ur hela kallan
+        // (live-sett: 4,3M tokens brann, spelet kraschade). Flagga bara
+        // literaler som TILLDELAS .text UTAN %-operator = det spelaren
+        // faktiskt ser ratt pa skarmen (samma logik som GdScriptLint.CheckUx).
         new("ap_format_strings",
-            "Using raw %s/%d format strings instead of f-strings or format()",
+            "Raw %s/%d placeholders assigned to .text without the % operator (player sees them literally)",
             "medium",
-            @"%s|%d|%f",
-            "Replace '%s/%d' format strings with proper string formatting: "
-            + "GDScript: use str() or format strings; C#: use $ interpolation; JS: use template literals.",
+            @"\.text\s*\+?=\s*""[^""\n]*%[sdf][^""\n]*""\s*$",
+            "Apply the format operator: node.text = \"Score: %d\" % [score] - "
+            + "template literals stored in variables and formatted later are fine.",
             0),
 
         new("ap_magic_numbers",

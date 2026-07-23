@@ -1083,6 +1083,24 @@ public static class WorkerRole
                 }
             }
 
+            // v2.8: säkerhetsnätet - varje grind-grönt läge fryses som
+            // snapshot; dör en SENARE runda (leverantörsfel, kredittak,
+            // krasch) återställs senaste godkända bygget i stället för att
+            // leverera halvopererad kod (live-sett: QuotaExhausted mitt i en
+            // textsanering => spel som kraschade förbi titelskärmen).
+            string? lastCleanSnapshotFile = null;
+            string? lastCleanRoot = null;
+            void RememberCleanState()
+            {
+                var okRoot = findings?.ProjectRoot ?? workspaceRoot;
+                var snap = ProjectSnapshots.Capture(workspaceRoot, okRoot, "grind-grön säkerhetspunkt", clean: true, findings?.Engine);
+                if (snap.Success)
+                {
+                    lastCleanRoot = okRoot;
+                    lastCleanSnapshotFile = ProjectSnapshots.List(workspaceRoot, okRoot).FirstOrDefault()?.File;
+                }
+            }
+
             const int maxFixRounds = 2;
             const int maxMilestoneRounds = 4;  // C5: längre bygge mot milstolpen medan framsteg görs
             var prevUnmet = int.MaxValue;
@@ -1293,8 +1311,14 @@ public static class WorkerRole
                     await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
                 }
                 if (findings.Clean)
+                {
                     result = result with { Success = true };
+                    RememberCleanState();
+                }
             }
+
+            if (result.Success && findings is { Clean: true } && buildIntent)
+                RememberCleanState();
 
             if (result.Success && findings is { Clean: true } && buildIntent && wantsGame
                 && await DemoCheckpointAsync(1, findings.ProjectRoot ?? workspaceRoot) is { } demoAnswers1)
@@ -1372,6 +1396,7 @@ public static class WorkerRole
                         // uppdraget som lyckat även om modellturen slog i tak
                         // (v1.95-lärdomen - kassera aldrig landat arbete).
                         result = result with { Success = true };
+                        RememberCleanState();
                         continue;
                     }
                     // Rundan försämrade bygget - återställ prototypen ärligt.
@@ -1399,6 +1424,26 @@ public static class WorkerRole
             if (result.Success && findings is { Clean: true } && buildIntent && wantsGame
                 && await DemoCheckpointAsync(2, findings.ProjectRoot ?? workspaceRoot) is { } demoAnswers2)
                 await RunFeedbackRoundAsync(demoAnswers2, 2);
+
+            // v2.8: säkerhetsnätets återställning - fanns ett grind-grönt
+            // läge men slutet är trasigt/avbrutet levereras det GODKÄNDA.
+            if (lastCleanSnapshotFile is not null && lastCleanRoot is not null
+                && (!result.Success || findings is not { Clean: true })
+                && ProjectSnapshots.Restore(workspaceRoot, lastCleanRoot, lastCleanSnapshotFile) is { Success: true })
+            {
+                await EmitStep("tool_result",
+                    "Säkerhetsnätet: en senare runda fullföljdes inte - projektet ÅTERSTÄLLT till senaste grind-gröna bygget.");
+                await EmitStep("tool_call", "kvalitetskontroll efter återställning");
+                findings = await InspectAsync();
+                await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                if (findings.Clean)
+                    result = result with
+                    {
+                        Success = true,
+                        FinalAnswer = result.FinalAnswer +
+                            "\n\nOBS: sista rundan avbröts (leverantörsfel/tak) - levererar senaste GODKÄNDA bygget, återställt från snapshot."
+                    };
+            }
 
             if (result.Success && findings is not null)
             {

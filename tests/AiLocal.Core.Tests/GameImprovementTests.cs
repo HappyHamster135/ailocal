@@ -211,12 +211,25 @@ const FINAL_LEVEL = 3
     // ═══════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void AntiPatternDb_FindsFormatStrings()
+    public void AntiPatternDb_KorrektFormateringFlaggasAldrig()
     {
-        var source = "var msg = \"Score: %d\" % score\n";
-        var findings = AntiPatternDb.Scan(source, "godot");
-        // The %d/%s pattern should be flagged
-        Assert.True(findings.Count > 0, "Expected anti-pattern findings for format strings");
+        // v2.8: "%s" % [args] AR korrekt GDScript - det gamla monstret
+        // flaggade ALL formatering och fick en agent att sanera bort
+        // fungerande kod ur hela kallan (4,3M tokens brann, spelet
+        // kraschade). Korrekt kod ska passera tyst.
+        var ok = "var msg = \"Score: %d\" % score\nhud.text = \"Round %d/%d\" % [r, t]\n";
+        Assert.DoesNotContain(AntiPatternDb.Scan(ok, "godot"),
+            f => f.Pattern.Id == "ap_format_strings");
+    }
+
+    [Fact]
+    public void AntiPatternDb_RaPlatshallareTillText_Flaggas()
+    {
+        // Literal med %d tilldelad .text UTAN %-operator = spelaren ser
+        // platshallaren ratt (skarmdumpsklassen) - DEN ska flaggas.
+        var bad = "hud.text = \"Score: %d\"\n";
+        Assert.Contains(AntiPatternDb.Scan(bad, "godot"),
+            f => f.Pattern.Id == "ap_format_strings");
     }
 
     [Fact]
