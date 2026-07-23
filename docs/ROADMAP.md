@@ -483,6 +483,18 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > BONUSRUNDA var 3:e runda (_is_bonus: HUD-tagg, blå ×2, minigame-
 > awards ×2; aldrig i practice). KVAR: 3D-partyts pixellyft, minigame-
 > intro-kort, hotseat 2-4 spelare, Options/Quit i Gläntan.
+>
+> **v2.21 INTROKORT + HOTSEAT.** (1) Introkort före varje minispel:
+> namn/regel/kontroller per mänsklig spelare + 3-2-1-nedräkning (state
+> mg_intro, tickar själv - autopilot opåverkad; _start_minigame väljer
+> typ + visar kortet, _begin_minigame kör gamla initen). (2) Hotseat:
+> Humans 1-4-knapp i setup; PLAYERS[i].ai = i >= human_count; människor
+> 2-4 heter P2-P4; per-spelare-tangenter i minispelen (MASH_KEYS Space/
+> W/U/O för Tap Race+Quick Draw; MOVE_KEYS pilar/A-D/J-L/F-H för Dodge+
+> Coin Grab; Memory delar pilarna på tur); alla AI-loopar gated på
+> PLAYERS[i].ai. Skärmdumpar: introkortet med nedräkning + Humans-
+> knappen. KVAR: 3D-partyts pixellyft, Options/Quit i Gläntan,
+> stil-förhandsbilder av riktiga kit-skärmdumpar.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

@@ -310,6 +310,12 @@ public class GodotKitTests
             Assert.Contains("TILE_WARP", script);
             Assert.Contains("_is_bonus", script);
             Assert.Contains("BONUS x2", script);
+            // v2.21: introkort + hotseat 1-4 manniskor.
+            Assert.Contains("mg_intro", script);
+            Assert.Contains("_begin_minigame", script);
+            Assert.Contains("human_count", script);
+            Assert.Contains("MASH_KEYS", script);
+            Assert.Contains("MOVE_KEYS", script);
             AssertKitComplete(root);
         }
         finally { Cleanup(root); }

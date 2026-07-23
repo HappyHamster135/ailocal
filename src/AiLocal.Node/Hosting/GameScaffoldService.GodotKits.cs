@@ -3522,9 +3522,10 @@ func close_overlay() -> void:
             "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
             "Komplett spelbart party-bradspel i Mario Party-klassen: bradlage med\n" +
             "tarning, turer, 4 spelare (1 mansklig + 3 AI), 24 rutor med olika\n" +
-            "effekter (mynt, stjarnor, minispel), 5 minispelstyper (Tap Race,\n" +
-            "Dodge, Memory, Coin Grab, Quick Draw), 3 bradlayouter med egna\n" +
-            "teman (Ring / Serpentine / Spiral), 6 rundor,\n" +
+            "effekter (mynt, stjarnor, minispel, dueller, warpar), 5 minispels-\n" +
+            "typer med introkort (Tap Race, Dodge, Memory, Coin Grab, Quick\n" +
+            "Draw), 3 bradlayouter med egna teman (Ring / Serpentine / Spiral),\n" +
+            "HOTSEAT for 1-4 manskliga spelare, bonusrundor, 6 rundor,\n" +
             "3 svarighetsgrader, partiklar, screenshake och touchkontroller.\n" +
             "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
             "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
@@ -3597,6 +3598,13 @@ const CHARACTERS := [
 var character_idx := 0
 var practice_mode := false   # minigame startat fran menyn - resultat gar till titeln
 var practice_pick := -1      # tvingat minigameval fran menyn (-1 = slumpa)
+# v2.21 HOTSEAT: 1-4 manskliga spelare vid samma tangentbord. Bradet ar
+# turbaserat (samma Space for alla); minispelen har egna tangenter per
+# spelare (visas pa introkortet).
+var human_count := 1
+const MASH_KEYS := [KEY_SPACE, KEY_W, KEY_U, KEY_O]          # mash/reaktion per spelare
+const MOVE_KEYS := [[KEY_LEFT, KEY_RIGHT], [KEY_A, KEY_D], [KEY_J, KEY_L], [KEY_F, KEY_H]]
+var mg_intro_t := 0.0        # v2.21: introkortets nedrakning fore varje minispel
 # Autopilot (AILOCAL_AUTOPILOT=1): kvalitetsgrindens demospelare - startar
 # fran titeln och haller partyt rullande. Vanliga spelare markar ingenting.
 var autopilot := false
@@ -3921,15 +3929,19 @@ func _show_setup() -> void:
     _clear_ui()
     _label("GAME SETUP", 70, 52, Color(1, 0.75, 0.2))
     _label("First to the most stars after %d rounds wins. Space/Enter rolls the dice." % ROUNDS, 150, 18)
-    _label("Pick a board - each has its own theme:", 205, 18)
-    _button("Ring (night sky)", 232, func(): board_layout = BOARD_RING; _play("click"))
-    _button("Serpentine (deep sea)", 290, func(): board_layout = BOARD_SERPENTINE; _play("click"))
-    _button("Spiral (candy dusk)", 348, func(): board_layout = BOARD_SPIRAL; _play("click"))
+    _label("Board and players:", 200, 18)
+    _button("Ring (night sky)", 224, func(): board_layout = BOARD_RING; _play("click"))
+    _button("Serpentine (deep sea)", 278, func(): board_layout = BOARD_SERPENTINE; _play("click"))
+    _button("Spiral (candy dusk)", 332, func(): board_layout = BOARD_SPIRAL; _play("click"))
+    _button("Humans: %d (press to change)" % human_count, 386, func():
+        human_count = human_count % 4 + 1
+        _play("click")
+        _show_setup())
     var diffs := ["Start: Easy", "Start: Normal", "Start: Hard"]
     for i in range(3):
         var d := i
-        _button(diffs[i], 424 + i * 56, func(): _start_game(d, board_layout))
-    _button("Back", 594, func(): _show_title())
+        _button(diffs[i], 448 + i * 52, func(): _start_game(d, board_layout))
+    _button("Back", 600, func(): _show_title())
     # Fokus pa START (Easy) - Enter startar direkt; bradval nas med pil-upp.
     for c in ui.get_children():
         if c is Button and c.text == "Start: Easy":
@@ -3998,6 +4010,11 @@ func _start_game(d: int, layout: int) -> void:
         _:
             board_bg_top = Color(0.10, 0.08, 0.20)
             board_bg_bottom = Color(0.17, 0.11, 0.27)
+    # v2.21 hotseat: spelare 0..human_count-1 ar manniskor; ovriga botar.
+    for i in range(4):
+        PLAYERS[i]["ai"] = i >= human_count
+        if i > 0:
+            PLAYERS[i]["name"] = ("P%d" % (i + 1)) if i < human_count else ["Bot A", "Bot B", "Bot C"][i - 1]
     _play("click")
     round = 1
     turn_idx = 0
@@ -4170,7 +4187,16 @@ func _physics_process(delta: float) -> void:
             c["y"] = -12.0
             c["x"] = randf() * 1152.0
 
-    if state == "playing_board":
+    if state == "mg_intro":
+        # v2.21: introkortets nedrakning - tickar sjalv (autopilot/attract
+        # behover aldrig trycka nagot).
+        mg_intro_t -= delta
+        for c in ui.get_children():
+            if c is Label and c.has_meta("countdown"):
+                c.text = str(maxi(1, int(ceil(mg_intro_t))))
+        if mg_intro_t <= 0.0:
+            _begin_minigame()
+    elif state == "playing_board":
         if turn_phase == "rolling" and PLAYERS[turn_idx]["ai"]:
             ai_roll_timer -= delta
             if ai_roll_timer <= 0.0:
@@ -4298,9 +4324,10 @@ func _next_player() -> void:
 # ---------- MINIGAME DISPATCH ----------
 
 func _start_minigame() -> void:
-    state = "playing_minigame"
+    # v2.21 INTROKORTET: namn, regel och kontroller + nedrakning innan
+    # spelet startar - forsta motet med ett minispel ska vara begripligt.
+    state = "mg_intro"
     _clear_ui()
-    _label("PRACTICE!" if practice_mode else "MINIGAME!", 40, 48, Color(1, 0.85, 0.2))
 
     # Pick minigame (different from last time); practice-menyn TVINGAR valet.
     var last := minigame_type
@@ -4309,6 +4336,39 @@ func _start_minigame() -> void:
         practice_pick = -1
     else:
         minigame_type = (last + 1 + randi() % 4) % 5  # guaranteed different
+
+    _label("PRACTICE!" if practice_mode else "MINIGAME!", 60, 44, Color(1, 0.85, 0.2))
+    var mg_names := ["TAP RACE", "DODGE", "MEMORY", "COIN GRAB", "QUICK DRAW"]
+    var mg_rules := [
+        "Mash your button to fill the bar first! 15 seconds.",
+        "Avoid the falling blocks - last one standing wins!",
+        "Watch the arrow sequence, then repeat it. Longest run wins!",
+        "Catch the falling coins - most coins in 18 seconds wins!",
+        "Wait for GREEN, then hit your button first! Too early = locked out. 3 rounds.",
+    ]
+    _label(mg_names[minigame_type], 130, 40)
+    _label(mg_rules[minigame_type], 190, 20)
+    var mash_names := ["Space", "W", "U", "O"]
+    var move_names := ["Arrows", "A/D", "J/L", "F/H"]
+    var ctrl := ""
+    for i in range(human_count):
+        if minigame_type == 0 or minigame_type == 4:
+            ctrl += "P%d: %s    " % [i + 1, mash_names[i]]
+        elif minigame_type == 1 or minigame_type == 3:
+            ctrl += "P%d: %s    " % [i + 1, move_names[i]]
+        else:
+            ctrl += "P%d: arrows on your turn    " % (i + 1)
+    _label(ctrl.strip_edges(), 232, 18, Color(0.6, 0.85, 1))
+    var cd := _label("3", 330, 76, Color(1, 0.85, 0.2))
+    cd.set_meta("countdown", true)
+    mg_intro_t = 3.2
+    _play("click")
+    queue_redraw()
+
+func _begin_minigame() -> void:
+    state = "playing_minigame"
+    _clear_ui()
+    _label("PRACTICE!" if practice_mode else "MINIGAME!", 40, 48, Color(1, 0.85, 0.2))
 
     mg_rankings.clear()
     mg_player_progress.clear()
@@ -4402,32 +4462,38 @@ func _qd_react(i: int) -> void:
 func _minigame_input(event: InputEvent) -> void:
     if state != "playing_minigame":
         return
-    if minigame_type == 0:  # Tap Race
-        if event.is_action_pressed("ui_accept") and mg_alive[0]:
-            mg_tap_fill[0] = minf(1.0, mg_tap_fill[0] + 0.08)
-            _play("click")
-    elif minigame_type == 2:  # Memory - human input
-        if mg_mem_input_phase and mg_alive[0] and mg_mem_player_idx == 0:
+    if minigame_type == 0:  # Tap Race - v2.21 hotseat: egen mash-tangent per spelare
+        if event is InputEventKey and event.pressed and not event.echo:
+            for i in range(human_count):
+                if mg_alive[i] and event.keycode == MASH_KEYS[i]:
+                    mg_tap_fill[i] = minf(1.0, mg_tap_fill[i] + 0.08)
+                    if i == 0:
+                        _play("click")
+    elif minigame_type == 2:  # Memory - pilarna galler den manskliga spelare vars tur det ar
+        if mg_mem_input_phase and mg_mem_player_idx < 4 \
+            and not PLAYERS[mg_mem_player_idx]["ai"] and mg_alive[mg_mem_player_idx]:
             var d := -1
             if event.is_action_pressed("ui_left"): d = 0
             elif event.is_action_pressed("ui_right"): d = 1
             elif event.is_action_pressed("ui_up"): d = 2
             elif event.is_action_pressed("ui_down"): d = 3
             if d >= 0:
-                _mem_check_input(0, d)
-    elif minigame_type == 4:  # Quick Draw - human reaction
-        if event.is_action_pressed("ui_accept"):
-            _qd_react(0)
+                _mem_check_input(mg_mem_player_idx, d)
+    elif minigame_type == 4:  # Quick Draw - v2.21 hotseat: egen tangent per spelare
+        if event is InputEventKey and event.pressed and not event.echo:
+            for i in range(human_count):
+                if event.keycode == MASH_KEYS[i]:
+                    _qd_react(i)
 
 func _minigame_process(delta: float) -> void:
     mg_timer += delta
 
     if minigame_type == 0:  # Tap Race
-        # AI fill rates (difficulty-dependent)
+        # AI fill rates (difficulty-dependent) - bara for botar (v2.21 hotseat)
         var ai_rates := [0.025, 0.038, 0.052]
         var rate: float = ai_rates[difficulty]
         for i in range(1, 4):
-            if mg_alive[i]:
+            if mg_alive[i] and PLAYERS[i]["ai"]:
                 mg_tap_fill[i] = minf(1.0, mg_tap_fill[i] + rate * delta * 60.0)
         # Check for finishers
         var all_done := true
@@ -4469,10 +4535,10 @@ func _minigame_process(delta: float) -> void:
                         _burst(Vector2(mg_dodge_player_x[i], 600), Color(1, 0.3, 0.3), 15)
         for b in to_remove:
             mg_dodge_blocks.erase(b)
-        # AI movement
+        # AI movement - bara for botar (v2.21 hotseat)
         var dodge_chance: float = [0.75, 0.55, 0.35][difficulty]
         for i in range(1, 4):
-            if not mg_alive[i]:
+            if not mg_alive[i] or not PLAYERS[i]["ai"]:
                 continue
             var danger := false
             var best_dir := 0
@@ -4484,13 +4550,15 @@ func _minigame_process(delta: float) -> void:
                 mg_dodge_player_x[i] = clamp(mg_dodge_player_x[i] + best_dir * 180 * delta, 100, 1050)
             else:
                 mg_dodge_player_x[i] = clamp(mg_dodge_player_x[i] + (randf() - 0.5) * 100 * delta, 100, 1050)
-        # Human movement
-        if mg_alive[0]:
-            if Input.is_action_pressed("ui_left"):
-                mg_dodge_player_x[0] -= 280 * delta
-            if Input.is_action_pressed("ui_right"):
-                mg_dodge_player_x[0] += 280 * delta
-            mg_dodge_player_x[0] = clamp(mg_dodge_player_x[0], 100, 1050)
+        # Human movement - v2.21 hotseat: egna tangenter per manniska
+        for i in range(human_count):
+            if not mg_alive[i]:
+                continue
+            if Input.is_physical_key_pressed(MOVE_KEYS[i][0]):
+                mg_dodge_player_x[i] -= 280 * delta
+            if Input.is_physical_key_pressed(MOVE_KEYS[i][1]):
+                mg_dodge_player_x[i] += 280 * delta
+            mg_dodge_player_x[i] = clamp(mg_dodge_player_x[i], 100, 1050)
         # End condition
         var alive_count := 0
         for i in range(4):
@@ -4513,7 +4581,7 @@ func _minigame_process(delta: float) -> void:
                     mg_mem_step = 0
                     mg_mem_flash_t = 0.0
             # AI input (only when it's their turn to respond, not during display)
-            if mg_mem_player_idx > 0 and mg_alive[mg_mem_player_idx]:
+            if mg_mem_player_idx < 4 and PLAYERS[mg_mem_player_idx]["ai"] and mg_alive[mg_mem_player_idx]:
                 mg_mem_ai_timer -= delta
                 if mg_mem_ai_timer <= 0.0:
                     mg_mem_ai_timer = 0.3 + randf() * 0.3
@@ -4566,9 +4634,11 @@ func _minigame_process(delta: float) -> void:
                     break
         for c in caught:
             mg_coin_items.erase(c)
-        # AI: jaga narmsta fallande mynt, med traffchans per svarighet.
+        # AI: jaga narmsta fallande mynt - bara botar (v2.21 hotseat).
         var chase_speed: float = [140.0, 190.0, 240.0][difficulty]
         for i in range(1, 4):
+            if not PLAYERS[i]["ai"]:
+                continue
             var best_x := -1.0
             var best_d := 99999.0
             for c in mg_coin_items:
@@ -4582,11 +4652,13 @@ func _minigame_process(delta: float) -> void:
             if best_x >= 0.0:
                 var dir := signf(best_x - mg_dodge_player_x[i])
                 mg_dodge_player_x[i] = clampf(mg_dodge_player_x[i] + dir * chase_speed * delta, 100.0, 1050.0)
-        if Input.is_action_pressed("ui_left"):
-            mg_dodge_player_x[0] -= 280 * delta
-        if Input.is_action_pressed("ui_right"):
-            mg_dodge_player_x[0] += 280 * delta
-        mg_dodge_player_x[0] = clampf(mg_dodge_player_x[0], 100.0, 1050.0)
+        # Manskliga spelare: egna tangenter (v2.21 hotseat).
+        for i in range(human_count):
+            if Input.is_physical_key_pressed(MOVE_KEYS[i][0]):
+                mg_dodge_player_x[i] -= 280 * delta
+            if Input.is_physical_key_pressed(MOVE_KEYS[i][1]):
+                mg_dodge_player_x[i] += 280 * delta
+            mg_dodge_player_x[i] = clampf(mg_dodge_player_x[i], 100.0, 1050.0)
         if mg_timer > 18.0:
             _end_minigame()
 
@@ -4599,7 +4671,7 @@ func _minigame_process(delta: float) -> void:
         elif mg_qd_phase == "go":
             mg_qd_timer += delta  # tid sedan GRONT - AI reagerar pa sina tider
             for i in range(1, 4):
-                if not mg_qd_round_done and not mg_qd_locked[i] and mg_qd_timer >= float(mg_qd_ai_react[i]):
+                if PLAYERS[i]["ai"] and not mg_qd_round_done and not mg_qd_locked[i] and mg_qd_timer >= float(mg_qd_ai_react[i]):
                     _qd_react(i)
             # Ingen kvar som kan reagera (alla for tidiga) => ny runda.
             var anyone := false
