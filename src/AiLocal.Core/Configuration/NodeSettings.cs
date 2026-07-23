@@ -87,6 +87,13 @@ public sealed class WorkerProfileSettings
     /// produktmål ÄR iterationen, men varje runda kostar tokens.</summary>
     public int PolishRounds { get; set; } = 1;
 
+    /// <summary>v2.5: demorundor - när prototypen är SPELBAR visas den som
+    /// live-vy i studiofliken (webbexport → iframe) med riktade frågor;
+    /// svaren blir en byggrunda med högsta prioritet. Runda 1 efter grind-
+    /// grön prototyp, runda 2 efter utvecklingsrundorna = sista ändrings-
+    /// punkten. Bara lokala körningar pausar; 10 min auto-fortsätt.</summary>
+    public bool DemoCheckpoints { get; set; } = true;
+
     /// <summary>When on, each agent assignment the Host dispatches runs in its
     /// own git worktree+branch (forked from the workspace's current branch), so
     /// multiple "employees" working the same repo never overwrite each other.

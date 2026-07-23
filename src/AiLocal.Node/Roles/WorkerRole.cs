@@ -1186,6 +1186,98 @@ public static class WorkerRole
                 }
             }
 
+            // ---- v2.5: demorundor - spelbar demo + ägarens svar in i bygget --
+            // Ägarens arbetsflöde: när prototypen är SPELBAR visas den som
+            // live-vy i studiofliken (webbexport -> iframe; inget mappletande)
+            // med 2-3 riktade frågor. Svaren blir en byggrunda med HÖGSTA
+            // prioritet. Runda 1 = riktningskoll efter grind-grön prototyp;
+            // runda 2 efter utvecklingsrundorna = SISTA ändringspunkten.
+            // Klusterkörningar pausar aldrig; timeout 10 min auto-fortsätter.
+            async Task<string?> DemoCheckpointAsync(int stage, string demoRoot)
+            {
+                if (!includePreview || !settings.Worker.DemoCheckpoints) return null;
+                var demoEngine = GameBuilder.DetectEngine(demoRoot);
+                string? demoPreview = null;
+                if (demoEngine == "godot" && ToolLocator.Find("godot") is not null)
+                {
+                    await EmitStep("tool_call", $"webbexport för demorunda {stage} (live-vyn i studiofliken)");
+                    var web = await gameBuilder.BuildWebAsync(demoRoot, runCmd, ct);
+                    await EmitStep(web.Success ? "tool_result" : "tool_error",
+                        web.Success
+                            ? "Demon är spelbar direkt i studiofliken."
+                            : "Webbexporten föll - demon visas via repris/skärmdumpar i stället. " + web.Output.Split('\n')[0]);
+                    if (web.Success && web.WebPath is { } wp && File.Exists(wp))
+                        demoPreview = "/api/preview/" + Path.GetRelativePath(workspaceRoot, wp).Replace('\\', '/');
+                }
+                else if (demoEngine == "html5" && File.Exists(Path.Combine(demoRoot, "index.html")))
+                {
+                    demoPreview = "/api/preview/" + Path.GetRelativePath(workspaceRoot, Path.Combine(demoRoot, "index.html")).Replace('\\', '/');
+                }
+                var replayFile = Path.Combine(demoRoot, "screenshots", "replay.png");
+                var demoReplay = File.Exists(replayFile)
+                    ? "/api/preview/" + Path.GetRelativePath(workspaceRoot, replayFile).Replace('\\', '/')
+                    : null;
+                string[] demoQs = stage == 1
+                    ?
+                    [
+                        "Stämmer riktningen - är det här spelet du bad om?",
+                        "Kändes svårigheten rimlig i det du hann prova?",
+                        "Vad saknas mest just nu (innehåll, känsla, tydlighet)?",
+                    ]
+                    :
+                    [
+                        "Är spelet roligt nog att visa för någon annan?",
+                        "Känns något buggigt eller ofärdigt?",
+                        "SISTA ÄNDRINGSPUNKTEN: vad ska ändras före slutleverans?",
+                    ];
+                var demoId = Guid.NewGuid().ToString("n")[..8];
+                await EmitStep("demo", JsonSerializer.Serialize(new
+                {
+                    id = demoId,
+                    stage,
+                    questions = demoQs,
+                    previewPath = demoPreview,
+                    replayPath = demoReplay,
+                    note = stage == 2
+                        ? "Sista ändringspunkten före slutleverans."
+                        : "Prototypen är spelbar - grafik/ljud/innehåll poleras EFTER din feedback."
+                }));
+                await EmitStep("thinking", $"Demorunda {stage}: väntar på dina svar i studiofliken (auto-fortsätter efter 10 min)...");
+                var (_, answers) = await MilestoneRegistry.WaitAsync(demoId, TimeSpan.FromMinutes(10), ct);
+                if (string.IsNullOrWhiteSpace(answers))
+                {
+                    await EmitStep("tool_result", $"Demorunda {stage}: inga svar - bygget fortsätter enligt studiokritiken.");
+                    return null;
+                }
+                await EmitStep("tool_result", $"Demorunda {stage} - dina svar tas in i bygget med högsta prioritet.");
+                return answers;
+            }
+
+            async Task RunFeedbackRoundAsync(string feedback, int stage)
+            {
+                result = await loop.RunAsync(
+                    $"DEMORUNDA {stage} - ÄGARENS FEEDBACK (högsta prioritet, bygg detta nu):\n{feedback}\n\n" +
+                    "Regler: bygg vidare på det som finns, riv aldrig fungerande system, spelartext på engelska, " +
+                    "inga råa formatsträngar/BBCode/datadumpar i UI. Kör verify när du är klar.",
+                    accessLevel, modelHint, onStep: emitAgentStep, ct, history: result.Messages, system: system);
+                await EmitStep("tool_call", $"kvalitetskontroll efter demorunda {stage}");
+                findings = await InspectAsync();
+                await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                if (!findings.Clean && !(maxCostUsd > 0m && spentUsd >= maxCostUsd))
+                {
+                    result = await loop.RunAsync(AssignmentQualityGate.FixPrompt(findings), accessLevel, modelHint,
+                        onStep: emitAgentStep, ct, history: result.Messages, system: system);
+                    findings = await InspectAsync();
+                    await EmitStep(findings.Clean ? "tool_result" : "tool_error", findings.Report);
+                }
+                if (findings.Clean)
+                    result = result with { Success = true };
+            }
+
+            if (result.Success && findings is { Clean: true } && buildIntent && wantsGame
+                && await DemoCheckpointAsync(1, findings.ProjectRoot ?? workspaceRoot) is { } demoAnswers1)
+                await RunFeedbackRoundAsync(demoAnswers1, 1);
+
             // ---- v2.0.0: utvecklingsrundor - prototyp -> riktigt spel --------
             // Ägarens fundamentala krav: grindens gröna leverans är PROTOTYPEN,
             // inte slutprodukten. Studion granskar sitt eget verk (kritik på
@@ -1220,7 +1312,7 @@ public static class WorkerRole
                     // mittspelsdumpar går genom visionsmodellen (art director-
                     // pass) så "ser tomt/oproffsigt ut" upptäcks ur riktiga
                     // pixlar, inte gissas ur koden.
-                    var polishShots = new[] { "playtest-title.png", "playtest.png" }
+                    var polishShots = new[] { "playtest-title.png", "playtest.png", "playtest-late.png" }
                         .Select(n => Path.Combine(polishRoot, "screenshots", n))
                         .Where(File.Exists).ToList();
                     var improvements = await PolishPass.CritiqueAsync(
@@ -1280,6 +1372,11 @@ public static class WorkerRole
                     break;
                 }
             }
+
+            // ---- v2.5: demorunda 2 - SISTA ändringspunkten före leverans ----
+            if (result.Success && findings is { Clean: true } && buildIntent && wantsGame
+                && await DemoCheckpointAsync(2, findings.ProjectRoot ?? workspaceRoot) is { } demoAnswers2)
+                await RunFeedbackRoundAsync(demoAnswers2, 2);
 
             if (result.Success && findings is not null)
             {

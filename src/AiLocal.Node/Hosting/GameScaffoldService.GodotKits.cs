@@ -3937,6 +3937,473 @@ func _draw_minigame() -> void:
 
 """;
 
+    /// <summary>v2.5: Strike Arena - FPS-golvet (first person, 3D). Utan det
+    /// foll fps-prompts till top-down-2D eller samlarspelet. Musfangst +
+    /// piltangent-titt (sonden kan spela), matematisk siktkontroll (ingen
+    /// fysik-raycast = deterministiskt), vagor, ammo, HP, 3D-juice.</summary>
+    internal static string[] ScaffoldGodotFps(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Strike Arena"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Node3D"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotFpsMain);
+        files.Add("Main.gd");
+        foreach (var (name, category, seed) in new[]
+        {
+            ("click.wav", "shoot", 7), ("coin.wav", "powerup", 7),
+            ("hurt.wav", "hurt", 7), ("win.wav", "win", 7),
+        })
+        {
+            Write(root, name, SfxrGenerator.Render(category, seed));
+            files.Add(name);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotFpsDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Strike Arena - First person shooter (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar FPS-grund: first person-kamera med musfangst OCH\n" +
+            "piltangent-titt, vagbaserade fiender som jagar, matematisk sikt-\n" +
+            "kontroll (ingen fysik-raycast), ammo/HP-pickups, 5 vagor, tre\n" +
+            "svarigheter, highscore, paus (slapper musen), 3D-partiklar, musik.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "Styrning: WASD ror, mus ELLER piltangenter tittar, vansterklick/\n" +
+            "Space skjuter, Esc pausar. All grafik ar kodbyggda meshar - byt\n" +
+            "tema via material/farger i _build_world och fiendernas varden.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotFpsDesignDoc(string prompt) =>
+        "# First person shooter (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nEn arena-FPS: overlev 5 vagor av jagande fiender fran forstapersons-\nperspektiv. Sikta, skjut, plocka ammo och HP, overlev.\n\n" +
+        "## Mekanik\n- **Kamera:** first person (musfangst) + piltangent-titt som fallback\n" +
+        "- **Skott:** matematisk siktkontroll (vinkel + rackvidd mot fiender) - ingen fysik-raycast, deterministiskt och robust\n" +
+        "- **Fiender:** kapslar som jagar spelaren; 2 traffar; kontakt kostar HP (i-frames)\n" +
+        "- **Vagor:** 5 st med fler/snabbare fiender; ammo- och HP-pickups spawnar mellan vagor\n" +
+        "- **Svarighetsgrader:** Easy/Normal/Hard paverkar HP, ammo och fiendefart\n" +
+        "- **Vinst:** klara vag 5; **Forlust:** 0 HP. Poang + highscore (user://)\n\n" +
+        "## Produktion\n- Titel med instruktioner (fokus pa Easy - Enter startar), paus slapper musen, game over/vinst med omstart\n" +
+        "- Juice: skottrekyl pa kameran, mynningsblixt (HUD-flash), traffpartiklar i 3D, skarmskak vid skada\n" +
+        "- Ljud: skott/traff/pickup/seger + actionmusik (loopad)\n- Crosshair och HUD i CanvasLayer\n\n" +
+        "## Extension (tema-exempel)\n- Fler vapentyper (spridning/automatisk), granater, boss pa vag 5,\n  korridorbana i stallet for arena, huvudskott-bonus, vapenupplasningar\n";
+
+    // ---- Main.gd: Strike Arena (FPS) ---------------------------------------
+    const string GodotFpsMain = """
+extends Node3D
+# Strike Arena - first person arena shooter. BYT TEMA: farger/material i
+# _build_world, fiendernas varden i WAVES-logiken. Spelartext pa ENGELSKA.
+
+const SAVE_PATH := "user://strikearena_best.txt"
+const FINAL_WAVE := 5
+const ARENA_R := 17.0
+
+var state := "title" # title | playing | paused | over
+var difficulty := 1
+var hp := 100
+var ammo := 24
+var score := 0
+var wave := 0
+var best := 0
+var invuln := 0.0
+var recoil := 0.0
+var flash := 0.0
+var yaw := 0.0
+var pitch := 0.0
+
+var player: Node3D
+var cam: Camera3D
+var enemies: Array = []   # {node, hp, speed}
+var pickups: Array = []   # {node, kind}
+var ui: CanvasLayer
+var hud: Label
+var crosshair: Label
+var flash_rect: ColorRect
+var focus_pending := true
+var snd := {}
+
+func _ready() -> void:
+    randomize()
+    for key in ["click", "coin", "hurt", "win"]:
+        var s = load("res://%s.wav" % key)
+        if s:
+            var p := AudioStreamPlayer.new()
+            p.stream = s
+            add_child(p)
+            snd[key] = p
+    # Bakgrundsmusik (v2.4): loopbar chiptune, lag volym under effekterna.
+    var music = load("res://music.wav")
+    if music:
+        var mp := AudioStreamPlayer.new()
+        mp.stream = music
+        mp.volume_db = -14.0
+        mp.finished.connect(mp.play)
+        add_child(mp)
+        mp.play()
+    best = _load_best()
+    _build_world()
+    ui = CanvasLayer.new()
+    add_child(ui)
+    hud = Label.new()
+    hud.position = Vector2(16, 10)
+    hud.add_theme_font_size_override("font_size", 18)
+    ui.add_child(hud)
+    crosshair = Label.new()
+    crosshair.text = "+"
+    crosshair.add_theme_font_size_override("font_size", 26)
+    crosshair.position = Vector2(566, 306)
+    ui.add_child(crosshair)
+    flash_rect = ColorRect.new()
+    flash_rect.color = Color(1, 0.9, 0.5, 0.0)
+    flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+    flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    ui.add_child(flash_rect)
+    _show_title()
+
+func play_sound(key: String) -> void:
+    if snd.has(key):
+        snd[key].play()
+
+func _mat(c: Color) -> StandardMaterial3D:
+    var m := StandardMaterial3D.new()
+    m.albedo_color = c
+    return m
+
+func _build_world() -> void:
+    var light := DirectionalLight3D.new()
+    light.rotation_degrees = Vector3(-55, -40, 0)
+    light.light_energy = 1.1
+    add_child(light)
+    var env := WorldEnvironment.new()
+    var e := Environment.new()
+    e.background_mode = Environment.BG_COLOR
+    e.background_color = Color(0.07, 0.08, 0.12)
+    e.ambient_light_color = Color(0.5, 0.5, 0.6)
+    e.ambient_light_energy = 0.65
+    env.environment = e
+    add_child(env)
+    var ground := MeshInstance3D.new()
+    var gm := CylinderMesh.new()
+    gm.top_radius = ARENA_R + 1.0
+    gm.bottom_radius = ARENA_R + 1.0
+    gm.height = 0.6
+    ground.mesh = gm
+    ground.position = Vector3(0, -0.3, 0)
+    ground.material_override = _mat(Color(0.22, 0.22, 0.28))
+    add_child(ground)
+    # Vaggring av pelare - ger djupkansla och riktmarken nar man snurrar.
+    for i in range(14):
+        var ang := TAU * float(i) / 14.0
+        var pillar := MeshInstance3D.new()
+        var bm := BoxMesh.new()
+        bm.size = Vector3(1.4, 4.0, 1.4)
+        pillar.mesh = bm
+        pillar.position = Vector3(cos(ang) * (ARENA_R + 0.4), 2.0, sin(ang) * (ARENA_R + 0.4))
+        pillar.material_override = _mat(Color(0.32, 0.34, 0.45) if i % 2 == 0 else Color(0.26, 0.28, 0.38))
+        add_child(pillar)
+    player = Node3D.new()
+    player.position = Vector3(0, 1.6, 0)
+    add_child(player)
+    cam = Camera3D.new()
+    player.add_child(cam)
+
+func _make_enemy() -> Dictionary:
+    var node := MeshInstance3D.new()
+    var cm := CapsuleMesh.new()
+    cm.radius = 0.5
+    cm.height = 1.8
+    node.mesh = cm
+    node.material_override = _mat(Color(0.85, 0.3, 0.3))
+    var ang := randf() * TAU
+    node.position = Vector3(cos(ang) * (ARENA_R - 2.0), 1.0, sin(ang) * (ARENA_R - 2.0))
+    add_child(node)
+    return {"node": node, "hp": 2, "speed": 2.2 + wave * 0.35 + float(difficulty) * 0.4}
+
+func _spawn_pickup(kind: String) -> void:
+    var node := MeshInstance3D.new()
+    var bm := BoxMesh.new()
+    bm.size = Vector3(0.7, 0.7, 0.7)
+    node.mesh = bm
+    node.material_override = _mat(Color(0.3, 0.8, 1.0) if kind == "ammo" else Color(0.3, 0.9, 0.4))
+    node.position = Vector3(randf_range(-10.0, 10.0), 0.6, randf_range(-10.0, 10.0))
+    add_child(node)
+    pickups.append({"node": node, "kind": kind})
+
+func _burst3d(pos: Vector3, col: Color) -> void:
+    var p := CPUParticles3D.new()
+    p.position = pos
+    p.amount = 14
+    p.one_shot = true
+    p.explosiveness = 0.9
+    p.lifetime = 0.5
+    p.direction = Vector3(0, 1, 0)
+    p.spread = 85.0
+    p.initial_velocity_min = 2.5
+    p.initial_velocity_max = 6.5
+    p.gravity = Vector3(0, -12, 0)
+    p.scale_amount_min = 1.0
+    p.scale_amount_max = 2.0
+    var m := SphereMesh.new()
+    m.radius = 0.1
+    m.height = 0.2
+    var mat := StandardMaterial3D.new()
+    mat.albedo_color = col
+    m.material = mat
+    p.mesh = m
+    add_child(p)
+    p.emitting = true
+    get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+
+# ---------- ui ----------
+func _clear_overlay() -> void:
+    for c in ui.get_children():
+        if c is Control and c != hud and c != crosshair and c != flash_rect:
+            c.queue_free()
+    focus_pending = true
+
+func _label_ui(txt: String, y: float, fsize: int, col := Color.WHITE) -> Label:
+    var l := Label.new()
+    l.text = txt
+    l.add_theme_font_size_override("font_size", fsize)
+    l.add_theme_color_override("font_color", col)
+    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    l.size = Vector2(1152, fsize + 10)
+    l.position = Vector2(0, y)
+    ui.add_child(l)
+    return l
+
+func _button_ui(txt: String, y: float, cb: Callable) -> Button:
+    var b := Button.new()
+    b.text = txt
+    b.size = Vector2(320, 46)
+    b.position = Vector2(416, y)
+    b.pressed.connect(cb)
+    ui.add_child(b)
+    if focus_pending:
+        focus_pending = false
+        b.grab_focus()
+    return b
+
+# ---------- flode ----------
+func _show_title() -> void:
+    state = "title"
+    Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+    _clear_overlay()
+    hud.text = ""
+    crosshair.visible = false
+    _label_ui("STRIKE ARENA", 80, 64, Color(1, 0.5, 0.35))
+    _label_ui("First person arena shooter. Survive %d waves." % FINAL_WAVE, 170, 20)
+    _label_ui("WASD: move   Mouse or arrow keys: look   Click/Space: fire   Esc: pause", 204, 16)
+    _label_ui("Best score: %d" % best, 238, 16, Color(0.7, 0.9, 1))
+    _button_ui("Start: Easy", 300, func(): _start(0))
+    _button_ui("Start: Normal", 358, func(): _start(1))
+    _button_ui("Start: Hard", 416, func(): _start(2))
+
+func _start(diff: int) -> void:
+    difficulty = diff
+    play_sound("coin")
+    hp = [140, 100, 70][diff]
+    ammo = [36, 24, 18][diff]
+    score = 0
+    wave = 0
+    yaw = 0.0
+    pitch = 0.0
+    player.position = Vector3(0, 1.6, 0)
+    for e in enemies:
+        if is_instance_valid(e["node"]):
+            e["node"].queue_free()
+    enemies = []
+    for pk in pickups:
+        if is_instance_valid(pk["node"]):
+            pk["node"].queue_free()
+    pickups = []
+    _clear_overlay()
+    crosshair.visible = true
+    state = "playing"
+    Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+    _next_wave()
+
+func _next_wave() -> void:
+    wave += 1
+    if wave > FINAL_WAVE:
+        _finish(true)
+        return
+    for i in range(2 + wave + difficulty):
+        enemies.append(_make_enemy())
+    _spawn_pickup("ammo")
+    if wave >= 2:
+        _spawn_pickup("hp")
+
+func _finish(won: bool) -> void:
+    state = "over"
+    Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+    crosshair.visible = false
+    if won:
+        play_sound("win")
+    if score > best:
+        best = score
+        _save_best(score)
+    _clear_overlay()
+    _label_ui("YOU WIN!" if won else "GAME OVER", 180, 56, Color(0.6, 0.9, 0.4) if won else Color(1, 0.5, 0.4))
+    _label_ui("Score: %d   Best: %d" % [score, best], 260, 24)
+    _button_ui("Play again", 330, func(): _show_title())
+
+# ---------- input ----------
+func _unhandled_input(event: InputEvent) -> void:
+    if event is InputEventMouseMotion and state == "playing":
+        yaw -= event.relative.x * 0.0028
+        pitch = clampf(pitch - event.relative.y * 0.0028, -1.2, 1.2)
+    if event.is_action_pressed("ui_cancel"):
+        if state == "playing":
+            state = "paused"
+            Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+            _label_ui("PAUSED", 240, 44)
+            _label_ui("Esc: resume", 300, 18)
+        elif state == "paused":
+            state = "playing"
+            Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+            _clear_overlay()
+    if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and state == "playing":
+        _fire()
+
+func _fire() -> void:
+    if ammo <= 0:
+        play_sound("coin")
+        return
+    ammo -= 1
+    play_sound("click")
+    recoil = 0.06
+    flash = 0.15
+    var fwd := -cam.global_transform.basis.z
+    var origin := cam.global_position
+    # Matematisk siktkontroll: narmaste fiende inom siktvinkel + rackvidd.
+    var best_e := -1
+    var best_d := 999.0
+    for i in range(enemies.size()):
+        var en: Dictionary = enemies[i]
+        if not is_instance_valid(en["node"]):
+            continue
+        var to: Vector3 = en["node"].global_position + Vector3(0, 0.9, 0) - origin
+        var d := to.length()
+        if d > 40.0:
+            continue
+        var ang := fwd.angle_to(to.normalized())
+        if ang < 0.06 + 0.9 / maxf(d, 1.0) * 0.06 and d < best_d:
+            best_d = d
+            best_e = i
+    if best_e >= 0:
+        var en2: Dictionary = enemies[best_e]
+        en2["hp"] = int(en2["hp"]) - 1
+        _burst3d(en2["node"].global_position + Vector3(0, 1.0, 0), Color(1, 0.7, 0.3))
+        if int(en2["hp"]) <= 0:
+            score += 25
+            _burst3d(en2["node"].global_position, Color(0.9, 0.3, 0.3))
+            en2["node"].queue_free()
+            enemies.remove_at(best_e)
+            play_sound("coin")
+
+# ---------- loop ----------
+func _physics_process(delta: float) -> void:
+    if state != "playing":
+        return
+    recoil = move_toward(recoil, 0.0, 0.3 * delta)
+    flash = move_toward(flash, 0.0, 1.2 * delta)
+    flash_rect.color.a = flash
+    # Piltangent-titt (sondens vag in - och laptop utan mus).
+    yaw -= Input.get_axis("ui_left", "ui_right") * 1.8 * delta
+    pitch = clampf(pitch - Input.get_axis("ui_down", "ui_up") * -1.2 * delta, -1.2, 1.2)
+    player.rotation.y = yaw
+    cam.rotation.x = pitch + recoil
+    # WASD-rorelse relativt blickriktningen.
+    var mv := Vector2.ZERO
+    if Input.is_physical_key_pressed(KEY_W):
+        mv.y -= 1.0
+    if Input.is_physical_key_pressed(KEY_S):
+        mv.y += 1.0
+    if Input.is_physical_key_pressed(KEY_A):
+        mv.x -= 1.0
+    if Input.is_physical_key_pressed(KEY_D):
+        mv.x += 1.0
+    if mv.length() > 0.0:
+        mv = mv.normalized()
+        var fwd2 := Vector3(sin(yaw), 0, cos(yaw))
+        var right := Vector3(cos(yaw), 0, -sin(yaw))
+        player.position += (fwd2 * mv.y + right * mv.x) * 6.0 * delta
+        var flat := Vector2(player.position.x, player.position.z)
+        if flat.length() > ARENA_R - 1.0:
+            flat = flat.normalized() * (ARENA_R - 1.0)
+            player.position.x = flat.x
+            player.position.y = 1.6
+            player.position.z = flat.y
+    if Input.is_action_just_pressed("ui_accept"):
+        _fire()
+    if invuln > 0.0:
+        invuln -= delta
+    # Fiender jagar; kontakt kostar HP.
+    for en in enemies:
+        if not is_instance_valid(en["node"]):
+            continue
+        var node: MeshInstance3D = en["node"]
+        var to_p := player.position - node.position
+        to_p.y = 0.0
+        node.position += to_p.normalized() * float(en["speed"]) * delta
+        if invuln <= 0.0 and to_p.length() < 1.2:
+            hp -= 12
+            invuln = 0.9
+            play_sound("hurt")
+            flash = 0.25
+            flash_rect.color = Color(1, 0.2, 0.2, flash)
+            if hp <= 0:
+                _finish(false)
+                return
+    flash_rect.color = Color(1, 0.9, 0.5, flash) if invuln <= 0.0 else Color(1, 0.2, 0.2, flash)
+    # Pickups (snurrar + plockas pa avstand).
+    var kept: Array = []
+    for pk in pickups:
+        if not is_instance_valid(pk["node"]):
+            continue
+        pk["node"].rotate_y(delta * 2.5)
+        if player.position.distance_to(pk["node"].position) < 1.4:
+            if str(pk["kind"]) == "ammo":
+                ammo += 12
+            else:
+                hp = mini(hp + 25, 150)
+            score += 5
+            play_sound("coin")
+            _burst3d(pk["node"].position, Color(0.4, 0.9, 1.0))
+            pk["node"].queue_free()
+        else:
+            kept.append(pk)
+    pickups = kept
+    var alive := 0
+    for en2 in enemies:
+        if is_instance_valid(en2["node"]):
+            alive += 1
+    if alive == 0:
+        score += 50
+        _next_wave()
+    hud.text = "HP: %d   Ammo: %d   Score: %d   Wave: %d/%d" % [maxi(hp, 0), ammo, score, mini(wave, FINAL_WAVE), FINAL_WAVE]
+
+# ---------- highscore ----------
+func _load_best() -> int:
+    if not FileAccess.file_exists(SAVE_PATH):
+        return 0
+    var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    return int(f.get_as_text()) if f else 0
+
+func _save_best(v: int) -> void:
+    var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if f:
+        f.store_string(str(v))
+""";
+
     /// <summary>v2.3: Board Bash 3D - partygenrens 3D-golv och det FORSTA
     /// flerfilskittet: Main.gd (brada/flode) + tre fristaende Mg*.gd-minispel.
     /// Filkonventionen AR utbyggnadsvagen: fler minispel = fler Mg*.gd-filer

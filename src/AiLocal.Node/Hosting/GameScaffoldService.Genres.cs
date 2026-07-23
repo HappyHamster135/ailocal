@@ -60,6 +60,13 @@ public partial class GameScaffoldService
             || WordStart(p, "minigame", "minispel", "bradspel", "brädspel", "boardgame",
                 "partyspel", "sallskapsspel", "sällskapsspel", "tarning", "tärning"))
             return "party";
+        // v2.5: FPS (first person) - FORE shooter-regeln ("first person
+        // shooter" innehaller "shooter") och en egen genre eftersom formen
+        // ar 3D-inifran, inte top-down. "fps" med sifferprefix ("60 fps",
+        // "120fps") ar ett PRESTANDAKRAV, inte en genre - lookbehind.
+        if (p.Contains("first person") || p.Contains("förstaperson") || p.Contains("forstaperson")
+            || System.Text.RegularExpressions.Regex.IsMatch(p, @"(?<!\d)(?<!\d\s)\bfps\b")
+            || WordStart(p, "doom")) return "fps";
         if (WordStart(p, "minesweeper", "minröj", "minroj", "minor", "mines")) return "minesweeper";
         if (WordStart(p, "quiz", "frågesport", "fragesport", "trivia")) return "quiz";
         if (WordStart(p, "memory", "minnesspel", "kortspel", "card", "pairs")) return "memory";

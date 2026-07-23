@@ -66,7 +66,7 @@ public static class PolishPass
             var evidence = gateReport;
             if (visionReview is not null && screenshots is { Count: > 0 })
             {
-                foreach (var shot in screenshots.Take(2))
+                foreach (var shot in screenshots.Take(3))
                 {
                     try
                     {

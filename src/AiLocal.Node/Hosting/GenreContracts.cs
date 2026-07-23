@@ -155,6 +155,17 @@ public static class GenreContracts
             ? Math.Clamp(n, 1, 30) : null;
     }
 
+    /// <summary>Begärt antal kartor/banor/brädor ur prompten ("3 kartor",
+    /// "5 banor", "2 maps") - samma mätbarhetsprincip som minispelen.</summary>
+    public static int? RequestedBoards(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var m = Regex.Match(text, @"(\d{1,2})\s*(?:olika\s+)?(?:kartor|maps?|banor|br[aä]dor|boards?)",
+            RegexOptions.IgnoreCase);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n)
+            ? Math.Clamp(n, 1, 20) : null;
+    }
+
     /// <summary>Räknar FAKTISKA minispel i projektet - naiv förekomsträkning
     /// av ordet "minigame" skalar inte med antalet. Tre konventioner räknas
     /// och största vinner: distinkta minigame_type == N-grenar (enfilskit),
@@ -235,6 +246,30 @@ public static class GenreContracts
         // Should-have: report as advisory, don't count toward met/total
         foreach (var c in spec.ShouldHave)
         {
+            // v2.5: begärt kart-/banantal ur prompten gör layoutkravet
+            // MÄTBART - distinkta BOARD_*-konstanter respektive "# Board N"-
+            // rubriker räknas mot det begärda antalet (hårt krav då).
+            if (c.Id == "board_layouts" && RequestedBoards(assignment) is { } reqBoards && reqBoards > 1)
+            {
+                var layouts = new HashSet<string>();
+                foreach (Match m in Regex.Matches(sourceText, @"BOARD_([A-Z_]+)\s*:?="))
+                    layouts.Add(m.Groups[1].Value);
+                foreach (Match m in Regex.Matches(sourceText, @"#\s*Board\s+(\d+)", RegexOptions.IgnoreCase))
+                    layouts.Add("h" + m.Groups[1].Value);
+                if (layouts.Count < reqBoards)
+                {
+                    total += 1;
+                    findings.Add(
+                        $"SAKNAS ({genre}): {layouts.Count} kartor/brädlayouter implementerade av {reqBoards} begärda - " +
+                        "lägg fler (konvention: BOARD_*-konstant per layout, eller \"# Board N\"-rubrik)");
+                }
+                else
+                {
+                    total += 1;
+                    met += 1;
+                }
+                continue;
+            }
             var matches = Regex.Matches(sourceText, c.GrepPattern,
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
             if (matches.Count < c.MinCount)

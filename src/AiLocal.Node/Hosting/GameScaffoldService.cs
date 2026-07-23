@@ -155,7 +155,7 @@ public sealed partial class GameScaffoldService
             var mood = DetectGenre(prompt) switch
             {
                 "party" => "victory",
-                "racing" or "shooter" => "action",
+                "racing" or "shooter" or "fps" => "action",
                 "artillery" => "action",
                 "platformer" or "rpg" or "roguelike" => "exploration",
                 "management" or "simulator" or "idle" => "calm",
@@ -223,6 +223,10 @@ public sealed partial class GameScaffoldService
         // Normalisera en gang: inline (prompt ?? "") lamnade prompt som "kanske
         // null" for de foljande anropen (CS8604) - reassignen gor den non-null.
         prompt ??= "";
+        // v2.5: FPS ar 3D till sin natur - routas fore 3D-signalen sa bade
+        // "fps" och "3d fps" far first person-golvet (inte samlarspelet).
+        if (DetectGenre(prompt) == "fps")
+            return ScaffoldGodotFps(root, prompt);
         if (prompt.Contains("3d", StringComparison.OrdinalIgnoreCase))
         {
             // v2.3: "3d mario party" ska INTE bli samlarspelet Kuben -
@@ -1164,7 +1168,10 @@ MonoBehaviour:
         "custom_template/debug=\"\"\n" +
         "custom_template/release=\"\"\n" +
         "variant/extensions_support=false\n" +
-        "variant/thread_support=true\n" +
+        // v2.5: threads AV - traddade webbyggen kraver COOP/COEP-headers
+        // (crossOriginIsolated) och blir svartruta i en vanlig iframe.
+        // Utan trador funkar demon direkt i studioflikens live-vy.
+        "variant/thread_support=false\n" +
         "vram_texture_compression/for_desktop=true\n" +
         "vram_texture_compression/for_mobile=false\n" +
         "html/export_icon=true\n" +

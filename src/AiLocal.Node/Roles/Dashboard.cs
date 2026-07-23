@@ -1475,6 +1475,9 @@ internal static class Dashboard
         .iterate-input:focus { outline: none; border-color: var(--accent); }
         .iterate-hint { color: var(--muted); }
         .milestone-card { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--surface-soft); display: flex; flex-direction: column; gap: 6px; }
+        .demo-frame { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+        .demo-q { width: 100%; font-size: 12px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); resize: vertical; min-height: 34px; transition: border-color .15s ease; }
+        .demo-q:focus { outline: none; border-color: var(--accent); }
         .model-select { width: 100%; margin-top: 6px; font-size: 13px; padding: 6px; }
         .token-row { display: flex; gap: 8px; align-items: center; }
         .token-row input { flex: 1 1 auto; min-width: 0; }
@@ -2196,6 +2199,14 @@ internal static class Dashboard
                   <span>Utvecklingsrundor efter godkänd prototyp</span>
                   <input id="settingPolishRounds" type="number" min="0" max="3" step="1" value="1">
                 </label>
+                <label class="check-field wide">
+                  <input id="settingDemoCheckpoints" type="checkbox" checked> Demorundor: spela demon i studiofliken och svara på frågor
+                </label>
+                <span class="small" style="display:block;margin-top:-6px">
+                  När prototypen är spelbar visas den som live-vy i bygget (webbexport) med riktade frågor -
+                  dina svar blir en byggrunda med högsta prioritet. Runda 2 efter utvecklingsrundorna är
+                  sista ändringspunkten. Bara lokala körningar pausar; auto-fortsätter efter 10 min utan svar.
+                </span>
                 <span class="small" style="display:block;margin-top:-6px">
                   Grindens godkända leverans behandlas som PROTOTYP: studion kritiserar sitt eget spel
                   (större · snyggare · bättre ljud · stabilare) och bygger förbättringarna i så här många
@@ -5180,6 +5191,7 @@ internal static class Dashboard
           $('settingMilestoneApproval').checked = data.milestoneApproval ?? false;
           $('settingAutoResume').checked = data.autoResume ?? false;
           $('settingPolishRounds').value = data.polishRounds ?? 1;
+          $('settingDemoCheckpoints').checked = data.demoCheckpoints ?? true;
           $('settingAllowInternet').checked = data.allowInternet ?? false;
           $('settingUseGitIsolation').checked = data.useGitIsolation ?? false;
           $('settingAutoMergeIsolatedTasks').checked = data.autoMergeIsolatedTasks ?? false;
@@ -5515,6 +5527,7 @@ internal static class Dashboard
             milestoneApproval: $('settingMilestoneApproval').checked,
             autoResume: $('settingAutoResume').checked,
             polishRounds: Math.max(0, Math.min(3, parseInt($('settingPolishRounds').value, 10) || 0)),
+            demoCheckpoints: $('settingDemoCheckpoints').checked,
             allowInternet: $('settingAllowInternet').checked,
             useGitIsolation: $('settingUseGitIsolation').checked,
             autoMergeIsolatedTasks: $('settingAutoMergeIsolatedTasks').checked,
@@ -6158,6 +6171,23 @@ internal static class Dashboard
               </div>`
             : '';
 
+          const demo = (running && m.demo && m.demo.id)
+            ? `<div class="milestone-card">
+                <strong>Demorunda ${esc(String(m.demo.stage || 1))} - spela demon här och svara</strong>
+                <div class="msg-text small">${esc(m.demo.note || '')}</div>
+                ${m.demo.previewPath
+                  ? `<iframe class="demo-frame" src="${esc(m.demo.previewPath)}" allow="autoplay; fullscreen"></iframe>`
+                  : (m.demo.replayPath
+                    ? `<img src="${esc(m.demo.replayPath)}" alt="Speltest-repris" style="max-width:100%;border-radius:8px">`
+                    : `<div class="msg-text small">Ingen webbdemo tillgänglig - se skärmdumparna i stegflödet ovan.</div>`)}
+                ${(m.demo.questions || []).map((q, i) => `<label class="small">${esc(q)}<textarea class="demo-q" data-demo-q="${i}" data-demo-question="${esc(q)}"></textarea></label>`).join('')}
+                <div class="detail-actions">
+                  <button class="mini-btn" data-demo-send="${esc(m.demo.id)}">Skicka svar & bygg vidare</button>
+                  <button class="mini-btn" data-demo-skip="${esc(m.demo.id)}">Fortsätt utan ändringar</button>
+                </div>
+              </div>`
+            : '';
+
           return `
           <article class="message assistant assignment">
             <div class="message-meta">
@@ -6171,6 +6201,7 @@ internal static class Dashboard
             </div>
             ${stepsHtml}
             ${milestone}
+            ${demo}
             ${answer}
             ${preview}
             ${resume}
@@ -6318,7 +6349,7 @@ internal static class Dashboard
           let success = false;
           let summary = '';
 
-          const addStep = step => { stepMsg.milestone = null; stepMsg.steps.push(step); renderMessages(); };
+          const addStep = step => { stepMsg.milestone = null; stepMsg.demo = null; stepMsg.steps.push(step); renderMessages(); };
 
           try {
             const headers = { 'content-type': 'application/json' };
@@ -6365,6 +6396,11 @@ internal static class Dashboard
                   // beslutet) rensar kortet via addStep.
                   if (payload.step.Kind === 'awaiting_milestone') {
                     try { stepMsg.milestone = JSON.parse(payload.step.Detail); } catch { stepMsg.milestone = null; }
+                    renderMessages();
+                  } else if (payload.step.Kind === 'demo') {
+                    // Demorundan: spelbar live-vy + frågor i bubblan - inget
+                    // mappletande. Nästa riktiga steg rensar kortet via addStep.
+                    try { stepMsg.demo = JSON.parse(payload.step.Detail); } catch { stepMsg.demo = null; }
                     renderMessages();
                   } else {
                     addStep(payload.step);
@@ -6790,6 +6826,35 @@ internal static class Dashboard
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ id, approve: !!approve, note })
+            });
+          } catch (error) {
+            showComposerNotice(error.message, true);
+          }
+        });
+
+        // Demorundans knappar - samma endpoint som milstolpen (svaren åker i
+        // note-fältet), samma eventdelegering eftersom korten byggs om per render.
+        document.addEventListener('click', async e => {
+          const send = e.target.closest('[data-demo-send]');
+          const skip = e.target.closest('[data-demo-skip]');
+          if (!send && !skip) return;
+          const id = send ? send.dataset.demoSend : skip.dataset.demoSkip;
+          let note = '';
+          if (send) {
+            const card = send.closest('.milestone-card');
+            const parts = [];
+            card.querySelectorAll('[data-demo-q]').forEach(ta => {
+              const v = ta.value.trim();
+              if (v) parts.push(ta.dataset.demoQuestion + '\n' + v);
+            });
+            note = parts.join('\n\n');
+            if (!note) { showComposerNotice('Skriv minst ett svar - eller välj "Fortsätt utan ändringar".', true); return; }
+          }
+          try {
+            await fetchJson('/api/assignment/milestone', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id, approve: true, note })
             });
           } catch (error) {
             showComposerNotice(error.message, true);

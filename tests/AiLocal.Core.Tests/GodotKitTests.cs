@@ -276,6 +276,35 @@ public class GodotKitTests
 
 
     [Fact]
+    public void FpsIGodot_FarStrikeArenaKitet()
+    {
+        // v2.5: fps-prompts foll till top-down-2D ("first person shooter"
+        // traffade shooter-regeln) eller samlarspelet ("3d fps") - nu finns
+        // first person-golvet. "60 fps" ar ett PRESTANDAKRAV, inte en genre.
+        const string prompt = "bygg ett litet fps spel i godot";
+        Assert.Equal("fps", GameScaffoldService.DetectGenre(prompt));
+        Assert.Equal("fps", GameScaffoldService.DetectGenre("ett first person shooter i godot"));
+        Assert.Equal("fps", GameScaffoldService.DetectGenre("3d fps arena"));
+        Assert.NotEqual("fps", GameScaffoldService.DetectGenre("bygg ett plattformsspel som haller 60 fps"));
+        Assert.NotEqual("fps", GameScaffoldService.DetectGenre("racing i 120fps"));
+
+        var (root, _) = ScaffoldTo(prompt);
+        try
+        {
+            Assert.Contains("Strike Arena", File.ReadAllText(Path.Combine(root, "project.godot")));
+            var script = File.ReadAllText(Path.Combine(root, "Main.gd"));
+            Assert.Contains("Camera3D", script);
+            Assert.Contains("MOUSE_MODE_CAPTURED", script);   // first person pa riktigt
+            Assert.Contains("angle_to", script);              // matematisk siktkontroll
+            Assert.Contains("FINAL_WAVE", script);
+            Assert.Contains("CPUParticles3D", script);        // 3D-juice
+            Assert.Contains("crosshair", script);
+            AssertKitComplete(root);
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void Party3dIGodot_FarFlerfilskittet()
     {
         // v2.3: "3d mario party" ska ge party-3D-golvet (flerfilskittet),
@@ -311,6 +340,9 @@ public class GodotKitTests
         // Malprompten: "15 minigames" ska BLI kravet - och ett kit med 3
         // ska underkannas pa just den punkten tills 15 finns.
         Assert.Equal(15, GenreContracts.RequestedMinigames("En mapp 15 minigames med 3d modeller"));
+        Assert.Equal(3, GenreContracts.RequestedBoards("ett party med 3 kartor"));
+        Assert.Equal(4, GenreContracts.RequestedBoards("4 banor och annat"));
+        Assert.Null(GenreContracts.RequestedBoards("ett party utan antal"));
         Assert.Equal(5, GenreContracts.RequestedMinigames("bygg 5 minispel"));
         Assert.Null(GenreContracts.RequestedMinigames("bygg ett partyspel"));
 
@@ -358,7 +390,8 @@ public class GodotKitTests
             "bygg ett 2d plattformsspel i godot",                     // v1.85: Pixel Rush i GDScript
             "bygg ett artillerispel som shellshock live i godot",     // v1.98: Cannonade
             "bygg ett mario party liknande spel i godot med minigames", // v2.1: Board Bash (fangade 6 riktiga parse-fel forra passet)
-            "bygg ett 3d mario party spel i godot med minigames"        // v2.3: Board Bash 3D (flerfilskittet)
+            "bygg ett 3d mario party spel i godot med minigames",       // v2.3: Board Bash 3D (flerfilskittet)
+            "bygg ett litet fps spel i godot"                           // v2.5: Strike Arena (first person)
         })
         {
             var (root, _) = ScaffoldTo(prompt);

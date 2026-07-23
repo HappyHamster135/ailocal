@@ -300,6 +300,24 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > grindens sond når hela loopen (bräda -> minispel) utan att kunna
 > reglerna. KVAR: tredje sen sond-dump (mitt-i-minispel-bevis), banor/
 > kartor-antal ur prompten som mätbart krav (minigames har det redan).
+>
+> **v2.5 FPS + DEMORUNDOR + LIVE-VY (ägarens godkända fyra).** (1) STRIKE
+> ARENA (11:e kittet, genre "fps"): first person på riktigt - musfångst +
+> piltangent-titt (sonden kan spela), matematisk siktkontroll (ingen fysik-
+> raycast), jagande vågor, ammo/HP-pickups, crosshair, skadeblixt, rekyl;
+> "60 fps"/"120fps" = prestandakrav, INTE genre (lookbehind); "3d fps"
+> routas hit. Spelat + skärmdumpsverifierat. (2) DEMORUNDOR (inställning,
+> default PÅ, lokala körningar): när prototypen är grind-grön webbexporteras
+> den och visas som LIVE-VY (iframe) i byggbubblan med 2-3 riktade frågor;
+> svaren = byggrunda med HÖGSTA prioritet; runda 2 efter utvecklingsrundorna
+> = sista ändringspunkten; 10 min auto-fortsätt; återanvänder milstolps-
+> registret/-endpointen (noll ny API-yta). Web-preseten exporterar nu UTAN
+> trådar (threads kräver COOP/COEP och blir svartruta i iframe). (3) SEN
+> SOND-DUMP: playtest-late.png 6 s senare (attract-autopiloten driver spelet
+> djupare) → med i art director-kritiken (Take 3). (4) KARTOR/BANOR MÄTBART:
+> RequestedBoards ("3 kartor") → BOARD_*-konstanter/"# Board N"-rubriker
+> räknas som hårt krav. KVAR: demorundornas fulla kedja live-testad mot
+> nod (endpoint/kort är milstolpskloner, men ett skarpt bygge är beviset).
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

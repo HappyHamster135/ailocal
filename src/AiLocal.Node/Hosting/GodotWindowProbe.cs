@@ -89,6 +89,19 @@ public static class GodotWindowProbe
             SavePng(screenshotPath, after, width, height);
             var replay = await CaptureReplayAsync(hwnd, screenshotPath, ct);
 
+            // v2.5: SEN dump - spelet får leva 6 s till (attract-autopilot/AI
+            // driver det framåt) så vision/kritik får bevis DJUPARE in i
+            // spelet (mitt i minispel/våg), inte bara sekunderna efter start.
+            try
+            {
+                await Task.Delay(6000, ct);
+                var (late, lw, lh) = WindowCapturer.TryCaptureRgba(hwnd);
+                if (late is not null)
+                    SavePng(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(screenshotPath))!, "playtest-late.png"), late, lw, lh);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* sena dumpen är en bonus, aldrig ett krav */ }
+
             var inputDiff = PixelDiffRatio(idle, after);
             var responded = inputDiff > ResponseThreshold;
             return new(true, responded, false,
