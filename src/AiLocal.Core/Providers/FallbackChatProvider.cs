@@ -16,51 +16,100 @@ public sealed class FallbackChatProvider
     private readonly ProviderSettings _settings;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new();
     private readonly Action<string>? _log;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly Func<DateTimeOffset> _clock;
 
-    public FallbackChatProvider(IEnumerable<IChatProvider> providers, ProviderSettings settings, Action<string>? log = null)
+    /// <summary>v2.14: hur lång cooldown som är värd att VÄNTA UT innan kedjan
+    /// ger upp. Transient/rate-limit-cooldowns är sekunder; quota (1 h) och
+    /// auth (15 min) är längre än taket och ger ärligt fail direkt.</summary>
+    internal static readonly TimeSpan MaxWaitPerRound = TimeSpan.FromSeconds(90);
+    internal const int MaxWaitRounds = 3;
+
+    public FallbackChatProvider(IEnumerable<IChatProvider> providers, ProviderSettings settings, Action<string>? log = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null, Func<DateTimeOffset>? clock = null)
     {
         _providers = providers.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
         _settings = settings;
         _log = log;
+        _delay = delay ?? Task.Delay;
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
     public IReadOnlyList<string> ProviderNames => BuildChain(null).Select(p => p.Name).ToList();
 
     public async Task<ProviderResponse> CompleteAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var errors = new List<string>();
-
-        foreach (var provider in BuildChain(request))
+        for (var round = 0; ; round++)
         {
-            if (IsCoolingDown(provider.Name))
+            var errors = new List<string>();
+
+            foreach (var provider in BuildChain(request))
             {
-                errors.Add($"{provider.Name}: cooling down");
+                if (IsCoolingDown(provider.Name))
+                {
+                    errors.Add($"{provider.Name}: cooling down");
+                    continue;
+                }
+
+                ProviderResponse result;
+                try
+                {
+                    result = await provider.CompleteAsync(request, ct);
+                }
+                catch (Exception ex)
+                {
+                    result = ProviderResponse.Fail(ProviderOutcome.TransientError, ex.Message);
+                }
+
+                if (result.IsSuccess)
+                {
+                    _log?.Invoke($"served by {provider.Name} ({result.Response!.Model})");
+                    return result;
+                }
+
+                errors.Add($"{provider.Name}: {result.Outcome} - {result.Error}");
+                ApplyCooldown(provider, result);
+            }
+
+            var summary = "all providers failed: " + string.Join(" | ", errors);
+
+            // v2.14: VÄNTA UT korta cooldowns i stället för att fälla bygget.
+            // Live (Candy Party-teamet): transient-cooldownen är 5 s, men
+            // redo-rundorna och fixrundan dog OMEDELBART på "all providers
+            // failed: ... cooling down" - hela bygget föll för att ingen
+            // väntade fem sekunder. Långa cooldowns (quota 1 h, auth 15 min)
+            // överstiger taket och ger fortfarande ärligt fail direkt.
+            if (round < MaxWaitRounds && !ct.IsCancellationRequested && ShortestRecovery() is { } wait)
+            {
+                _log?.Invoke($"alla leverantörer i cooldown - väntar {wait.TotalSeconds:0.#}s och försöker igen ({round + 1}/{MaxWaitRounds})");
+                try { await _delay(wait, ct); }
+                catch (OperationCanceledException)
+                {
+                    _log?.Invoke(summary);
+                    return ProviderResponse.Fail(ProviderOutcome.FatalError, summary);
+                }
                 continue;
             }
 
-            ProviderResponse result;
-            try
-            {
-                result = await provider.CompleteAsync(request, ct);
-            }
-            catch (Exception ex)
-            {
-                result = ProviderResponse.Fail(ProviderOutcome.TransientError, ex.Message);
-            }
-
-            if (result.IsSuccess)
-            {
-                _log?.Invoke($"served by {provider.Name} ({result.Response!.Model})");
-                return result;
-            }
-
-            errors.Add($"{provider.Name}: {result.Outcome} - {result.Error}");
-            ApplyCooldown(provider, result);
+            _log?.Invoke(summary);
+            return ProviderResponse.Fail(ProviderOutcome.FatalError, summary);
         }
+    }
 
-        var summary = "all providers failed: " + string.Join(" | ", errors);
-        _log?.Invoke(summary);
-        return ProviderResponse.Fail(ProviderOutcome.FatalError, summary);
+    /// <summary>Kortaste återstående cooldown bland leverantörerna när den är
+    /// kort nog att vänta ut (≤ MaxWaitPerRound), med liten marginal så
+    /// cooldownen verkligen hunnit löpa ut. Null = inget värt att vänta på.</summary>
+    private TimeSpan? ShortestRecovery()
+    {
+        TimeSpan? best = null;
+        var now = _clock();
+        foreach (var kv in _cooldownUntil)
+        {
+            var remaining = kv.Value - now;
+            if (remaining <= TimeSpan.Zero || remaining > MaxWaitPerRound) continue;
+            if (best is null || remaining < best) best = remaining;
+        }
+        return best is { } b ? b + TimeSpan.FromMilliseconds(250) : null;
     }
 
     /// <summary>
@@ -74,6 +123,8 @@ public sealed class FallbackChatProvider
         ChatRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        for (var round = 0; ; round++)
+        {
         var errors = new List<string>();
 
         foreach (var provider in BuildChain(request))
@@ -133,8 +184,22 @@ public sealed class FallbackChatProvider
         }
 
         var summary = "all providers failed: " + string.Join(" | ", errors);
+
+        // v2.14: samma cooldown-väntan som CompleteAsync - säker här eftersom
+        // vägen hit bara nås när INGET innehåll emitterats ännu.
+        if (round < MaxWaitRounds && !ct.IsCancellationRequested && ShortestRecovery() is { } wait)
+        {
+            _log?.Invoke($"alla leverantörer i cooldown - väntar {wait.TotalSeconds:0.#}s och försöker igen ({round + 1}/{MaxWaitRounds})");
+            var cancelled = false;
+            try { await _delay(wait, ct); }
+            catch (OperationCanceledException) { cancelled = true; }
+            if (!cancelled) continue;
+        }
+
         _log?.Invoke(summary);
         yield return new StreamChunk(null, ProviderResponse.Fail(ProviderOutcome.FatalError, summary));
+        yield break;
+        }
     }
 
     private static async IAsyncEnumerable<StreamChunk> SafeStream(
@@ -211,7 +276,7 @@ public sealed class FallbackChatProvider
     }
 
     private bool IsCoolingDown(string name) =>
-        _cooldownUntil.TryGetValue(name, out var until) && until > DateTimeOffset.UtcNow;
+        _cooldownUntil.TryGetValue(name, out var until) && until > _clock();
 
     private void ApplyCooldown(IChatProvider provider, ProviderResponse result)
     {
@@ -229,7 +294,7 @@ public sealed class FallbackChatProvider
 
         if (cooldown > TimeSpan.Zero)
         {
-            _cooldownUntil[provider.Name] = DateTimeOffset.UtcNow + cooldown;
+            _cooldownUntil[provider.Name] = _clock() + cooldown;
             _log?.Invoke($"{provider.Name} cooling down {cooldown.TotalSeconds:0}s ({result.Outcome})");
         }
     }

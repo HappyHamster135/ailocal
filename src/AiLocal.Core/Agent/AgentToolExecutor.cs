@@ -418,7 +418,9 @@ public sealed class AgentToolExecutor
         var start = offset - 1;
         if (start >= allLines.Length)
             return new ToolResult(call.Id, call.Name, $"(file has {allLines.Length} lines; offset {offset} is past the end)");
-        var end = Math.Min(start + limit, allLines.Length);
+        // long-aritmetik: offset UTAN limit gav int-overflow (start + MaxValue
+        // -> negativt -> "Non-negative number required") - sett live 3 ggr.
+        var end = (int)Math.Min((long)start + limit, allLines.Length);
         var slice = allLines[start..end];
         var header = $"lines {start + 1}-{end} of {allLines.Length}:\n";
         return new ToolResult(call.Id, call.Name, header + Truncate(string.Join('\n', slice)));
@@ -615,17 +617,28 @@ public sealed class AgentToolExecutor
         try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline); }
         catch (ArgumentException ex) { return Error(call, $"invalid search pattern: {ex.Message}"); }
 
+        // v2.14: default = ARBETSYTAN, inte "." (processens cwd = nodens
+        // exe-katalog, inget med agentens projekt att göra - live gav glob/
+        // search utan path alltid noll träffar för Full-agenter).
         var baseDir = args.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && p.GetString() is { Length: > 0 } pp
             ? ResolveDir(pp)
-            : _level == AgentAccessLevel.Sandboxed ? _workspaceRoot : ".";
-        if (!Directory.Exists(baseDir))
-            return Error(call, $"search path not found: {baseDir}");
+            : _workspaceRoot;
+        // v2.14: path som pekar på en FIL = sök i just den filen (live: sökning
+        // i "project.godot" gav "search path not found" trots att filen fanns).
+        var explicitFile = File.Exists(baseDir);
+        IEnumerable<string> searchFiles;
+        if (explicitFile) searchFiles = [baseDir];
+        else if (Directory.Exists(baseDir)) searchFiles = EnumerateFiles(baseDir);
+        else return Error(call, $"search path not found: {baseDir}");
 
         var matches = new List<string>();
-        foreach (var file in EnumerateFiles(baseDir))
+        foreach (var file in searchFiles)
         {
             if (matches.Count >= maxMatches) break;
-            if (!IsTextFile(file)) continue;
+            // en EXPLICIT angiven fil textfiltreras aldrig (project.godot
+            // ligger utanför extensions-vitlistan men är precis vad
+            // agenter söker i).
+            if (!explicitFile && !IsTextFile(file)) continue;
             string[] lines;
             try { lines = await File.ReadAllLinesAsync(file, ct); }
             catch { continue; }
@@ -634,10 +647,9 @@ public sealed class AgentToolExecutor
                 if (matches.Count >= maxMatches) break;
                 if (regex.IsMatch(lines[i]))
                 {
-                    var rel = _level == AgentAccessLevel.Sandboxed
-                        ? Path.GetRelativePath(_workspaceRoot, file).Replace('\\', '/')
-                        : file;
-                    matches.Add($"{rel}:{i + 1}: {lines[i].Trim()}");
+                    // ToRel även för Full-agenter - absoluta vägar i utdatan
+                    // är råmaterial till leverantörsmaskningen (v1.96-regeln).
+                    matches.Add($"{ToRel(file).Replace('\\', '/')}:{i + 1}: {lines[i].Trim()}");
                 }
             }
         }
@@ -664,9 +676,10 @@ public sealed class AgentToolExecutor
         if (pattern.StartsWith("**/"))
             pattern = pattern[3..];
 
+        // v2.14: default = arbetsytan (se SearchAsync - "." var nodens cwd).
         var baseDir = args.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String && p.GetString() is { Length: > 0 } pp
             ? ResolveDir(pp)
-            : _level == AgentAccessLevel.Sandboxed ? _workspaceRoot : ".";
+            : _workspaceRoot;
         if (!Directory.Exists(baseDir))
             return Error(call, $"glob path not found: {baseDir}");
 
@@ -675,9 +688,7 @@ public sealed class AgentToolExecutor
         {
             if (GlobMatch(Path.GetRelativePath(baseDir, file).Replace('\\', '/'), pattern)
                 || GlobMatch(Path.GetFileName(file), pattern))
-                results.Add(_level == AgentAccessLevel.Sandboxed
-                    ? Path.GetRelativePath(_workspaceRoot, file).Replace('\\', '/')
-                    : file);
+                results.Add(ToRel(file).Replace('\\', '/'));
         }
         results.Sort(StringComparer.OrdinalIgnoreCase);
 
@@ -763,8 +774,11 @@ public sealed class AgentToolExecutor
                     ? _workspaceRoot : _workspaceRoot + Path.DirectorySeparatorChar;
                 if (!full.StartsWith(rootSep, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(full, _workspaceRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TranslateMainRootPath(full) is { } translated) return translated;
                     throw new UnauthorizedAccessException(
                         $"ditt teamspår arbetar ISOLERAT i worktreen '{_workspaceRoot}' - '{requestedPath}' pekar utanför den. Använd RELATIVA vägar.");
+                }
             }
             return full;
         }
@@ -774,9 +788,35 @@ public sealed class AgentToolExecutor
         return Path.GetFullPath(Path.Combine(_workspaceRoot, requestedPath));
     }
 
+    /// <summary>v2.14: ÖVERSÄTT huvudrot-vägar till spårets worktree i stället
+    /// för att neka. Live brände varje teamspår 3-6 famlande anrop på
+    /// ISOLERAT-fel (read_file "E:\proj\DESIGN.md" -> block -> nytt försök)
+    /// innan de gick över till relativa vägar. En absolut väg in i
+    /// huvudprojektet betyder alltid "min projektfil" - ge spåret den fil det
+    /// menade. Syskonworktrees (andra spårs arbete) översätts ALDRIG.</summary>
+    private string? TranslateMainRootPath(string fullPath)
+    {
+        if (ForbiddenMainRootFor(_workspaceRoot) is not { } mainRoot) return null;
+        var mainSep = mainRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(mainSep, StringComparison.OrdinalIgnoreCase)) return null;
+        var rel = fullPath[mainSep.Length..];
+        if (rel.Equals(".worktrees", StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith(".worktrees" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return null;
+        return Path.GetFullPath(Path.Combine(_workspaceRoot, rel));
+    }
+
     private async Task<ToolResult> RunCommandAsync(ToolCall call, JsonElement args, CancellationToken ct)
     {
         var command = RequireString(args, "command");
+        // v2.14: samma maskningsvakt som write/edit - live sågs ett spår
+        // "laga" [ADDRESS] direkt på disk via powershell -replace och skriva
+        // in trasiga värden i stället för de riktiga (som aldrig var skadade).
+        if (RedactionArtifactIn(command) is { } cmdMarker)
+            return Error(call,
+                $"kommandot innehåller \"{cmdMarker}\" - det är AI-leverantörens integritetsmaskning av det DU LÄST, " +
+                "inte något som finns i filerna på disk. Filerna är oskadade. Jaga inte platshållaren, och reparera " +
+                "ALDRIG filer via kommandon - använd edit_file med de riktiga strängarna.");
         var screen = _commandGuard.Screen(command);
         if (screen is not null && _commandGuard.IsBlocked(command))
             return Error(call, screen);
@@ -1228,9 +1268,15 @@ public sealed class AgentToolExecutor
                     ? _workspaceRoot : _workspaceRoot + Path.DirectorySeparatorChar;
                 if (!full.StartsWith(rootSep, StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(full, _workspaceRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    // v2.14: huvudrot-vägar översätts till worktreen (se
+                    // TranslateMainRootPath) - bara syskonworktrees och vägar
+                    // helt utanför projektet nekas nu.
+                    if (TranslateMainRootPath(full) is { } translated) return translated;
                     throw new UnauthorizedAccessException(
                         $"ditt teamspår arbetar ISOLERAT i worktreen '{_workspaceRoot}' - '{requestedPath}' pekar utanför den. " +
                         "Använd RELATIVA vägar (t.ex. \"Main.gd\"); huvudroten och andra spår får inte röras (mergen sker efteråt).");
+                }
             }
             return full;
         }

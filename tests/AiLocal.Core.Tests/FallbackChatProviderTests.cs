@@ -135,4 +135,49 @@ public class FallbackChatProviderTests
         Assert.True(result.IsSuccess);
         Assert.Equal("ollama", result.Response!.Provider);
     }
+
+    [Fact]
+    public async Task CompleteAsync_KortCooldown_VantasUtOchLyckas()
+    {
+        // v2.14: transient-cooldownen är 5 s - kedjan ska VÄNTA ut den och
+        // försöka igen i stället för att fälla bygget (live: teamets redo-
+        // rundor och fixrundan dog på "all providers failed: cooling down"
+        // sekunder från återhämtning).
+        var calls = 0;
+        var flaky = new FakeChatProvider("openrouter", false, _ =>
+            ++calls == 1
+                ? ProviderResponse.Fail(ProviderOutcome.TransientError, "parse error (transient)")
+                : ProviderResponse.Ok(new ChatResponse { Content = "ok", Model = "m", Provider = "openrouter" }));
+        var now = DateTimeOffset.UtcNow;
+        var waits = new List<TimeSpan>();
+        var fallback = new FallbackChatProvider([flaky], SettingsFor("openrouter"),
+            delay: (ts, _) => { waits.Add(ts); now += ts; return Task.CompletedTask; },
+            clock: () => now);
+
+        var result = await fallback.CompleteAsync(Request());
+
+        Assert.True(result.IsSuccess, result.Error ?? "");
+        Assert.Equal(2, calls);
+        Assert.Single(waits);
+        Assert.True(waits[0] <= TimeSpan.FromSeconds(91), $"väntan {waits[0]} översteg taket");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_LangaCooldowns_VantarInte()
+    {
+        // Quota (1 h) och auth (15 min) överstiger väntetaket - ärligt fail
+        // direkt i stället för meningslös väntan.
+        var quota = FakeChatProvider.Failing("openrouter", ProviderOutcome.QuotaExhausted);
+        var now = DateTimeOffset.UtcNow;
+        var waits = new List<TimeSpan>();
+        var fallback = new FallbackChatProvider([quota], SettingsFor("openrouter"),
+            delay: (ts, _) => { waits.Add(ts); now += ts; return Task.CompletedTask; },
+            clock: () => now);
+
+        var result = await fallback.CompleteAsync(Request());
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(waits);
+        Assert.Equal(1, quota.CallCount);
+    }
 }

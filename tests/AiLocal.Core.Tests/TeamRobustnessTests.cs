@@ -102,6 +102,57 @@ public class TeamRobustnessTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_dir, "Spar.gd")));
     }
 
+    [Fact]
+    public async Task ConfineToRoot_HuvudrotVag_OversattsTillWorktreen()
+    {
+        // v2.14: live brände varje teamspår 3-6 famlande anrop på ISOLERAT-fel
+        // innan de bytte till relativa vägar. En absolut väg in i HUVUD-
+        // PROJEKTET betyder alltid "min projektfil" - den översätts nu tyst
+        // till spårets worktree i stället för att nekas.
+        var main = Path.Combine(Path.GetTempPath(), "ailocal-v214-main-" + Guid.NewGuid().ToString("n"));
+        var worktree = Path.Combine(main, ".worktrees", "spar1");
+        Directory.CreateDirectory(worktree);
+        try
+        {
+            var executor = new AgentToolExecutor(AgentAccessLevel.Full, worktree) { ConfineToRoot = true };
+            var mainPath = Path.Combine(main, "DESIGN.md");
+            var write = await executor.ExecuteAsync(new ToolCall("1", "write_file",
+                $$"""{"path":{{System.Text.Json.JsonSerializer.Serialize(mainPath)}},"content":"# brief"}"""),
+                CancellationToken.None);
+            Assert.False(write.IsError, write.Output);
+            Assert.True(File.Exists(Path.Combine(worktree, "DESIGN.md")), "skrivningen ska landa i WORKTREEN");
+            Assert.False(File.Exists(mainPath), "huvudroten får aldrig röras");
+
+            var read = await executor.ExecuteAsync(new ToolCall("2", "read_file",
+                $$"""{"path":{{System.Text.Json.JsonSerializer.Serialize(mainPath)}}}"""),
+                CancellationToken.None);
+            Assert.False(read.IsError, read.Output);
+            Assert.Contains("# brief", read.Output);
+        }
+        finally { try { Directory.Delete(main, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task ConfineToRoot_SyskonWorktree_NekasFortfarande()
+    {
+        // Syskonworktrees är andra spårs pågående arbete - de översätts ALDRIG.
+        var main = Path.Combine(Path.GetTempPath(), "ailocal-v214-syskon-" + Guid.NewGuid().ToString("n"));
+        var worktree = Path.Combine(main, ".worktrees", "spar1");
+        var sibling = Path.Combine(main, ".worktrees", "spar2");
+        Directory.CreateDirectory(worktree);
+        Directory.CreateDirectory(sibling);
+        try
+        {
+            var executor = new AgentToolExecutor(AgentAccessLevel.Full, worktree) { ConfineToRoot = true };
+            var result = await executor.ExecuteAsync(new ToolCall("1", "write_file",
+                $$"""{"path":{{System.Text.Json.JsonSerializer.Serialize(Path.Combine(sibling, "Main.gd"))}},"content":"x"}"""),
+                CancellationToken.None);
+            Assert.True(result.IsError);
+            Assert.Contains("ISOLERAT", result.Output);
+        }
+        finally { try { Directory.Delete(main, recursive: true); } catch { } }
+    }
+
     // ---- Granskarens scope-nonsens-filter ---------------------------------
 
     [Theory]

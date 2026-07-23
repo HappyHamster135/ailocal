@@ -320,6 +320,12 @@ public static class TeamBuild
         Rules:
         - Tracks must be as file-independent as possible (different features,
           different files). Never give two tracks the same responsibility.
+        - Each deliverable (e.g. "replace circles with animated sprites",
+          "richer sound effects") belongs to EXACTLY ONE track - live runs
+          where three tracks each built their own sprite system wasted the
+          whole merge. If several tracks would need to touch one shared file
+          (Main.gd), give OWNERSHIP of that file to ONE track and have the
+          others only ADD new files that the owner wires in.
         - Each description tells ONE developer concretely what to build, in
           the same language the user wrote in.
         - CONCRETE FILES: every description must NAME the 2-5 files the

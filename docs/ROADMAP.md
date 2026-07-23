@@ -362,6 +362,29 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > KVAR i planen: autopilot i fler kit (FPS/party har attract-lägen),
 > kameraskak i övriga kit med root-shake, CC0-assetpaket via pinnad
 > ToolProvisioner-katalog, språkväljare i settings.
+>
+> **v2.14 SJU ROTORSAKER UR CANDY PARTY-TEAMHAVERIET (ägarens v2.11-
+> transkript, 8M tokens in → fail).** (1) COOLDOWN-KASKADEN (huvudfelet):
+> transient-cooldown är 5 s men uttömd kedja gav FatalError direkt - alla
+> tre redo-rundorna efter merge-konflikt + fixrunda 2 dog på "all providers
+> failed: cooling down". Nu VÄNTAR FallbackChatProvider ut korta cooldowns
+> (≤90 s, max 3 rundor, injicerbar klocka/delay för test) i Complete- OCH
+> Stream-vägen; quota/auth (timmar/kvartar) failar ärligt direkt.
+> (2) VÄGÖVERSÄTTNING: teamspår brände 3-6 famlande anrop var på ISOLERAT-
+> fel - absoluta huvudrot-vägar översätts nu TYST till worktreen
+> (syskonworktrees nekas fortfarande). (3) read_file offset UTAN limit
+> int-overflowade ("Non-negative number required" ×3 live). (4) glob/
+> search utan path sökte i "." = NODENS cwd (exe-katalogen!) - Full-agenter
+> fick alltid "no files match"; default är nu arbetsytan, och utdatan
+> relativiseras (maskningsskydd). (5) search med path=EN FIL gav "path not
+> found" - söker nu i filen (utan textfilter för explicit fil).
+> (6) run_command-MASKVAKT: ett spår "lagade" [ADDRESS] på disk via
+> powershell -replace och skrev in trasiga värden - samma facit-block som
+> write/edit. (7) ARKITEKTREGELN: tre spår byggde VAR SIN sprite-lösning
+> och alla redigerade Main.gd → merge-konflikt ×3; prompten kräver nu att
+> varje leverabel ägs av EXAKT ETT spår och att delade filer har en ägare.
+> OBS: ägarens nod körde v2.11.0 - import-fyndet (v2.12), vakterna/
+> autopiloten (v2.13) och dessa fixar fanns inte där.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

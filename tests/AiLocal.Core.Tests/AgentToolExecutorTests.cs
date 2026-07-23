@@ -51,6 +51,61 @@ public class AgentToolExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadFile_OffsetUtanLimit_LaserTillSlutet()
+    {
+        // v2.14: offset UTAN limit overflowade (start + int.MaxValue) till
+        // "Non-negative number required" - sett tre gånger i ett live-transkript.
+        await File.WriteAllLinesAsync(Path.Combine(_workspace, "long.txt"),
+            Enumerable.Range(1, 20).Select(i => $"line {i}"));
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        var result = await executor.ExecuteAsync(Call("read_file", new { path = "long.txt", offset = 15 }), CancellationToken.None);
+        Assert.False(result.IsError, result.Output);
+        Assert.Contains("line 15", result.Output);
+        Assert.Contains("line 20", result.Output);
+        Assert.DoesNotContain("line 14", result.Output);
+    }
+
+    [Fact]
+    public async Task Search_PathArEnFil_SokerIDenFilen()
+    {
+        // v2.14: live gav search med path="project.godot" (en FIL) felet
+        // "search path not found" trots att filen fanns.
+        await File.WriteAllTextAsync(Path.Combine(_workspace, "project.godot"),
+            "[autoload]\nAudioManager=\"*res://audio/AudioManager.gd\"\n");
+        var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
+        var result = await executor.ExecuteAsync(Call("search", new { pattern = "autoload", path = "project.godot" }), CancellationToken.None);
+        Assert.False(result.IsError, result.Output);
+        Assert.Contains("project.godot:1", result.Output);
+    }
+
+    [Fact]
+    public async Task Glob_UtanPath_SokerIArbetsytan_InteProcessensCwd()
+    {
+        // v2.14: default var "." = processens cwd (nodens exe-katalog) för
+        // Full-agenter - glob/search utan path gav alltid "no files match"
+        // trots att filerna fanns i arbetsytan.
+        await File.WriteAllTextAsync(Path.Combine(_workspace, "Main.gd"), "extends Node2D\n");
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+        var result = await executor.ExecuteAsync(Call("glob", new { pattern = "**/*.gd" }), CancellationToken.None);
+        Assert.False(result.IsError, result.Output);
+        Assert.Contains("Main.gd", result.Output);
+    }
+
+    [Fact]
+    public async Task RunCommand_MedMaskningsartefakt_BlockerasMedFacit()
+    {
+        // v2.14: live "lagade" ett spår [ADDRESS] direkt på disk via
+        // powershell -replace och skrev in trasiga värden - samma vakt som
+        // write/edit gäller nu kommandon.
+        var executor = new AgentToolExecutor(AgentAccessLevel.Full, _workspace);
+        var result = await executor.ExecuteAsync(Call("run_command",
+            new { command = "powershell -Command \"(Get-Content Main.gd) -replace '\\[ADDRESS\\]','fix' | Set-Content Main.gd\"" }),
+            CancellationToken.None);
+        Assert.True(result.IsError);
+        Assert.Contains("maskning", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Sandboxed_WriteThenReadFile_RoundTrips()
     {
         var executor = new AgentToolExecutor(AgentAccessLevel.Sandboxed, _workspace);
