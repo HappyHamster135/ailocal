@@ -385,6 +385,22 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > varje leverabel ägs av EXAKT ETT spår och att delade filer har en ägare.
 > OBS: ägarens nod körde v2.11.0 - import-fyndet (v2.12), vakterna/
 > autopiloten (v2.13) och dessa fixar fanns inte där.
+>
+> **v2.15 SPELSKALET (ägarens dom: "inte produktionsredo - startmeny,
+> settings, välja gubbe/map/minigames, sånt som ALLA spel har").**
+> Shell.gd = menyverkstaden i varje Godot-scaffold: Shell.menu (riktig
+> navigerbar huvudmeny), Shell.options_panel (volym/mute/fullskärm som
+> SPARAS till user:// - Shell.startup laddar), Shell.character_select.
+> Board Bash har hela skalet (Play/Choose Character/Minigames/Options/
+> Quit; sex valbara figurer vars val styr färg+namn och överlever
+> omstart; practice-läge för enskilda minigames; setup-skärm; autopilot).
+> Pixel Rush fick Options+Quit på titeln. Regissören har nytt stående
+> SPELSKAL-kriterium och release-checklistan flaggar saknad options/
+> fullskärm/quit. LÄRDOM: class_name registreras först vid IMPORT - kit
+> som parsas före importen måste preload:a (const Shell = preload(...)).
+> KVAR mot "spel folk vill spela": flera BRÄDEN med olika layout/tema i
+> partygolvet, fler minigames i golvet (3 idag - kontraktet skalar med
+> prompten), CC0-assetpaket, språkväljare.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

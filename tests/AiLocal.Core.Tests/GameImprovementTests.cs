@@ -341,6 +341,10 @@ const FINAL_LEVEL = 3
             Assert.Contains(notes, n => n.Contains("paus"));
             Assert.Contains(notes, n => n.Contains("highscore"));
             Assert.Contains(notes, n => n.Contains("generisk"));
+            // v2.15 spelskalet: options, fullskarm och quit ar standard.
+            Assert.Contains(notes, n => n.Contains("Options/Settings"));
+            Assert.Contains(notes, n => n.Contains("fullskarmsvaxel"));
+            Assert.Contains(notes, n => n.Contains("Quit"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -357,7 +361,10 @@ const FINAL_LEVEL = 3
                 "\tif event.is_action_pressed(\"ui_cancel\"):\n\t\tstate = \"paused\"\n" +
                 "\tif event is InputEventKey and event.keycode == KEY_R:\n\t\tnew_game()\n" +
                 "\tAudioServer.set_bus_volume_db(0, -6.0)\n" +
-                "func new_game() -> void:\n\tstate = \"playing\"\n");
+                "func new_game() -> void:\n\tstate = \"playing\"\n" +
+                "func open_options() -> void:\n\tShell.options_panel(self, func(): pass)\n" +
+                "func toggle_fullscreen() -> void:\n\tDisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)\n" +
+                "func quit_game() -> void:\n\tget_tree().quit()\n");
             File.WriteAllText(Path.Combine(dir, "project.godot"), "[application]\nconfig/name=\"Pixel Rush\"\n");
             Assert.Empty(ReleaseChecklist.Review(dir, "godot"));
         }

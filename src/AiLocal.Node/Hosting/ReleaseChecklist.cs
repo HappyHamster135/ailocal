@@ -39,6 +39,15 @@ public static class ReleaseChecklist
             if (!Has("user://", "localStorage"))
                 notes.Add("RELEASE-CHECKLISTA: inget sparat framsteg/basta resultat hittat (user:// eller localStorage) - " +
                           "aven sma arkadspel ska minnas sitt highscore mellan korningar.");
+            // v2.15 spelskalet: options-skarm och quit-val ar standard i ALLA
+            // riktiga spel (agarens dom). Shell.gd-hjalparna gor det billigt.
+            if (!Has("options_panel", "OptionsMenu", "\"Options\"", "\"Settings\"", "settings_menu"))
+                notes.Add("RELEASE-CHECKLISTA: ingen Options/Settings-skarm hittad - volym, mute och fullskarm ska ga att " +
+                          "stalla i spelet (Shell.options_panel ger den fardig).");
+            if (!Has("fullscreen", "window_set_mode", "WINDOW_MODE"))
+                notes.Add("RELEASE-CHECKLISTA: ingen fullskarmsvaxel hittad (DisplayServer.window_set_mode eller motsvarande).");
+            if (!Has("quit()", ".quit", "\"Quit\""))
+                notes.Add("RELEASE-CHECKLISTA: inget Quit-val hittat - spelet ska ga att avsluta fran menyn, inte bara via X.");
 
             if (engine == "godot")
             {

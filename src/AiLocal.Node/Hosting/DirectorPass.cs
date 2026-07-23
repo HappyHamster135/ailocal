@@ -165,6 +165,12 @@ public static class DirectorPass
             // användningen till ett kontraktskrav för allt agentritat.
             (["art.gd", "kontur", "outline", "skugga", "shadow", "programmer-art", "grafisk finish", "visuell finish"],
                 "Grafisk finish: allt agentritat använder Art.gd-hjälparna (Art.orb/tile/panel/token/bg - kontur, skugga, ljushighlight, djup) - ALDRIG nakna osminkade draw_rect/draw_circle för spelentiteter"),
+            // v2.15 (ägarens dom: "startmeny, settings, välja gubbe - sånt som
+            // ALLA spel har, även gratis"): spelSKALET är ett kontraktskrav.
+            // Shell.gd skickas med i varje Godot-scaffold med färdiga
+            // byggstenar så kravet kostar minuter, inte timmar.
+            (["huvudmeny", "main menu", "meny med", "startmeny", "options", "settings", "inställning", "installning"],
+                "Riktigt SPELSKAL: titelskärmen är en HUVUDMENY med valbara knappar (Play, Options, Quit - plus karaktärs-/ban-/lägesval när spelet har figurer eller flera banor), och Options-skärmen har volym, mute och fullskärm som SPARAS mellan körningar - Shell.gd-hjälparna (Shell.menu/options_panel/character_select/startup) finns i projektet och ska användas"),
         ];
 
         var result = new List<string>(criteria);

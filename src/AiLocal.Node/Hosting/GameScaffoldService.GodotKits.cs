@@ -1910,6 +1910,10 @@ extends Node2D
 # tid + hoppbuffert + variabel hopphojd + acceleration, landnings-squash.
 # BYT TEMA: farger/paletter i level_data + make_texture-anropen + texterna.
 
+# Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
+# importen, och class_name-registret finns forst efter import.
+const Shell = preload("res://Shell.gd")
+
 const SAVE_PATH := "user://pixelrush_highscore.save"
 const MEDALS_PATH := "user://pixelrush_medals.save"
 const FINAL_LEVEL := 5
@@ -1972,6 +1976,8 @@ var cam: Camera2D
 func _ready() -> void:
 	randomize()
 	autopilot = OS.get_environment("AILOCAL_AUTOPILOT") == "1"
+	# Spelskalet: sparade installningar (volym/mute/fullskarm) galler direkt.
+	Shell.startup()
 	# Kameran finns BARA for screenshake (offset ror renderingen, aldrig
 	# fysiken). Fixed-top-left vid (0,0) = exakt samma vy som utan kamera.
 	cam = Camera2D.new()
@@ -2723,6 +2729,29 @@ func show_overlay(title: String, message: String, with_buttons: bool) -> void:
 			if first:
 				first = false
 				b.grab_focus()
+	# v2.15 spelskalet: Options (volym/mute/fullskarm, sparas) + Quit -
+	# bara pa titeln, aldrig pa paus/game over-overlays.
+	if with_buttons and state == "title":
+		var ob := Button.new()
+		ob.text = "Options"
+		ob.custom_minimum_size = Vector2(320, 46)
+		ob.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ob.pressed.connect(func():
+			play_sound("click")
+			open_options())
+		box.add_child(ob)
+		var qb := Button.new()
+		qb.text = "Quit"
+		qb.custom_minimum_size = Vector2(320, 46)
+		qb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		qb.pressed.connect(func(): get_tree().quit())
+		box.add_child(qb)
+
+func open_options() -> void:
+	close_overlay()
+	overlay = Shell.options_panel(hud, func():
+		play_sound("click")
+		show_title())
 
 func _medal_row_text() -> String:
 	var icons := {"gold": "[G]", "silver": "[S]", "bronze": "[b]"}
@@ -3408,6 +3437,10 @@ extends Node2D
 # UI built in code. CHANGE THEME: colors in _draw, player names in PLAYERS.
 # Player text in ENGLISH (house rule since v1.99).
 
+# Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
+# importen, och class_name-registret finns forst efter import.
+const Shell = preload("res://Shell.gd")
+
 const BOARD_RING := 0
 const BOARD_SERPENTINE := 1
 const ROUNDS := 6
@@ -3426,6 +3459,23 @@ var PLAYERS: Array[Dictionary] = [
     {"name":"Bot B","col":Color(0.4,1,0.4), "ai":true},
     {"name":"Bot C","col":Color(1,0.9,0.3), "ai":true},
 ]
+
+# Valbara karaktarer (namn + farg) - spelarens val sparas via Shell-settings.
+const CHARACTERS := [
+    ["Bubble", Color(0.3, 0.7, 1.0)],
+    ["Berry", Color(1.0, 0.4, 0.4)],
+    ["Lime", Color(0.4, 1.0, 0.4)],
+    ["Lemon", Color(1.0, 0.9, 0.3)],
+    ["Grape", Color(0.75, 0.5, 1.0)],
+    ["Peach", Color(1.0, 0.62, 0.45)],
+]
+var character_idx := 0
+var practice_mode := false   # minigame startat fran menyn - resultat gar till titeln
+var practice_pick := -1      # tvingat minigameval fran menyn (-1 = slumpa)
+# Autopilot (AILOCAL_AUTOPILOT=1): kvalitetsgrindens demospelare - startar
+# fran titeln och haller partyt rullande. Vanliga spelare markar ingenting.
+var autopilot := false
+var auto_t := 0.0
 
 var state := "title"
 var difficulty := 1        # 0=easy 1=normal 2=hard
@@ -3485,6 +3535,11 @@ var tile_positions: Array[Vector2] = []
 func _ready() -> void:
     randomize()
     _setup_audio()
+    # Spelskalet: sparade installningar (volym/mute/fullskarm) galler fran
+    # forsta rutan, och spelarens valda karaktar laddas.
+    var saved := Shell.startup()
+    _apply_character(int(saved.get("bb_character", 0)))
+    autopilot = OS.get_environment("AILOCAL_AUTOPILOT") == "1"
     var img := Image.create(6, 6, false, Image.FORMAT_RGBA8)
     img.fill(Color(1, 1, 1))
     dot_tex = ImageTexture.create_from_image(img)
@@ -3492,6 +3547,19 @@ func _ready() -> void:
     add_child(ui)
     _setup_touch()
     _show_title()
+
+func _apply_character(i: int) -> void:
+    character_idx = clampi(i, 0, CHARACTERS.size() - 1)
+    PLAYERS[0]["name"] = str(CHARACTERS[character_idx][0])
+    PLAYERS[0]["col"] = CHARACTERS[character_idx][1]
+    # Botarna far aldrig samma farg som spelarens val - ta lediga ur listan.
+    var used: Array = [character_idx]
+    for b in range(1, 4):
+        var pick := (character_idx + b) % CHARACTERS.size()
+        while pick in used:
+            pick = (pick + 1) % CHARACTERS.size()
+        used.append(pick)
+        PLAYERS[b]["col"] = CHARACTERS[pick][1]
 
 # ---------- TOUCH ----------
 
@@ -3606,30 +3674,92 @@ func _burst(pos: Vector2, col: Color, count: int) -> void:
 # ---------- TITLE SCREEN ----------
 
 func _show_title() -> void:
+    # v2.15 SPELSKALET: riktig huvudmeny (Play/karaktar/minigames/options/
+    # quit) i stallet for instruktionstext + direktstart - det som skiljer
+    # "demo" fran "spel". Play gar till setup-skarmen (brade + svarighet).
     state = "title"
     position = Vector2.ZERO
     shake = 0.0
+    practice_mode = false
+    auto_t = 0.0
     _clear_ui()
-    _label("BOARD BASH", 70, 72, Color(1, 0.75, 0.2))
-    _label("A party board game! Roll dice, collect coins, buy stars, win minigames.", 170, 22)
-    _label("First to the most stars after %d rounds wins. Space/Enter to roll." % ROUNDS, 200, 18)
-    _label("Board: Ring (circle loop)", 260, 22, Color(0.5, 0.9, 1))
-    _button("Ring", 290, func(): board_layout = BOARD_RING; _play("click"))
-    _label("Board: Serpentine (snake path)", 350, 22, Color(0.5, 1, 0.7))
-    _button("Serpentine", 380, func(): board_layout = BOARD_SERPENTINE; _play("click"))
-    var diffs := ["Easy", "Normal", "Hard"]
+    _label("BOARD BASH", 60, 72, Color(1, 0.75, 0.2))
+    _label("A party board game! Roll dice, collect coins, buy stars, win minigames.", 150, 20)
+    _label("Playing as: %s" % str(PLAYERS[0]["name"]), 182, 18, Color(PLAYERS[0]["col"]))
+    Shell.menu(ui, [
+        ["Play", func(): _show_setup()],
+        ["Choose Character", func(): _show_character_select()],
+        ["Minigames", func(): _show_minigame_menu()],
+        ["Options", func(): _show_options()],
+        ["Quit", func(): get_tree().quit()],
+    ], 70.0)
+    queue_redraw()
+
+func _show_setup() -> void:
+    _play("click")
+    _clear_ui()
+    _label("GAME SETUP", 70, 52, Color(1, 0.75, 0.2))
+    _label("First to the most stars after %d rounds wins. Space/Enter rolls the dice." % ROUNDS, 150, 18)
+    _label("Board: Ring (circle loop)", 220, 20, Color(0.5, 0.9, 1))
+    _button("Ring", 250, func(): board_layout = BOARD_RING; _play("click"))
+    _label("Board: Serpentine (snake path)", 310, 20, Color(0.5, 1, 0.7))
+    _button("Serpentine", 340, func(): board_layout = BOARD_SERPENTINE; _play("click"))
+    var diffs := ["Start: Easy", "Start: Normal", "Start: Hard"]
     for i in range(3):
         var d := i
-        _button(diffs[i], 460 + i * 58, func(): _start_game(d, board_layout))
-    # Fokus ska landa pa START (Easy), inte pa bradvalet - annars startar
-    # Enter aldrig spelet (bekraftat i skarp korning: sonden fastnade pa
-    # titeln). Bradknapparna nas med pil-upp.
+        _button(diffs[i], 420 + i * 58, func(): _start_game(d, board_layout))
+    _button("Back", 600, func(): _show_title())
+    # Fokus pa START (Easy) - Enter startar direkt; bradval nas med pil-upp.
     for c in ui.get_children():
-        if c is Button and c.text == "Easy":
+        if c is Button and c.text == "Start: Easy":
             c.grab_focus()
-    # Add a hovering instruction
-    var hint := _label("[Space/Enter = roll dice on your turn]", 630, 14, Color(0.5, 0.5, 0.5))
     queue_redraw()
+
+func _show_character_select() -> void:
+    _play("click")
+    _clear_ui()
+    var names_arr: Array = []
+    var cols: Array = []
+    for cdef in CHARACTERS:
+        names_arr.append(cdef[0])
+        cols.append(cdef[1])
+    Shell.character_select(ui, names_arr, cols, character_idx, func(i: int):
+        _apply_character(i)
+        var s := Shell.load_settings()
+        s["bb_character"] = i
+        Shell.save_settings(s)
+        _play("coin")
+        _show_title())
+    queue_redraw()
+
+func _show_minigame_menu() -> void:
+    # Fritt lage: ova pa ett valfritt minigame utan bradspelet runtomkring.
+    _play("click")
+    _clear_ui()
+    _label("MINIGAMES - practice any of them", 70, 40, Color(1, 0.75, 0.2))
+    var mgs := [["Tap Race - mash to fill first", 0], ["Dodge - last one standing", 1], ["Memory - repeat the pattern", 2]]
+    for m in mgs:
+        var mtype: int = m[1]
+        _button(str(m[0]), 200 + mtype * 70, func(): _start_practice(mtype))
+    _button("Back", 460, func(): _show_title())
+    for c in ui.get_children():
+        if c is Button and str(c.text).begins_with("Tap"):
+            c.grab_focus()
+    queue_redraw()
+
+func _show_options() -> void:
+    _play("click")
+    _clear_ui()
+    Shell.options_panel(ui, func(): _show_title())
+    queue_redraw()
+
+func _start_practice(mtype: int) -> void:
+    practice_mode = true
+    practice_pick = mtype
+    if pstate.is_empty():
+        _init_players()
+    _play("click")
+    _start_minigame()
 
 # ---------- GAME START ----------
 
@@ -3759,6 +3889,22 @@ func _physics_process(delta: float) -> void:
     elif position != Vector2.ZERO:
         position = Vector2.ZERO
 
+    # Autopilot: vanta forbi sondens titeldump (~3 s), starta sedan partiet;
+    # slutskarmen gar tillbaka till titeln sa demon aldrig stannar.
+    if autopilot:
+        if state == "title":
+            auto_t += delta
+            if auto_t > 5.0:
+                auto_t = 0.0
+                _start_game(1, board_layout)
+        elif state == "results":
+            auto_t += delta
+            if auto_t > 4.0:
+                auto_t = 0.0
+                _show_title()
+        else:
+            auto_t = 0.0
+
     if state == "playing_board":
         if turn_phase == "rolling" and PLAYERS[turn_idx]["ai"]:
             ai_roll_timer -= delta
@@ -3767,8 +3913,9 @@ func _physics_process(delta: float) -> void:
         elif turn_phase == "rolling":
             # Attract-autopilot: efter 8s utan input rullar spelet sjalvt -
             # partyt stannar aldrig, och grindens sond nar hela loopen.
+            # I autopilotlaget rullas snabbare sa dumparna visar mittspel.
             attract_t += delta
-            if attract_t > 8.0:
+            if attract_t > (2.0 if autopilot else 8.0):
                 attract_t = 0.0
                 _do_roll()
         elif turn_phase == "moving":
@@ -3854,11 +4001,15 @@ func _next_player() -> void:
 func _start_minigame() -> void:
     state = "playing_minigame"
     _clear_ui()
-    _label("MINIGAME!", 40, 48, Color(1, 0.85, 0.2))
+    _label("PRACTICE!" if practice_mode else "MINIGAME!", 40, 48, Color(1, 0.85, 0.2))
 
-    # Pick minigame (different from last time)
+    # Pick minigame (different from last time); practice-menyn TVINGAR valet.
     var last := minigame_type
-    minigame_type = (last + 1 + randi() % 2) % 3  # guaranteed different
+    if practice_pick >= 0:
+        minigame_type = practice_pick
+        practice_pick = -1
+    else:
+        minigame_type = (last + 1 + randi() % 2) % 3  # guaranteed different
 
     mg_rankings.clear()
     mg_player_progress.clear()
@@ -4120,7 +4271,11 @@ func _end_minigame() -> void:
         var txt := "%d. %s  +%d coins" % [rank + 1, PLAYERS[pi]["name"], award]
         _label(txt, y, 22, PLAYERS[pi]["col"])
         y += 30
-    _button("Continue", y + 20, func(): _return_to_board())
+    # Practice-lage: tillbaka till menyn, inte in i ett bradspel som inte pagar.
+    if practice_mode:
+        _button("Back to menu", y + 20, func(): _show_title())
+    else:
+        _button("Continue", y + 20, func(): _return_to_board())
     queue_redraw()
 
 func _return_to_board() -> void:

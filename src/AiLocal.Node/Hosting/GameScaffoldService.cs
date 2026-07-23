@@ -142,10 +142,217 @@ public sealed partial class GameScaffoldService
         var scaffolded = ScaffoldGodotCore(root, prompt);
         scaffolded = AppendMusic(root, prompt ?? "", scaffolded);
         scaffolded = AppendArtLib(root, scaffolded);
+        scaffolded = AppendShellLib(root, scaffolded);
         scaffolded = AppendSfxBank(root, scaffolded);
         scaffolded = AppendCharacterSprites(root, prompt ?? "", scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
     }
+
+    /// <summary>v2.15: SPELSKALET (ägarens dom: "startmeny, settings, välja
+    /// gubbe/map/minigames - sånt som ALLA spel har, även gratis"). Shell.gd
+    /// ger byggstenarna varje riktigt spel behöver: riktig huvudmeny med
+    /// navigerbara val, options-skärm (volym/mute/fullskärm som SPARAS mellan
+    /// körningar) och karaktärsval. Kiten använder dem; regissörskriteriet +
+    /// release-checklistan tvingar agentbyggen att göra detsamma.</summary>
+    static string[] AppendShellLib(string root, string[] files)
+    {
+        try
+        {
+            Write(root, "Shell.gd", GodotShellLib);
+            return [.. files, "Shell.gd"];
+        }
+        catch
+        {
+            return files;
+        }
+    }
+
+    const string GodotShellLib = """
+class_name Shell
+# Shell.gd - SPELSKALET som byggstenar: riktig huvudmeny, options-skarm
+# (volym, mute, fullskarm - sparas mellan korningar i user://) och
+# karaktarsval. Alla funktioner ar statiska: Shell.menu(...),
+# Shell.options_panel(...), Shell.character_select(...).
+# Anropa Shell.startup() forst i _ready sa sparade installningar galler
+# fran forsta rutan. Extra spel-egna nycklar (t.ex. vald karaktar) far
+# lagras i samma dictionary via load_settings/save_settings.
+# Player text in ENGLISH (house rule).
+
+const SETTINGS_PATH := "user://shell_settings.save"
+
+static func load_settings() -> Dictionary:
+	var data := {"volume": 1.0, "muted": false, "fullscreen": false}
+	if FileAccess.file_exists(SETTINGS_PATH):
+		var f := FileAccess.open(SETTINGS_PATH, FileAccess.READ)
+		if f:
+			var parsed: Variant = JSON.parse_string(f.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				for k in (parsed as Dictionary).keys():
+					data[k] = parsed[k]
+	return data
+
+static func save_settings(data: Dictionary) -> void:
+	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(data))
+
+static func apply_settings(data: Dictionary) -> void:
+	var vol: float = clampf(float(data.get("volume", 1.0)), 0.0, 1.0)
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(vol, 0.001)))
+	AudioServer.set_bus_mute(0, bool(data.get("muted", false)))
+	var want_full: bool = bool(data.get("fullscreen", false))
+	var is_full: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	if want_full != is_full:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if want_full else DisplayServer.WINDOW_MODE_WINDOWED)
+
+static func startup() -> Dictionary:
+	var data := load_settings()
+	apply_settings(data)
+	return data
+
+# ---------- huvudmenyn ----------
+# entries: [["Play", callable], ["Options", callable], ...]. Forsta knappen
+# far fokus => upp/ner + Enter fungerar direkt (fokusgrannar ar automatiska
+# i en VBox). FULL_RECT + centrerad alignment - PRESET_CENTER satter bara
+# pivoten och hogerforskjuter innehallet.
+static func menu(parent: Node, entries: Array, top_offset: float = 0.0) -> Control:
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.offset_top = top_offset
+	parent.add_child(overlay)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 12)
+	overlay.add_child(box)
+	var first := true
+	for e in entries:
+		var b := Button.new()
+		b.text = str(e[0])
+		b.custom_minimum_size = Vector2(320, 46)
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		var cb: Callable = e[1]
+		b.pressed.connect(cb)
+		box.add_child(b)
+		if first:
+			first = false
+			b.call_deferred("grab_focus")
+	return overlay
+
+# ---------- options ----------
+# Volym-slider + mute + fullskarm; varje andring appliceras och SPARAS
+# direkt. on_back stanger skarmen (anroparen bygger om sin meny).
+static func options_panel(parent: Node, on_back: Callable) -> Control:
+	var data := load_settings()
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	parent.add_child(overlay)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 14)
+	overlay.add_child(box)
+	var title := Label.new()
+	title.text = "OPTIONS"
+	title.add_theme_font_size_override("font_size", 44)
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+
+	var vol_row := HBoxContainer.new()
+	vol_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vol_row.add_theme_constant_override("separation", 12)
+	box.add_child(vol_row)
+	var vol_label := Label.new()
+	vol_label.text = "Volume"
+	vol_label.custom_minimum_size = Vector2(110, 0)
+	vol_row.add_child(vol_label)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 100.0
+	slider.step = 5.0
+	slider.value = clampf(float(data.get("volume", 1.0)), 0.0, 1.0) * 100.0
+	slider.custom_minimum_size = Vector2(240, 24)
+	slider.value_changed.connect(func(v: float):
+		data["volume"] = v / 100.0
+		apply_settings(data)
+		save_settings(data))
+	vol_row.add_child(slider)
+
+	var mute := CheckButton.new()
+	mute.text = "Mute"
+	mute.button_pressed = bool(data.get("muted", false))
+	mute.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	mute.toggled.connect(func(on: bool):
+		data["muted"] = on
+		apply_settings(data)
+		save_settings(data))
+	box.add_child(mute)
+
+	var full := CheckButton.new()
+	full.text = "Fullscreen"
+	full.button_pressed = bool(data.get("fullscreen", false))
+	full.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	full.toggled.connect(func(on: bool):
+		data["fullscreen"] = on
+		apply_settings(data)
+		save_settings(data))
+	box.add_child(full)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(320, 46)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(on_back)
+	box.add_child(back)
+	back.call_deferred("grab_focus")
+	return overlay
+
+# ---------- karaktarsval ----------
+# names/colors ar parallella listor; selected markeras med ram. on_pick(i)
+# far index - anroparen sparar valet och stanger skarmen.
+static func character_select(parent: Node, names: Array, colors: Array, selected: int, on_pick: Callable) -> Control:
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	parent.add_child(overlay)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 18)
+	overlay.add_child(box)
+	var title := Label.new()
+	title.text = "CHOOSE YOUR CHARACTER"
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	row.add_theme_constant_override("separation", 16)
+	box.add_child(row)
+	var first := true
+	for i in range(names.size()):
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 6)
+		row.add_child(col)
+		var swatch := ColorRect.new()
+		swatch.color = colors[i] if i < colors.size() else Color.WHITE
+		swatch.custom_minimum_size = Vector2(64, 64)
+		swatch.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		col.add_child(swatch)
+		var b := Button.new()
+		b.text = str(names[i]) + (" *" if i == selected else "")
+		b.custom_minimum_size = Vector2(110, 40)
+		var idx := i
+		b.pressed.connect(func(): on_pick.call(idx))
+		col.add_child(b)
+		if first or i == selected:
+			first = false
+			b.call_deferred("grab_focus")
+	return overlay
+""";
 
     /// <summary>v2.11: GUBBARNA - animerade karaktärssprites till ALLA Godot-
     /// scaffolds (ägarens "utan gubbar, utan animationer"). Topdown/plattform
