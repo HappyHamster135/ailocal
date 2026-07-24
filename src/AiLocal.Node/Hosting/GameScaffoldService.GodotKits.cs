@@ -6461,7 +6461,12 @@ func _physics_process(delta: float) -> void:
         if not a["alive"]:
             continue
         var i: int = a["idx"]
-        var node: MeshInstance3D = a["node"]
+        # v2.29: MASTE vara Node3D. make_actor returnerar sedan v2.24 en
+        # AnimatedSprite3D (pixelgubben), och GDScript AVBRYTER funktionen vid
+        # en typad tilldelning fran fel typ - alltsa dog _physics_process pa
+        # forsta aktoren varje bildruta och minispelet slutade spela. Figurerna
+        # SYNTES anda (de lades till i setup), sa skarmdumpen sag korrekt ut.
+        var node: Node3D = a["node"]
         if i == 0:
             var dx := Input.get_axis("ui_left", "ui_right")
             var dz := Input.get_axis("ui_up", "ui_down")
@@ -6550,7 +6555,12 @@ func _physics_process(delta: float) -> void:
     var ai_speed: Array = [3.4, 4.1, 4.8]
     for a in actors:
         var i: int = a["idx"]
-        var node: MeshInstance3D = a["node"]
+        # v2.29: MASTE vara Node3D. make_actor returnerar sedan v2.24 en
+        # AnimatedSprite3D (pixelgubben), och GDScript AVBRYTER funktionen vid
+        # en typad tilldelning fran fel typ - alltsa dog _physics_process pa
+        # forsta aktoren varje bildruta och minispelet slutade spela. Figurerna
+        # SYNTES anda (de lades till i setup), sa skarmdumpen sag korrekt ut.
+        var node: Node3D = a["node"]
         if i == 0:
             var dx := Input.get_axis("ui_left", "ui_right")
             var dz := Input.get_axis("ui_up", "ui_down")

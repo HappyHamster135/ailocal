@@ -392,6 +392,20 @@ public class GodotKitTests
             Assert.True(File.Exists(Path.Combine(root, "player_frames.tres")), "player_frames.tres saknas");
             foreach (var mg in new[] { "MgRace3D.gd", "MgFall3D.gd", "MgCollect3D.gd" })
                 Assert.Contains("main.make_actor", File.ReadAllText(Path.Combine(root, mg)));
+            // v2.29 REGRESSIONSLAS: minispelen far INTE deklarera aktoren som
+            // MeshInstance3D. make_actor returnerar sedan v2.24 en
+            // AnimatedSprite3D, och GDScript AVBRYTER funktionen vid en typad
+            // tilldelning fran fel typ - _physics_process dog pa forsta
+            // aktoren varje bildruta och minispelet slutade spela. Figurerna
+            // SYNTES anda (de laggs till i setup), sa varken skarmdump,
+            // --check-only eller --quit-sonden kunde se det. Bara en
+            // genomspelning avslojade det.
+            foreach (var mg in new[] { "MgFall3D.gd", "MgCollect3D.gd", "MgRace3D.gd" })
+            {
+                var mgSrc = File.ReadAllText(Path.Combine(root, mg));
+                Assert.DoesNotContain("var node: MeshInstance3D", mgSrc);
+                Assert.DoesNotContain("var body: MeshInstance3D", mgSrc);
+            }
             // Raknaren ser flerfilskonventionen: 3 Mg*.gd = 3 minispel.
             Assert.True(GenreContracts.CountMinigames(root, script) >= 3);
             AssertKitComplete(root);
