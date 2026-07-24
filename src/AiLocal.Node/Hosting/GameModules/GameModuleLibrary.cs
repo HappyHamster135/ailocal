@@ -829,8 +829,10 @@ func _ready() -> void:
 func take_damage(raw_amount: float, type: int = DamageType.PHYSICAL, source = null) -> void:
     if is_invulnerable or current_health <= 0:
         return
-    var multiplier := resistances.get(type, 1.0)
-    var final_amount := raw_amount * multiplier
+    # EXPLICITA typer: Dictionary.get() ger Variant, sa ':=' kan inte
+    # inferera och HELA modulen vagrade parsa i Godot.
+    var multiplier: float = resistances.get(type, 1.0)
+    var final_amount: float = raw_amount * multiplier
     current_health = max(0.0, current_health - final_amount)
     on_damage.emit(final_amount, type)
     if current_health <= 0:
@@ -1481,59 +1483,86 @@ public class ParticleEffects : MonoBehaviour
     }
 }";
 
+        // v2.32 OMSKRIVEN: den gamla versionen parsade INTE i Godot och hade
+        // delats ut som drop-in-kod. Tre fel: (1) den preloadade
+        // "res://Particles/ParticleTemplate.tscn" som inte finns och aldrig
+        // levererades, (2) typnamnet var "GpuParticles3D" - Godot 4 stavar det
+        // GPUParticles3D, (3) ':=' pa resultatet gav darfor inferensfel.
+        // Nu bygger den allt i kod och ar helt sjalvstandig.
         public static string GodotCode => @"
 extends Node3D
 
-# ParticleEffects.gd — utility node for spawning GPU particles
+# ParticleEffects.gd - partikelskurar utan externa scenfiler.
+#   var fx = ParticleEffects.new()
+#   add_child(fx)
+#   fx.burst(global_position, 24, Color(1, 0.8, 0.3))
 
-var _particle_scene: PackedScene = preload(""res://Particles/ParticleTemplate.tscn"")
 var default_color := Color.WHITE
-var default_lifetime := 2.0
+var default_lifetime := 1.4
 var default_speed := 3.0
 
-func burst(position: Vector3, count := 20, color := default_color, speed := default_speed) -> void:
-    var gp := _particle_scene.instantiate() as GpuParticles3D
-    gp.global_position = position
+func _make(count: int, color: Color, speed: float, spread: float) -> GPUParticles3D:
+    var gp := GPUParticles3D.new()
+    var mat := ParticleProcessMaterial.new()
+    mat.direction = Vector3(0, 1, 0)
+    mat.spread = spread
+    mat.initial_velocity_min = speed * 0.5
+    mat.initial_velocity_max = speed * 1.5
+    mat.gravity = Vector3(0, -6.0, 0)
+    mat.color = color
+    mat.scale_min = 0.4
+    mat.scale_max = 1.0
+    gp.process_material = mat
+    var mesh := QuadMesh.new()
+    mesh.size = Vector2(0.12, 0.12)
+    var smat := StandardMaterial3D.new()
+    smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+    smat.vertex_color_use_as_albedo = true
+    smat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+    smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+    mesh.material = smat
+    gp.draw_pass_1 = mesh
+    gp.amount = maxi(1, count)
+    gp.lifetime = default_lifetime
+    gp.one_shot = true
+    gp.explosiveness = 0.9
+    return gp
+
+# Engangsskur i en punkt.
+func burst(pos: Vector3, count := 20, color := Color.WHITE, speed := 3.0) -> void:
+    var gp := _make(count, color, speed, 45.0)
+    add_child(gp)
+    gp.global_position = pos
+    gp.emitting = true
+    _reap(gp)
+
+# Skur langs en linje - traffspar, laserspar, stigar.
+func stream(origin: Vector3, target: Vector3, count := 10, color := Color.WHITE) -> void:
+    for i in range(count):
+        var t := float(i) / float(maxi(1, count))
+        burst(origin.lerp(target, t), 2, color, 1.0)
+
+# Skur som sugs INAT mot en punkt - upplockning, laddning.
+func attract(center: Vector3, radius := 2.0, count := 30, color := Color.WHITE) -> void:
+    var gp := _make(count, color, 2.0, 180.0)
     var mat := gp.process_material as ParticleProcessMaterial
     if mat:
-        mat.color = color
-        mat.initial_velocity_min = speed * 0.5
-        mat.initial_velocity_max = speed * 1.5
-    gp.lifetime = default_lifetime
-    gp.amount = count
-    gp.emitting = true
+        mat.gravity = Vector3.ZERO
+        mat.radial_accel_min = -8.0
+        mat.radial_accel_max = -14.0
+        mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+        mat.emission_sphere_radius = radius
     add_child(gp)
-    # Auto-cleanup
-    await get_tree().create_timer(default_lifetime + 1.0).timeout
-    gp.queue_free()
+    gp.global_position = center
+    gp.emitting = true
+    _reap(gp)
 
-func stream(origin: Vector3, target: Vector3, count := 10, color := default_color) -> void:
-    for i in range(count):
-        var t := float(i) / float(count)
-        var pos := origin.lerp(target, t)
-        burst(pos, 1, color)
-
-func attract(center: Vector3, radius := 2.0, count := 30, color := default_color) -> void:
-    for i in range(count):
-        var pos := center + Vector3(
-            randf_range(-radius, radius),
-            randf_range(-radius, radius),
-            randf_range(-radius, radius)
-        )
-        var gp := _particle_scene.instantiate() as GpuParticles3D
-        gp.global_position = pos
-        var mat := gp.process_material as ParticleProcessMaterial
-        if mat:
-            mat.color = color
-            mat.initial_velocity_min = 1.0
-            mat.initial_velocity_max = 3.0
-            mat.direction = (center - pos).normalized()
-            mat.direction_spread = 15.0
-        gp.lifetime = default_lifetime
-        gp.amount = 1
-        gp.emitting = true
-        add_child(gp)
-        await get_tree().create_timer(default_lifetime + 0.5).timeout
+# Stadar upp sig sjalv - annars laker noder vid varje traff.
+# Skrivet med await i stallet for en lambda: en enradig lambda med ett
+# if-STATEMENT (inte uttryck) ger 'Expected end of file' i GDScript.
+func _reap(gp: GPUParticles3D) -> void:
+    await get_tree().create_timer(default_lifetime + 0.6).timeout
+    if is_instance_valid(gp):
         gp.queue_free()";
 
         public static string Html5Code => @"
@@ -1638,6 +1667,11 @@ export class ParticleEffects {
         new(nameof(ProgressionSystem), ProgressionSystem.Description, ProgressionSystem.Dependencies),
         new(nameof(SimpleAI), SimpleAI.Description, SimpleAI.Dependencies),
         new(nameof(ParticleEffects), ParticleEffects.Description, ParticleEffects.Dependencies),
+        // v2.32: kryssrutorna for butik och prestationer fanns sedan v2.30
+        // men saknade allt stod - "achievement" och "unlock" forekom NOLL
+        // ganger i samtliga 21 kit, sa agenten fick uppfinna dem varje gang.
+        new(nameof(ShopModule), ShopModule.Description, ShopModule.Dependencies),
+        new(nameof(AchievementModule), AchievementModule.Description, AchievementModule.Dependencies),
     ];
 
     /// <summary>Drop-in source for one module in one engine's language, or
@@ -1656,6 +1690,9 @@ export class ParticleEffects {
             "progressionsystem" or "progression" or "xp" => (ProgressionSystem.UnityCode, ProgressionSystem.GodotCode, ProgressionSystem.Html5Code),
             "simpleai" or "ai" or "enemyai" => (SimpleAI.UnityCode, SimpleAI.GodotCode, SimpleAI.Html5Code),
             "particleeffects" or "particles" => (ParticleEffects.UnityCode, ParticleEffects.GodotCode, ParticleEffects.Html5Code),
+            "shopmodule" or "shop" or "store" => (ShopModule.UnityCode, ShopModule.GodotCode, ShopModule.Html5Code),
+            "achievementmodule" or "achievements" or "achievement" =>
+                (AchievementModule.UnityCode, AchievementModule.GodotCode, AchievementModule.Html5Code),
             _ => ((string, string, string)?)null
         };
         if (codes is null) return null;

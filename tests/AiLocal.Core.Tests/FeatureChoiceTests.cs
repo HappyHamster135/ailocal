@@ -76,8 +76,15 @@ public class FeatureChoiceTests
         Assert.Contains("game_module", hint!);
         Assert.Contains("'inventory'", hint);
         Assert.Contains("'quest'", hint);
-        // shop har ingen fardig modul - far inte hittas pa.
-        Assert.DoesNotContain("'shop'", hint);
+        // v2.32: shop fick en RIKTIG modul (den saknades i v2.30 och var da
+        // ett tomt lofte agenten fick uppfylla fran noll).
+        Assert.Contains("'shop'", hint);
+
+        // Hotseat och tutorial har fortfarande ingen modul - de far INTE
+        // hittas pa. En hint mot en modul som inte finns skickar agenten pa
+        // ett omojligt arende.
+        var utan = BuildDirectives.ModuleHint(["hotseat", "tutorial"]);
+        Assert.Null(utan);
     }
 
     [Fact]

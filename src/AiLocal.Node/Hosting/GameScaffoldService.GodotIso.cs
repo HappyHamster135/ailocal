@@ -182,6 +182,9 @@ func _setup_audio() -> void:
 
 func _play(key: String) -> void:
     if snd.has(key):
+        # Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+        snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+        	else randf_range(0.88, 1.13)
         snd[key].play()
 
 # ---------- iso-matte ----------

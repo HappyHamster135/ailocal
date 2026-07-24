@@ -1787,6 +1787,10 @@ func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 # C1 juice: en engangs-partikelskur. HUD/overlay ligger pa en CanvasLayer och
@@ -2349,6 +2353,10 @@ func _touch_btn(pos: Vector2, action: String, text: String) -> TouchScreenButton
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 # ---------- ljudkontroll (volym + mute - arkadribban kraver den) ----------
@@ -3166,6 +3174,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 # ---------- terrang (pixelbaserad, forstorbar) ----------
@@ -5285,7 +5297,6 @@ func _draw_minigame() -> void:
             draw_rect(Rect2(bx - 20, 470, 40, 40), col)
             for w in range(mg_qd_wins[i] if i < mg_qd_wins.size() else 0):
                 draw_circle(Vector2(bx - 12 + w * 12, 530), 4, Color(1, 0.85, 0.25))
-
 """;
 
     /// <summary>v2.5: Strike Arena - FPS-golvet (first person, 3D). Utan det
@@ -5431,6 +5442,9 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
     if snd.has(key):
+        # Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+        snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+        	else randf_range(0.88, 1.13)
         snd[key].play()
 
 func _mat(c: Color) -> StandardMaterial3D:
@@ -5990,6 +6004,9 @@ func _setup_audio() -> void:
 
 func play_sound(key: String) -> void:
     if snd.has(key):
+        # Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+        snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+        	else randf_range(0.88, 1.13)
         snd[key].play()
 
 # ---------- touch (aktiveras BARA pa touchskarm) ----------
@@ -6811,7 +6828,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	randomize()
 	Shell.startup()
 	best_wave = _load_best()
@@ -6837,6 +6857,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -6959,6 +6983,7 @@ func _point_to_line_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
 	return (a + ab * t).distance_to(p)
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	for y in range(GRID_H):
@@ -7085,6 +7110,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Wave: %d/%d  Gold: %d  Lives: %d" % [wave + 1, WAVE_COUNT, int(gold), lives]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotSnake(string root, string prompt)
@@ -7159,7 +7191,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best = _load_best()
 	randomize()
 	Shell.startup()
@@ -7184,6 +7219,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -7262,6 +7301,7 @@ func _screenshake(intensity: float) -> void:
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	var ox := (1152 - GRID_W * CELL) / 2
@@ -7368,6 +7408,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Score: %d   Best: %d" % [score, best]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotBreakout(string root, string prompt)
@@ -7446,7 +7493,10 @@ var shake := 0.0
 var ui: CanvasLayer
 var ball_launched := false
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best = _load_best()
 	randomize()
 	Shell.startup()
@@ -7471,6 +7521,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -7547,6 +7601,7 @@ func _screenshake(intensity: float) -> void:
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	# Paddle
@@ -7667,6 +7722,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Score: %d   Lives: %d   Best: %d" % [score, lives, best]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotQuiz(string root, string prompt)
@@ -7767,12 +7829,28 @@ func _ready() -> void:
 		mp.finished.connect(mp.play)
 		add_child(mp)
 		mp.play()
+	# v2.32: scenisk bakgrund i stallet for platt gratt. Laggs som
+	# TextureRect FORE CanvasLayer:en sa den hamnar bakom all UI.
+	var _bg_tex := load("res://background.png") as Texture2D
+	if _bg_tex:
+		var _bg := TextureRect.new()
+		_bg.texture = _bg_tex
+		_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_bg.stretch_mode = TextureRect.STRETCH_SCALE
+		_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_bg.size = Vector2(1152, 648)
+		_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_bg)
 	ui = CanvasLayer.new()
 	add_child(ui)
 	_show_title()
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -7998,7 +8076,10 @@ var shake := 0.0
 var ui: CanvasLayer
 var card_symbols := ["A","B","C","D","E","F","G","H"]
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best = _load_best()
 	randomize()
 	Shell.startup()
@@ -8023,6 +8104,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -8103,6 +8188,7 @@ func _process(_delta: float) -> void:
 	_update_hud()
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	var ox := (1152 - GRID * (CARD_W + CARD_GAP)) / 2
@@ -8210,6 +8296,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Moves: %d   Best: %s" % [moves, ("-" if best == 0 else str(best))]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
 
@@ -8285,7 +8378,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best = _load_best()
 	randomize()
 	Shell.startup()
@@ -8310,6 +8406,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -8386,6 +8486,7 @@ func _screenshake(intensity: float) -> void:
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	var ox := (1152 - GRID * CELL) / 2
@@ -8532,6 +8633,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Time: %d   Best: %s" % [int(time), ("-" if best == 0 else str(best))]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotIdle(string root, string prompt)
@@ -8622,6 +8730,18 @@ func _ready() -> void:
 		mp.finished.connect(mp.play)
 		add_child(mp)
 		mp.play()
+	# v2.32: scenisk bakgrund i stallet for platt gratt. Laggs som
+	# TextureRect FORE CanvasLayer:en sa den hamnar bakom all UI.
+	var _bg_tex := load("res://background.png") as Texture2D
+	if _bg_tex:
+		var _bg := TextureRect.new()
+		_bg.texture = _bg_tex
+		_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_bg.stretch_mode = TextureRect.STRETCH_SCALE
+		_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_bg.size = Vector2(1152, 648)
+		_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_bg)
 	ui = CanvasLayer.new()
 	add_child(ui)
 	_load_game()
@@ -8629,6 +8749,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -8877,7 +9001,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best = _load_best()
 	randomize()
 	Shell.startup()
@@ -8902,6 +9029,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -9024,6 +9155,7 @@ func _calc_ghost() -> int:
 	return gy
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	var ox := (1152 - COLS * CELL) / 2
@@ -9169,6 +9301,13 @@ func _update_hud() -> void:
 	var h := ui.get_node_or_null("Hud")
 	if h:
 		h.text = "Score: %d   Lines: %d   Level: %d   Best: %d" % [score, lines, level, best]
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotRoguelike(string root, string prompt)
@@ -9243,7 +9382,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	best_floor = _load_best()
 	randomize()
 	Shell.startup()
@@ -9268,6 +9410,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -9422,6 +9568,7 @@ func _update_hud() -> void:
 		h.text = "Floor: %d  HP: %d/%d  Lvl: %d  ATK: %d  DEF: %d" % [floor, player.hp, player.max_hp, player.level, player.atk, player.def]
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	var ox := 20
@@ -9528,6 +9675,13 @@ func _load_best() -> int:
 		return 0
 	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
 	return int(f.get_as_text()) if f else 0
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
     internal static string[] ScaffoldGodotRpg(string root, string prompt)
@@ -9608,7 +9762,10 @@ var focus_pending := true
 var shake := 0.0
 var ui: CanvasLayer
 
+var backdrop: Texture2D = null
+
 func _ready() -> void:
+	backdrop = load("res://background.png") as Texture2D
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -9633,6 +9790,10 @@ func _ready() -> void:
 
 func play_sound(key: String) -> void:
 	if snd.has(key):
+		# Liten slumpad tonhojd sa upprepade ljud inte trottar orat.
+		# UI-klick halls nastan rent; spelljud far mer liv.
+		snd[key].pitch_scale = randf_range(0.97, 1.03) if key == "click" \
+			else randf_range(0.88, 1.13)
 		snd[key].play()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -9748,6 +9909,7 @@ func _update_hud() -> void:
 		h.text = "HP: %d/%d  Lvl: %d  XP: %d" % [player.hp, player.max_hp, player.level, player.xp]
 
 func _draw() -> void:
+	_draw_backdrop()
 	if state != "playing":
 		return
 	if combat_active:
@@ -9917,6 +10079,13 @@ func _load_game() -> void:
 			npcs = data.get("npcs", [])
 			inventory = data.get("inventory", [])
 			quest_log = data.get("quest_log", [])
+
+func _draw_backdrop() -> void:
+	# Ritas FORE state-vakten: annars star titelskarmen kvar tom.
+	if backdrop != null:
+		draw_texture_rect(backdrop, Rect2(0, 0, 1152, 648), false)
+	else:
+		draw_rect(Rect2(0, 0, 1152, 648), Color(0.10, 0.11, 0.16))
 """;
 
 }

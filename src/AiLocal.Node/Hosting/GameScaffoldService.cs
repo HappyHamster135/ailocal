@@ -412,6 +412,20 @@ static func character_select(parent: Node, names: Array, colors: Array, selected
                 extra.Add("theme.tres");
             }
             catch { /* temat är en förbättring, aldrig en byggstoppare */ }
+            // v2.32: BAKGRUND TILL ALLA KIT. Bara 4 av 21 hade en - resten
+            // ritade platt grått, vilket är den enskilt tydligaste
+            // "browserspel"-signalen i skärmdumpsjämförelsen. Kit som redan
+            // skriver en egen behåller sin.
+            try
+            {
+                if (!File.Exists(Path.Combine(root, "background.png")))
+                {
+                    Write(root, "background.png",
+                        PixelBackdrop.Build(BackdropHint(genre, identity), 288, 162));
+                    extra.Add("background.png");
+                }
+            }
+            catch { /* bakgrunden är en förbättring, aldrig en byggstoppare */ }
             return [.. files, .. extra];
         }
         catch
@@ -420,6 +434,32 @@ static func character_select(parent: Node, names: Array, colors: Array, selected
             // sprites": faller tillbaka på den gamla vägen.
             return AppendCharacterSpritesLegacy(root, prompt, files);
         }
+    }
+
+    /// <summary>v2.32: bakgrundens tema. Utan detta faller varje prompt utan
+    /// temaord ("bygg ett snake spel") till samma standardäng, så ett halvdussin
+    /// olika spel fick IDENTISK bakgrund och såg ut som samma produkt.
+    /// Genren ger ett tema när prompten inte redan bär ett - användarens egna
+    /// ord vinner alltid, eftersom PixelBackdrop läser dem först.</summary>
+    internal static string BackdropHint(string genre, string identity)
+    {
+        var theme = genre switch
+        {
+            "roguelike" => "grotta dungeon",
+            "rpg" => "skog forest",
+            "shooter" or "fps" => "natt night",
+            "racing" => "solnedgang sunset",
+            "management" or "simulator" or "idle" => "stad city",
+            "puzzle" or "blockpuzzle" => "skymning dusk",
+            "memory" or "quiz" => "solnedgang sunset",
+            "minesweeper" => "grotta cave",
+            "breakout" or "snake" => "rymd space",
+            "towerdefense" => "skog forest",
+            "artillery" => "oken desert",
+            "party" => "natt night",
+            _ => "",
+        };
+        return theme.Length == 0 ? identity : identity + " " + theme;
     }
 
     static string[] AppendCharacterSpritesLegacy(string root, string prompt, string[] files)

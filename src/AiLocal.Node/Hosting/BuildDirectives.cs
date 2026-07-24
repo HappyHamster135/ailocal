@@ -63,11 +63,11 @@ public static class BuildDirectives
     public static readonly IReadOnlyDictionary<string, Feature> Catalog =
         new Dictionary<string, Feature>(StringComparer.OrdinalIgnoreCase)
         {
-            ["shop"] = new("shop", "Butik", null,
+            ["shop"] = new("shop", "Butik", "shop",
                 "FUNKTION (operatörens val - hårt krav): BUTIK. En butiksskärm där spelaren växlar intjänad valuta " +
                 "mot minst 5 meningsfulla uppgraderingar/föremål som MÄRKS i spelet. Priserna stiger, det köpta " +
                 "syns i HUD:en och sparas mellan körningar."),
-            ["achievements"] = new("achievements", "Prestationer", null,
+            ["achievements"] = new("achievements", "Prestationer", "achievements",
                 "FUNKTION (operatörens val - hårt krav): PRESTATIONER. Minst 8 namngivna achievements med villkor, " +
                 "en lista i menyn som visar låsta/upplåsta, popup när en låses upp, och sparning i user://."),
             ["inventory"] = new("inventory", "Inventarie", "inventory",

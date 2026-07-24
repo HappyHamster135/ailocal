@@ -15,7 +15,9 @@ public class GameModuleLibraryTests
     public void List_ExposesAllEightModulesWithDescriptions()
     {
         var modules = GameModuleLibrary.List();
-        Assert.Equal(8, modules.Count);
+        // v2.32: 8 -> 10. Butik och prestationer tillkom; composern hade
+        // kryssrutor for dem sedan v2.30 utan att biblioteket kunde leverera.
+        Assert.Equal(10, modules.Count);
         Assert.All(modules, m =>
         {
             Assert.False(string.IsNullOrWhiteSpace(m.Name));
@@ -23,6 +25,8 @@ public class GameModuleLibraryTests
         });
         Assert.Contains(modules, m => m.Name == "InventorySystem");
         Assert.Contains(modules, m => m.Name == "ParticleEffects");
+        Assert.Contains(modules, m => m.Name == "ShopModule");
+        Assert.Contains(modules, m => m.Name == "AchievementModule");
     }
 
     [Fact]
