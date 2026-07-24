@@ -569,6 +569,26 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > tematiska himlar per bana — byte vore regression, inte förbättring).
 > Fönsterverifierat båda kiten. KVAR: CC0-assetpaket, kampanjläge,
 > HTML5-kitens svenska.
+>
+> **v2.28 TIO NYA KIT — OCH RÄDDNINGEN AV DEM.** En parallell session
+> lade 10 kit (tower defense, snake, breakout, quiz, memory, minesweeper,
+> idle, blockpuzzle, roguelike, rpg/Hero's Quest) med genrekontrakt,
+> idébank och routning. C#-testerna var gröna — men INGET av kiten
+> laddade eller renderade i Godot; sessionen körde aldrig sitt arbete i
+> motorn. Sju buggklasser fixade: `_label` col/fsize omkastade (alla 10),
+> `:=` på Variant (~70 rader), `draw_char` arg 2/3 omkastade,
+> `_queue_redraw` (finns ej), saknat `queue_redraw()` i `_process`
+> (blank vy, 9 kit), scen `Node2D` + `extends Control` (skriptet fäster
+> aldrig = HELT blankt, memory+Hero's Quest), och TD:s `grid` som aldrig
+> byggdes (out-of-bounds-krasch). Hero's Quest inkopplat: rpg/äventyr
+> UTAN "top-down" → Hero's Quest, "top-down"/vågöverlevnad → The Glade.
+> ROTORSAK till att allt slank igenom: det gated Godot-testet KÖR kiten
+> skarpt men de nya kiten lades aldrig till i det, och assertionen
+> missade scen-mismatchen — nu är alla 20 kit med och kontrollen fångar
+> "can't be assigned"/"Failed to load" (bevisad skarp via injicerat fel).
+> LÄRDOM: C#-grep OCH `--check-only` passerar båda på helt trasiga kit —
+> bara riktig körning + skärmdump duger. KVAR: CC0-assetpaket,
+> kampanjläge, HTML5-kitens svenska.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
