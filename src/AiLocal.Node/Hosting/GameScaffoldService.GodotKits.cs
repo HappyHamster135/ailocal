@@ -6788,6 +6788,9 @@ var enemies: Array = []
 var wave := 0
 var gold := 150
 var lives := 20
+# v2.31: basta vag som natts, sparad mellan korningar. SAVE_PATH deklarerades
+# men rordes aldrig - "basta resultat" fanns inte trots att kitet lovade det.
+var best_wave := 0
 var wave_timer := 0.0
 var spawning := false
 var spawn_queue: Array = []
@@ -6804,6 +6807,7 @@ var ui: CanvasLayer
 func _ready() -> void:
 	randomize()
 	Shell.startup()
+	best_wave = _load_best()
 	for key in ["click","coin","hurt","win"]:
 		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
 		if stream:
@@ -6881,11 +6885,27 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("YOU WIN!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
+	_label("Wave %d of %d   Best: %d" % [wave + 1, WAVE_COUNT, best_wave], 280, 22)
+	if wave + 1 > best_wave:
+		best_wave = wave + 1
+		_save_best()
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
 	play_sound("win" if win else "hurt")
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best_wave))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
 
 func _screenshake(intensity: float) -> void:
 	shake = intensity
@@ -6950,6 +6970,7 @@ func _process(delta: float) -> void:
 	queue_redraw()
 	if state != "playing":
 		return
+	_update_hud()
 	if not wave_active:
 		return
 	if spawning and not spawn_queue.is_empty():
@@ -6976,6 +6997,13 @@ func _process(delta: float) -> void:
 				lives -= 1
 				e["hp"] = 0
 				play_sound("hurt")
+				_screenshake(6.0)
+				# Utan denna kontroll gick spelet ALDRIG att forlora - lives
+				# rakades ner men lastes aldrig, sa man kunde na -1000 liv och
+				# spela vidare. Ett tower defense utan forlustvillkor ar inget spel.
+				if lives <= 0:
+					_game_over(false)
+					return
 	for t in towers:
 		t["cd"] -= delta
 		if t["cd"] > 0.0:
@@ -7010,6 +7038,11 @@ func _start(d: int) -> void:
 	selected_tower = -1
 	state = "playing"
 	_clear_ui()
+	var hud := Label.new()
+	hud.name = "Hud"
+	hud.position = Vector2(16, 10)
+	hud.add_theme_font_size_override("font_size", 20)
+	ui.add_child(hud)
 	_start_wave()
 
 func _start_wave() -> void:
@@ -7036,6 +7069,15 @@ func _input(event: InputEvent) -> void:
 				towers.append({"x": cx, "y": cy, "type": 0, "cd": 0.0})
 				gold -= 50
 				play_sound("click")
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Wave: %d/%d  Gold: %d  Lives: %d" % [wave + 1, WAVE_COUNT, int(gold), lives]
 """;
 
     internal static string[] ScaffoldGodotSnake(string root, string prompt)
@@ -7111,6 +7153,7 @@ var shake := 0.0
 var ui: CanvasLayer
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -7189,10 +7232,15 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
-	_label("GAME OVER - Score: %d" % score, 200, 76, Color(1, 0.3, 0.3))
+	# win-parametern MASTE respekteras - annars far spelaren rod "GAME OVER"
+	# nar hen precis VUNNIT (Snake anropar _game_over(true) vid full plan).
+	_label("YOU WIN! - Score: %d" % score if win else "GAME OVER - Score: %d" % score,
+		200, 76, Color(0.4, 1, 0.5) if win else Color(1, 0.3, 0.3))
 	if score > best:
 		best = score
+		_save_best()
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
 	play_sound("hurt")
@@ -7237,6 +7285,7 @@ func _process(delta: float) -> void:
 	queue_redraw()
 	if state != "playing":
 		return
+	_update_hud()
 	move_timer -= delta
 	if move_timer > 0.0:
 		return
@@ -7292,6 +7341,26 @@ func _start(d: int) -> void:
 	hud.name = "Hud"
 	ui.add_child(hud)
 	_spawn_food()
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Score: %d   Best: %d" % [score, best]
 """;
 
     internal static string[] ScaffoldGodotBreakout(string root, string prompt)
@@ -7371,6 +7440,7 @@ var ui: CanvasLayer
 var ball_launched := false
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -7449,10 +7519,12 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("YOU WIN!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
 	if score > best:
 		best = score
+		_save_best()
 	_label("Score: %d" % score, 280, 22)
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
@@ -7494,6 +7566,7 @@ func _process(delta: float) -> void:
 	queue_redraw()
 	if state != "playing":
 		return
+	_update_hud()
 	# Keyboard paddle
 	if Input.is_key_pressed(KEY_LEFT):
 		paddle_x = max(PADDLE_W/2, paddle_x - 500 * delta)
@@ -7567,6 +7640,26 @@ func _start(d: int) -> void:
 	hud.text = "Score: 0  Lives: 3"
 	hud.name = "Hud"
 	ui.add_child(hud)
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Score: %d   Lives: %d   Best: %d" % [score, lives, best]
 """;
 
     internal static string[] ScaffoldGodotQuiz(string root, string prompt)
@@ -7649,6 +7742,7 @@ var shake := 0.0
 var ui: CanvasLayer
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -7727,11 +7821,13 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("QUIZ MASTER!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
 	_label("Score: %d / %d" % [score, 12], 280, 22)
 	if score > best:
 		best = score
+		_save_best()
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
 	play_sound("win" if win else "hurt")
@@ -7812,6 +7908,17 @@ func _start(d: int) -> void:
 	answered = false
 	state = "playing"
 	_show_question()
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
 """;
 
     internal static string[] ScaffoldGodotMemory(string root, string prompt)
@@ -7885,6 +7992,7 @@ var ui: CanvasLayer
 var card_symbols := ["A","B","C","D","E","F","G","H"]
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -7963,10 +8071,12 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("YOU WIN! Moves: %d" % moves, 200, 76, Color(0.3, 1, 0.3))
 	if best == 0 or moves < best:
 		best = moves
+		_save_best()
 	_label("Best: %d moves" % best, 280, 22)
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
@@ -7983,6 +8093,7 @@ func _screenshake(intensity: float) -> void:
 
 func _process(_delta: float) -> void:
 	queue_redraw()
+	_update_hud()
 
 func _draw() -> void:
 	if state != "playing":
@@ -8072,6 +8183,26 @@ func _start(d: int) -> void:
 	hud.text = "Moves: 0"
 	hud.name = "Hud"
 	ui.add_child(hud)
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Moves: %d   Best: %s" % [moves, ("-" if best == 0 else str(best))]
 """;
 
 
@@ -8148,6 +8279,7 @@ var shake := 0.0
 var ui: CanvasLayer
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -8226,10 +8358,12 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("YOU WIN! Time: %ds" % int(time), 200, 76, Color(0.3,1,0.3))
 	if win and (best == 0 or time < best):
 		best = int(time)
+		_save_best()
 	_label("Best: %ds" % best, 280, 22)
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
@@ -8324,6 +8458,7 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	queue_redraw()
+	_update_hud()
 	if state == "playing" and not game_over:
 		time += delta
 
@@ -8370,6 +8505,26 @@ func _start(d: int) -> void:
 	hud.text = "Time: 0"
 	hud.name = "Hud"
 	ui.add_child(hud)
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Time: %d   Best: %s" % [int(time), ("-" if best == 0 else str(best))]
 """;
 
     internal static string[] ScaffoldGodotIdle(string root, string prompt)
@@ -8523,6 +8678,7 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("GOLD RUSH!", 200, 76, Color(0.95, 0.8, 0.2))
 	_label("Total earned: %d gold" % total_earned, 280, 22)
@@ -8715,6 +8871,7 @@ var shake := 0.0
 var ui: CanvasLayer
 
 func _ready() -> void:
+	best = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -8793,10 +8950,15 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
-	_label("GAME OVER - Score: %d" % score, 200, 76, Color(1, 0.3, 0.3))
+	# win-parametern MASTE respekteras - annars far spelaren rod "GAME OVER"
+	# nar hen precis VUNNIT (Snake anropar _game_over(true) vid full plan).
+	_label("YOU WIN! - Score: %d" % score if win else "GAME OVER - Score: %d" % score,
+		200, 76, Color(0.4, 1, 0.5) if win else Color(1, 0.3, 0.3))
 	if score > best:
 		best = score
+		_save_best()
 	_label("Lines: %d" % lines, 280, 22)
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
@@ -8883,6 +9045,7 @@ func _draw() -> void:
 
 func _process(delta: float) -> void:
 	queue_redraw()
+	_update_hud()
 	if state != "playing" or game_over:
 		return
 	drop_timer -= delta
@@ -8979,6 +9142,26 @@ func _start(d: int) -> void:
 	hud.text = "Score: 0  Lines: 0  Level: 1"
 	hud.name = "Hud"
 	ui.add_child(hud)
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
+
+func _update_hud() -> void:
+	# HUD:en skapades med statisk text och uppdaterades aldrig -
+	# spelaren sag "Score: 0" genom hela spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Score: %d   Lines: %d   Level: %d   Best: %d" % [score, lines, level, best]
 """;
 
     internal static string[] ScaffoldGodotRoguelike(string root, string prompt)
@@ -9054,6 +9237,7 @@ var shake := 0.0
 var ui: CanvasLayer
 
 func _ready() -> void:
+	best_floor = _load_best()
 	randomize()
 	Shell.startup()
 	for key in ["click","coin","hurt","win"]:
@@ -9132,11 +9316,13 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("PERISHED on floor %d" % floor, 200, 76, Color(1, 0.3, 0.3))
 	_label("Turns: %d" % turns, 280, 22)
 	if floor > best_floor:
 		best_floor = floor
+		_save_best()
 	_button("Play Again", 340, func(): _show_title())
 	_button("Quit", 398, func(): get_tree().quit())
 	play_sound("hurt")
@@ -9217,6 +9403,16 @@ func _generate_map() -> void:
 
 func _process(_delta: float) -> void:
 	queue_redraw()
+	_update_hud()
+
+func _update_hud() -> void:
+	# HUD-texten sattes EN gang vid start och uppdaterades aldrig - HP, niva
+	# och vaning stod stilla oavsett vad som hande i spelet.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "Floor: %d  HP: %d/%d  Lvl: %d  ATK: %d  DEF: %d" % [floor, player.hp, player.max_hp, player.level, player.atk, player.def]
 
 func _draw() -> void:
 	if state != "playing":
@@ -9314,6 +9510,17 @@ func _start(d: int) -> void:
 	hud.text = "Floor: %d  HP: %d/%d  Lvl: %d  ATK: %d  DEF: %d" % [floor, player.hp, player.max_hp, player.level, player.atk, player.def]
 	hud.name = "Hud"
 	ui.add_child(hud)
+
+func _save_best() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(str(best_floor))
+
+func _load_best() -> int:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return 0
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	return int(f.get_as_text()) if f else 0
 """;
 
     internal static string[] ScaffoldGodotRpg(string root, string prompt)
@@ -9474,6 +9681,7 @@ func _show_title() -> void:
 	_button("Quit", 528, func(): get_tree().quit())
 
 func _game_over(win: bool) -> void:
+	state = "over"
 	_clear_ui()
 	_label("YOU DIED" if not win else "QUEST COMPLETE!", 200, 76, Color(1,0.3,0.3) if not win else Color(0.3,1,0.3))
 	_label("Level: %d  XP: %d" % [player.level, player.xp], 280, 22)
@@ -9521,6 +9729,16 @@ func _generate_world() -> void:
 
 func _process(_delta: float) -> void:
 	queue_redraw()
+	_update_hud()
+
+func _update_hud() -> void:
+	# HUD-texten sattes EN gang vid start och uppdaterades aldrig - HP och
+	# niva stod stilla aven mitt i strid.
+	if ui == null:
+		return
+	var h := ui.get_node_or_null("Hud")
+	if h:
+		h.text = "HP: %d/%d  Lvl: %d  XP: %d" % [player.hp, player.max_hp, player.level, player.xp]
 
 func _draw() -> void:
 	if state != "playing":
