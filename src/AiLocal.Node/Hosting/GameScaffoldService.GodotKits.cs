@@ -938,6 +938,10 @@ extends Node3D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.29: husets 3D-karaktar. Riggen byggs ur SAMMA CharacterSpec som ritar
+# 2D-pixelgubben, sa figuren kanns igen mellan 2D- och 3D-spel.
+const Rig3D = preload("res://Rig3D.gd")
+const Cast3D = preload("res://Cast3D.gd")
 
 const SAVE_PATH := "user://cube_best.txt"
 const COINS := 8
@@ -945,6 +949,9 @@ const COINS := 8
 var state := "title"
 var difficulty := 1
 var player: CharacterBody3D
+# OTYPAD med flit: riggen ar en Rig3D vars metoder (play/set_speed/face_dir)
+# inte finns pa Node3D, och en typad deklaration skulle ge kompileringsfel.
+var rig = null
 var coins: Array[Node3D] = []
 var collected := 0
 var time_left := 0.0
@@ -1086,20 +1093,26 @@ func _build_world() -> void:
     add_child(gbody)
     cam = Camera3D.new()
     add_child(cam)
+    # v2.29: spelaren ar inte langre en bokstavlig kub utan husets riggade
+    # 3D-figur. Riggens fotter ligger pa y=0 lokalt, sa den hangs -halva
+    # kapselhojden under kroppens centrum.
     player = CharacterBody3D.new()
-    var pm := MeshInstance3D.new()
-    var pbox := BoxMesh.new()
-    pbox.size = Vector3(1, 1, 1)
-    pm.mesh = pbox
-    pm.material_override = _mat(Color(0.3, 0.6, 1.0))
-    player.add_child(pm)
+    var pspec: Dictionary = Cast3D.spec("player")
+    var pm3: Dictionary = Rig3D.metrics_of(pspec)
+    var ph: float = float(pm3.get("cap_h", 1.7))
+    var pr: float = float(pm3.get("cap_r", 0.22))
+    rig = Rig3D.actor(pspec)
+    rig.position = Vector3(0, -ph * 0.5, 0)
+    player.add_child(rig)
     var pcol := CollisionShape3D.new()
-    var pshape := BoxShape3D.new()
-    pshape.size = Vector3(1, 1, 1)
+    var pshape := CapsuleShape3D.new()
+    pshape.height = ph
+    pshape.radius = pr
     pcol.shape = pshape
     player.add_child(pcol)
-    player.position = Vector3(0, 1, 0)
+    player.position = Vector3(0, ph * 0.5, 0)
     add_child(player)
+    rig.play("idle")
 
 func _clear_ui() -> void:
     for c in ui.get_children():
@@ -1163,8 +1176,10 @@ func _start(d: int) -> void:
     collected = 0
     var times: Array[float] = [60.0, 45.0, 30.0]
     time_left = times[d]
-    player.position = Vector3(0, 1, 0)
+    player.position = Vector3(0, float(Rig3D.metrics_of(Cast3D.spec("player")).get("cap_h", 1.7)) * 0.5, 0)
     player.velocity = Vector3.ZERO
+    if rig:
+        rig.play("idle")
     _spawn_coins()
     _clear_ui()
     var hud := _label("", 12, 26)
@@ -1202,12 +1217,28 @@ func _physics_process(delta: float) -> void:
     else:
         player.velocity.y -= 24.0 * delta
     player.move_and_slide()
+    # v2.29: riggen speglar rorelsen - gar nar man ror sig, star still annars,
+    # och vander sig at det hall man springer.
+    if rig:
+        var flat := Vector3(player.velocity.x, 0.0, player.velocity.z)
+        var sp: float = flat.length() / maxf(0.001, speed)
+        if not player.is_on_floor():
+            rig.play("jump" if player.velocity.y > 0.0 else "fall")
+        elif sp > 0.06:
+            rig.play("walk")
+            rig.set_speed(clampf(sp, 0.0, 1.0))
+            rig.face_dir(flat, delta)
+        else:
+            rig.play("idle")
     # C1 juice: kamerashake - lagg en avtagande slump-offset pa foljekameran.
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 2.0 * delta)
     var sh := Vector3(randf_range(-shake, shake), randf_range(-shake, shake), 0.0)
-    cam.position = player.position + Vector3(0, 14, 14) + sh
-    cam.look_at(player.position, Vector3.UP)
+    # v2.29: narmare kamera an de gamla 14/14. Spelaren ar inte langre en
+    # 1x1-kub utan en 1,7 m hog figur med ansikte och gangcykel - pa
+    # 14 enheters avstand blev den ~50 px och all detalj foll bort.
+    cam.position = player.position + Vector3(0, 7.5, 8.5) + sh
+    cam.look_at(player.position + Vector3(0, 0.6, 0), Vector3.UP)
     for coin in coins:
         if is_instance_valid(coin):
             coin.rotate_y(delta * 3.0)

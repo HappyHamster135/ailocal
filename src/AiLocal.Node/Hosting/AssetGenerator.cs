@@ -144,6 +144,9 @@ public sealed class AssetGenerator
             var seed = VisualStyleLib.StableHash(prompt ?? slug);
             var (spec, created) = CharacterCast.Resolve(root, slug, null, RoleFor(slug, prompt), bible, seed);
             var (png, tres) = CharacterSheetBuilder.WriteInto(root, spec);
+            // v2.29: hall Cast3D.gd i takt sa en nytillagd figur gar att
+            // anvanda i 3D direkt, inte forst efter nasta scaffold.
+            Cast3DScript.WriteInto(root);
             var full = Path.Combine(root, png);
             return new AssetResult(true,
                 created

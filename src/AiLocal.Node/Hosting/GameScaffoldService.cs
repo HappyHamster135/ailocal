@@ -145,6 +145,12 @@ public sealed partial class GameScaffoldService
         scaffolded = AppendShellLib(root, scaffolded);
         scaffolded = AppendSfxBank(root, scaffolded);
         scaffolded = AppendCharacterSprites(root, prompt ?? "", scaffolded);
+        // v2.29: 3D-golvet. Rig3D.gd bygger en riggad humanoid ur samma
+        // CharacterSpec som ritar 2D-pixelgubben; Cast3D.gd ar rollistan som
+        // GDScript-data. MASTE komma efter AppendCharacterSprites - det ar
+        // den som skapar rollistan Cast3D speglar.
+        scaffolded = AppendRig3DLib(root, scaffolded);
+        scaffolded = AppendCast3D(root, scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
     }
 
