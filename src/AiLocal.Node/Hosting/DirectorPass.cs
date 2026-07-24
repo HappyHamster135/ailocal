@@ -179,7 +179,7 @@ public static class DirectorPass
             // Art.gd skickas med i varje Godot-scaffold - kriteriet gör
             // användningen till ett kontraktskrav för allt agentritat.
             (["art.gd", "kontur", "outline", "skugga", "shadow", "programmer-art", "grafisk finish", "visuell finish"],
-                "Grafisk finish: allt agentritat använder Art.gd-hjälparna (Art.orb/tile/panel/token/bg - kontur, skugga, ljushighlight, djup) - ALDRIG nakna osminkade draw_rect/draw_circle för spelentiteter"),
+                "Grafisk finish: allt agentritat använder Art.gd-hjälparna (Art.orb/tile/panel/token/bg - kontur, skugga, ljushighlight, djup) - ALDRIG nakna osminkade draw_rect/draw_circle för spelentiteter. Lägg raden `const Art = preload(\"res://Art.gd\")` högst upp i filen: enbart klassnamnet fungerar INTE i ett projekt som körs utan importpass"),
             // v2.15 (ägarens dom: "startmeny, settings, välja gubbe - sånt som
             // ALLA spel har, även gratis"): spelSKALET är ett kontraktskrav.
             // Shell.gd skickas med i varje Godot-scaffold med färdiga

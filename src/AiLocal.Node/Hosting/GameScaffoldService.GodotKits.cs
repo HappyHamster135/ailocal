@@ -241,6 +241,12 @@ extends Node2D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const SAVE_PATH := "user://circuit_best.txt"
 const LAPS := 3
@@ -596,6 +602,12 @@ extends Node2D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const N := 4
 const SAVE_PATH := "user://twenty48_best.txt"
@@ -938,6 +950,12 @@ extends Node3D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 # v2.29: husets 3D-karaktar. Riggen byggs ur SAMMA CharacterSpec som ritar
 # 2D-pixelgubben, sa figuren kanns igen mellan 2D- och 3D-spel.
 const Rig3D = preload("res://Rig3D.gd")
@@ -1376,6 +1394,12 @@ extends Control
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const SAVE_PATH := "user://clubmanager_save.json"
 const SEASON_LENGTH := 10
@@ -1690,6 +1714,12 @@ extends Node2D
 # Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
 # importen, och class_name-registret finns forst efter import.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const SAVE_PATH := "user://glade_highscore.save"
 const ARENA := Rect2(60, 60, 1032, 528)
@@ -2201,6 +2231,12 @@ extends Node2D
 # Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
 # importen, och class_name-registret finns forst efter import.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const SAVE_PATH := "user://pixelrush_highscore.save"
 const MEDALS_PATH := "user://pixelrush_medals.save"
@@ -3087,6 +3123,12 @@ extends Node2D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 const SAVE_PATH := "user://cannonade_streak.save"
 const W := 1152
@@ -3790,6 +3832,12 @@ extends Node2D
 # Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
 # importen, och class_name-registret finns forst efter import.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 # v2.30: karaktarsskaparen - spelaren bygger sin egen gubbe (kroppstyp,
 # frisyr, har-/hud-/kladfarg) med levande forhandsvisning, sparat i user://.
 const CharCustom = preload("res://CharCustom.gd")
@@ -5367,6 +5415,12 @@ extends Node3D
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 
 # v2.29: husets 3D-karaktar - fienderna ar riggade figurer, inte kapslar.
 const Rig3D = preload("res://Rig3D.gd")
@@ -5926,6 +5980,12 @@ const TILE_STAR := 3
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 # v2.29: husets 3D-karaktar. Se REPRESENTATION i make_actor - partyt kor
 # billboard-sprite som default eftersom figuren ar liten vid kitets kamera.
 const Rig3D = preload("res://Rig3D.gd")
@@ -6798,8 +6858,18 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://towersiege_best.save"
-const GRID_W := 10
+# v2.35: 10 x 64 px = 640 av fonstrets 1152 - brädet lag i vanstra kanten
+# och hogra halvan var tom bakgrund. Ett halvt spelplan ser ut som ett
+# oavslutat bygge. 18 kolumner fyller bredden EXAKT (18 * 64 = 1152), sa
+# inga offset-berakningar i _draw eller klickhanteringen behover andras.
+const GRID_W := 18
 const GRID_H := 8
 const TILE := 64
 const WAVE_COUNT := 10
@@ -6947,12 +7017,19 @@ func _screenshake(intensity: float) -> void:
 
 func _build_path() -> void:
 	var pts: Array[Vector2] = []
+	# v2.35: vagen slutade pa kolumn 9 - med det bredare bradet hade
+	# fienderna forsvunnit mitt pa planen. Nu slingrar den over hela bredden
+	# och gar ut i hogra kanten, vilket ocksa ger fler tornlagen att valja.
 	pts.append(Vector2(0, 3 * TILE + TILE/2))
 	pts.append(Vector2(3 * TILE + TILE/2, 3 * TILE + TILE/2))
 	pts.append(Vector2(3 * TILE + TILE/2, 6 * TILE + TILE/2))
 	pts.append(Vector2(7 * TILE + TILE/2, 6 * TILE + TILE/2))
-	pts.append(Vector2(7 * TILE + TILE/2, 2 * TILE + TILE/2))
-	pts.append(Vector2(9 * TILE + TILE/2, 2 * TILE + TILE/2))
+	pts.append(Vector2(7 * TILE + TILE/2, 1 * TILE + TILE/2))
+	pts.append(Vector2(11 * TILE + TILE/2, 1 * TILE + TILE/2))
+	pts.append(Vector2(11 * TILE + TILE/2, 5 * TILE + TILE/2))
+	pts.append(Vector2(15 * TILE + TILE/2, 5 * TILE + TILE/2))
+	pts.append(Vector2(15 * TILE + TILE/2, 2 * TILE + TILE/2))
+	pts.append(Vector2(GRID_W * TILE, 2 * TILE + TILE/2))
 	# v2.28-fix: grid byggdes aldrig (tomt -> _draw kraschade "out of bounds").
 	# Fyll rutnatet och markera vagceller (1) sa torn inte kan sattas pa vagen.
 	grid = []
@@ -6989,12 +7066,16 @@ func _draw() -> void:
 			var col := Color(0.15, 0.2, 0.1) if grid[y * GRID_W + x] == 0 else Color(0.3, 0.25, 0.15)
 			draw_rect(Rect2(x * TILE, y * TILE + 80, TILE, TILE), col, true)
 			draw_rect(Rect2(x * TILE, y * TILE + 80, TILE, TILE), Color(0.2,0.2,0.2), false)
+	# v2.35: Art.gd i stallet for nakna draw_circle. Rutnatet lamnas platt -
+	# det ar SAMMANHANGANDE terrang, och en skugga per ruta hade bara blivit
+	# brus. Pjaserna PA rutnatet ar det som ska ha djup.
 	for t in towers:
-		draw_circle(Vector2(t["x"], t["y"]), 20, Color(0.6, 0.4, 0.2))
+		Art.orb(self, Vector2(t["x"], t["y"]), 20, Color(0.6, 0.4, 0.2))
 	for e in enemies:
-		draw_circle(Vector2(e["x"], e["y"]), 10, Color(1, 0.2, 0.2))
-		var hp_pct = e["hp"] / e["max_hp"]
-		draw_rect(Rect2(e["x"] - 12, e["y"] - 18, 24 * hp_pct, 4), Color(0, 1, 0), true)
+		Art.orb(self, Vector2(e["x"], e["y"]), 10, Color(1, 0.2, 0.2))
+		var hp_pct: float = float(e["hp"]) / float(e["max_hp"])
+		Art.bar(self, Rect2(e["x"] - 12, e["y"] - 18, 24, 4), hp_pct,
+			Color(0, 0, 0, 0.5), Color(0.25, 0.9, 0.3))
 
 func _process(delta: float) -> void:
 	queue_redraw()
@@ -7168,6 +7249,12 @@ extends Control
 # Arrow keys to move. Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://snake_best.save"
 const GRID_W := 20
 const GRID_H := 15
@@ -7308,11 +7395,13 @@ func _draw() -> void:
 		for x in range(GRID_W):
 			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.08, 0.12, 0.08), true)
 			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.15, 0.2, 0.15), false)
+	# v2.35: kroppen via Art.tile - varje segment far skugga, ljuskant och
+	# kontur, sa ormen last som en KROPP i stallet for en rad platta rutor.
 	for i in range(snake.size()):
 		var col := Color(0.1, 0.8, 0.2) if i == 0 else Color(0.15, 0.6, 0.15)
-		draw_rect(Rect2(ox + snake[i].x * CELL + 1, oy + snake[i].y * CELL + 1, CELL - 2, CELL - 2), col, true)
+		Art.tile(self, Rect2(ox + snake[i].x * CELL + 1, oy + snake[i].y * CELL + 1, CELL - 2, CELL - 2), col)
 	if food.x >= 0:
-		draw_circle(Vector2(ox + food.x * CELL + CELL/2, oy + food.y * CELL + CELL/2), CELL/2 - 2, Color(1, 0.2, 0.2))
+		Art.orb(self, Vector2(ox + food.x * CELL + CELL/2, oy + food.y * CELL + CELL/2), CELL/2 - 2, Color(1, 0.2, 0.2))
 
 func _input(event: InputEvent) -> void:
 	if state != "playing":
@@ -7466,6 +7555,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://breakout_best.save"
 const PADDLE_W := 120
 const PADDLE_H := 16
@@ -7602,16 +7697,15 @@ func _draw() -> void:
 	_draw_backdrop()
 	if state != "playing":
 		return
-	# Paddle
-	draw_rect(Rect2(paddle_x - PADDLE_W/2, 580, PADDLE_W, PADDLE_H), Color(0.8, 0.8, 1.0), true)
-	# Ball
-	draw_circle(ball, BALL_R, Color(1, 1, 1))
-	# Bricks
+	# v2.35: Art.gd. Fristaende pjaser (racket, boll, murstenar) ar precis
+	# vad skugga/ljuskant/kontur ar till for - platta rektanglar var den
+	# tydligaste browserspel-signalen i det har kitet.
+	Art.panel(self, Rect2(paddle_x - PADDLE_W/2, 580, PADDLE_W, PADDLE_H), Color(0.8, 0.8, 1.0))
+	Art.orb(self, ball, BALL_R, Color(1, 1, 1))
 	for b in bricks:
 		if b["hp"] > 0:
 			var col := Color(0.2 + b["row"] * 0.12, 0.5 - b["row"] * 0.06, 0.8 - b["row"] * 0.1)
-			draw_rect(Rect2(b["x"], b["y"], BRICK_W, BRICK_H), col, true)
-			draw_rect(Rect2(b["x"], b["y"], BRICK_W, BRICK_H), Color(0.3, 0.3, 0.3), false)
+			Art.tile(self, Rect2(b["x"], b["y"], BRICK_W, BRICK_H), col)
 
 func _input(event: InputEvent) -> void:
 	if state != "playing":
@@ -7779,6 +7873,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://quiz_best.save"
 const QUESTIONS := [
 	["What is the capital of France?", "Paris", "London", "Berlin", "Madrid", 0],
@@ -8054,6 +8154,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://memory_best.save"
 const GRID := 4
 const CARD_W := 100
@@ -8197,15 +8303,15 @@ func _draw() -> void:
 		var row := int(idx / GRID)
 		var x = ox + col * (CARD_W + CARD_GAP)
 		var y := oy + row * (CARD_H + CARD_GAP)
+		# v2.35: Art.panel ger korten skugga, ljuskant och kontur - platta
+		# rektanglar lag som klistermarken pa bakgrunden.
 		if c["matched"]:
-			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.1, 0.3, 0.1), true)
+			Art.panel(self, Rect2(x, y, CARD_W, CARD_H), Color(0.1, 0.3, 0.1))
 		elif c["flipped"]:
-			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.25, 0.25, 0.35), true)
-			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.4, 0.4, 0.5), false)
+			Art.panel(self, Rect2(x, y, CARD_W, CARD_H), Color(0.25, 0.25, 0.35))
 			draw_char(get_theme_default_font(), Vector2(x + 40, y + 80), c["symbol"], 40, Color(1, 1, 1))
 		else:
-			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.2, 0.2, 0.5), true)
-			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.3, 0.3, 0.6), false)
+			Art.panel(self, Rect2(x, y, CARD_W, CARD_H), Color(0.2, 0.2, 0.5))
 
 func _input(event: InputEvent) -> void:
 	if state != "playing" or not can_flip:
@@ -8355,6 +8461,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://minesweeper_best.save"
 const GRID := 10
 const CELL := 48
@@ -8495,8 +8607,18 @@ func _draw() -> void:
 			var f = flags[y * GRID + x]
 			var is_mine := mine_positions.has(y * GRID + x)
 			var col := Color(0.35, 0.35, 0.35) if not r else Color(0.55, 0.55, 0.55)
-			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), col, true)
-			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.2, 0.2, 0.2), false)
+			# v2.35: OTACKTA rutor ar upphojda knappar (Art.tile ger dem
+			# ljuskant + skugga, precis som originalspelet); avtackta ar
+			# nedtryckta och forblir platta - skillnaden ska SYNAS.
+			if r:
+				draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), col, true)
+				draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.2, 0.2, 0.2), false)
+			else:
+				# 2 px luft: Art.panel lagger skuggan 4 px UNDER rutan, och
+				# kant-i-kant maladde nasta rad over den sa allt blev vagrata
+				# band i stallet for knappar. Med luft last varje ruta som en
+				# egen upphojd knapp, precis som i originalspelet.
+				Art.tile(self, Rect2(ox + x * CELL + 2, oy + y * CELL + 2, CELL - 4, CELL - 4), col)
 			if f:
 				draw_char(get_theme_default_font(), Vector2(ox + x * CELL + 16, oy + y * CELL + 34), "F", 24, Color(1, 0.2, 0.2))
 			elif r:
@@ -8689,6 +8811,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://goldmine_save.json"
 const UPGRADES := [
 	{"name": "Better Pickaxe", "cost": 30, "effect": "click +1"},
@@ -8964,6 +9092,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://blockpuzzle_best.save"
 const COLS := 10
 const ROWS := 20
@@ -9161,9 +9295,14 @@ func _draw() -> void:
 	# Board
 	for y in range(ROWS):
 		for x in range(COLS):
-			var col := Color(0.08, 0.08, 0.1) if board[y * COLS + x] == 0 else Color(0.3, 0.5, 0.8)
-			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), col, true)
-			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.15, 0.15, 0.18), false)
+			# v2.35: TOMMA rutor ar brunnen och forblir platta; LANDADE
+			# block ar pjaser och far djup via Art.tile. Skillnaden mellan
+			# brunn och block ar hela lasbarheten i ett tetrisspel.
+			if board[y * COLS + x] == 0:
+				draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.08, 0.08, 0.1), true)
+				draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.15, 0.15, 0.18), false)
+			else:
+				Art.tile(self, Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.3, 0.5, 0.8))
 	# Ghost piece
 	var cells := _get_cells(current_piece, current_rot)
 	ghost_y = _calc_ghost()
@@ -9177,8 +9316,7 @@ func _draw() -> void:
 		var cx := int(c.x) + px
 		var cy := int(c.y) + py
 		if cy >= 0:
-			draw_rect(Rect2(ox + cx * CELL, oy + cy * CELL, CELL, CELL), Color(0.2, 0.7, 1.0), true)
-			draw_rect(Rect2(ox + cx * CELL, oy + cy * CELL, CELL, CELL), Color(0.4, 0.8, 1.0), false)
+			Art.tile(self, Rect2(ox + cx * CELL, oy + cy * CELL, CELL, CELL), Color(0.2, 0.7, 1.0))
 
 func _process(delta: float) -> void:
 	queue_redraw()
@@ -9359,6 +9497,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://dungeon_best.save"
 const TILE := 32
 const MAP_W := 40
@@ -9580,22 +9724,32 @@ func _draw() -> void:
 			if mx < 0 or mx >= MAP_W or my < 0 or my >= MAP_H:
 				continue
 			var idx = my * MAP_W + mx
-			var col := Color(0.05, 0.05, 0.08) if map_data[idx] == 1 else Color(0.1, 0.12, 0.1)
+			# v2.35: vaggarna var (0.05,0.05,0.08) = i praktiken SVART, och
+			# tackte hela skarmen med en enda platt yta - grottbakgrunden
+			# maladdes over och spelet sag ut som en tom ruta. Nu sten mot
+			# ljust golv, i tva nyanser schackrutigt (husets pixelsprak fran
+			# v2.20) sa ytan far textur utan att bli brus.
+			var shade := 0.028 if (mx + my) % 2 == 0 else 0.0
+			var col := Color(0.15 + shade, 0.14 + shade, 0.19 + shade) if map_data[idx] == 1 \
+				else Color(0.23 + shade, 0.27 + shade, 0.21 + shade)
 			draw_rect(Rect2(ox + x * TILE, oy + y * TILE, TILE, TILE), col, true)
+	# v2.35: Art.gd. Golvet ar sammanhangande terrang och forblir platt -
+	# det som ROR SIG pa det ska sticka ut, och spelaren mest av alla
+	# (Art.token = orb med vit ring, husets markor for "det har ar du").
 	for item in items:
 		var ix = (item["x"] - cam_x) * TILE + ox
 		var iy = (item["y"] - cam_y) * TILE + oy
-		draw_circle(Vector2(ix + TILE/2, iy + TILE/2), 8, Color(0.2, 1, 0.2))
+		Art.orb(self, Vector2(ix + TILE/2, iy + TILE/2), 8, Color(0.2, 1, 0.2))
 	for e in enemies:
 		if e["hp"] <= 0:
 			continue
 		var ex = (e["x"] - cam_x) * TILE + ox
 		var ey = (e["y"] - cam_y) * TILE + oy
-		draw_rect(Rect2(ex + 4, ey + 4, TILE - 8, TILE - 8), Color(0.8, 0.2, 0.2), true)
+		Art.tile(self, Rect2(ex + 4, ey + 4, TILE - 8, TILE - 8), Color(0.8, 0.2, 0.2))
 	# Player
 	var px2 = (player.x - cam_x) * TILE + ox
 	var py2 = (player.y - cam_y) * TILE + oy
-	draw_rect(Rect2(px2 + 4, py2 + 4, TILE - 8, TILE - 8), Color(0.2, 0.5, 1.0), true)
+	Art.token(self, Vector2(px2 + TILE/2, py2 + TILE/2), TILE/2 - 4, Color(0.2, 0.5, 1.0))
 
 func _input(event: InputEvent) -> void:
 	if state != "playing":
@@ -9734,6 +9888,12 @@ extends Control
 # Player text in ENGLISH (house rule).
 
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name. Ett farskt projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache -
+# `Art.orb(...)` gav da "Identifier Art not declared" och HELA Main.gd
+# vagrade ladda. Shell laddades redan sa har; Art gjorde det inte, vilket
+# ar precis darfor biblioteket varit oanvandbart sedan v2.9.
+const Art = preload("res://Art.gd")
 const SAVE_PATH := "user://herosquest_save.json"
 const TILE := 32
 const MAP_W := 30
@@ -9927,22 +10087,28 @@ func _draw() -> void:
 			if mx < 0 or mx >= MAP_W or my < 0 or my >= MAP_H:
 				continue
 			var idx = my * MAP_W + mx
-			var col := Color(0.1, 0.25, 0.1) if map_data[idx] == 0 else Color(0.15, 0.1, 0.05)
+			# v2.35: samma schackrutiga tvatonsyta som ovriga kit - en enda
+			# platt farg over hela skarmen ar det som far ett spel att se ut
+			# som ett skoluppgiftsprojekt.
+			var shade := 0.03 if (mx + my) % 2 == 0 else 0.0
+			var col := Color(0.13 + shade, 0.28 + shade, 0.13 + shade) if map_data[idx] == 0 \
+				else Color(0.20 + shade, 0.14 + shade, 0.08 + shade)
 			draw_rect(Rect2(ox + x * TILE, oy + y * TILE, TILE, TILE), col, true)
 	for e in enemies:
 		if e["hp"] <= 0:
 			continue
 		var ex = (e["x"] - cam_x) * TILE + ox
 		var ey = (e["y"] - cam_y) * TILE + oy
-		draw_circle(Vector2(ex + TILE/2, ey + TILE/2), 10, Color(1, 0.2, 0.2))
+		# v2.35: Art.gd - marken forblir platt, figurerna far djup.
+		Art.orb(self, Vector2(ex + TILE/2, ey + TILE/2), 10, Color(1, 0.2, 0.2))
 	for npc in npcs:
 		var nx = (npc["x"] - cam_x) * TILE + ox
 		var ny = (npc["y"] - cam_y) * TILE + oy
-		draw_rect(Rect2(nx + 6, ny + 6, TILE - 12, TILE - 12), Color(0.2, 0.8, 0.5), true)
+		Art.tile(self, Rect2(nx + 6, ny + 6, TILE - 12, TILE - 12), Color(0.2, 0.8, 0.5))
 	# Player
 	var px2 = (player.x - cam_x) * TILE + ox
 	var py2 = (player.y - cam_y) * TILE + oy
-	draw_rect(Rect2(px2 + 6, py2 + 6, TILE - 12, TILE - 12), Color(0.3, 0.6, 1.0), true)
+	Art.token(self, Vector2(px2 + TILE/2, py2 + TILE/2), TILE/2 - 6, Color(0.3, 0.6, 1.0))
 
 func _draw_combat() -> void:
 	_label("COMBAT - " + combat_enemy["name"], 150, 28, Color(1, 0.3, 0.3))

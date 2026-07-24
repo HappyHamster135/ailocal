@@ -933,6 +933,13 @@ class_name Art
 # for nakna draw_rect/draw_circle: alla former far skugga, kontur och djup.
 # Alla funktioner ar statiska: Art.panel(self, rect, fargen) fran valfri
 # _draw(). BYT TEMA: skicka andra farger - formspraket ar konstant.
+#
+# SA HAR ANVANDER DU DEN - lagg raden hogst upp i din egen fil:
+#     const Art = preload("res://Art.gd")
+# Klassnamnet nedan racker INTE pa egen hand: ett projekt som startas med
+# `godot --path` utan importpass har ingen global klassregister-cache, och
+# da faller HELA filen med "Identifier Art not declared". Preload loser
+# via SOKVAG och fungerar alltid. Samma sak galler Shell/Phys/Nav3D/Rig3D.
 
 const SHADOW := Color(0.0, 0.0, 0.0, 0.28)
 const OUTLINE_DARKEN := 0.45

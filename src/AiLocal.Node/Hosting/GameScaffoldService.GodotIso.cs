@@ -88,6 +88,9 @@ const TILE_H := 16.0
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.35: preload, INTE class_name - utan importpass finns ingen global
+# klassregister-cache och `Art.` fallerar med "Identifier not declared".
+const Art = preload("res://Art.gd")
 
 # Oarna: radie i tiles, stenar, fiender, tid och markfarger (topp/sida/mork).
 const ISLANDS: Array = [
