@@ -589,6 +589,28 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > LÄRDOM: C#-grep OCH `--check-only` passerar båda på helt trasiga kit —
 > bara riktig körning + skärmdump duger. KVAR: CC0-assetpaket,
 > kampanjläge, HTML5-kitens svenska.
+>
+> **v2.29 KARAKTÄRSIDENTITET + 3D-RIGG.** Ägarens "gubben ser annorlunda
+> ut hela tiden" hade rotorsaken att identiteten var hash(promptsträngen)
+> — minsta omformulering gav ny figur, inget sparades. Nu: `art/artbible.
+> json` (projektets enda färgkälla, speglas till DESIGN.md där AssetStyle
+> redan hade en läsare men ingen skrivare) + `art/cast/<slug>.json`
+> (rollistan; Resolve returnerar befintlig post ordagrant och ignorerar
+> beskrivningen) + harmonitabell för skjortnyans + EGEN dragtabell för
+> fiender. `generate_asset` fick `character`-parameter. TRE BUGGAR PÅ
+> KÖPET: `type += ":pixelart"` före filnamnsbygget gav `assets\sprite:
+> pixelart-*.png` = NTFS alternate data stream (File.Exists true, Godot
+> ser inget); AssetStyle vitlistade `"sprite"` inte `"sprite:pixelart"`
+> så art-bibeln nådde ALDRIG en spelsprite; VisualStyleLib föll tillbaka
+> på Random.Shared. RIG3D: husets återbrukbara 3D-karaktär (namngivna
+> leder + fästpunkter, nio kodstyrda klipp, proportioner ur SAMMA
+> CharacterTraits som 2D-spriten). Kuben och Strike Arena tar riggen;
+> partyt behåller spriten efter sida-vid-sida-jämförelse (~35 px figur
+> där, pixelart vinner). KRITISK FIX: 3D-partyts Falling Floor och Coin
+> Rush hade inte spelat sedan v2.24 — `var node: MeshInstance3D` mot en
+> AnimatedSprite3D avbryter `_physics_process` varje bildruta; figurerna
+> SYNS ändå, så skärmdumpen såg korrekt ut. LÄRDOM: skärmdump bevisar
+> rendering, inte logik. KVAR: fysik, 3D-djup, spelarval av funktioner.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,
