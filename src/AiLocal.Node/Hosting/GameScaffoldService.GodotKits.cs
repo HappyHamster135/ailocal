@@ -5307,6 +5307,10 @@ extends Node3D
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
 
+# v2.29: husets 3D-karaktar - fienderna ar riggade figurer, inte kapslar.
+const Rig3D = preload("res://Rig3D.gd")
+const Cast3D = preload("res://Cast3D.gd")
+
 const SAVE_PATH := "user://strikearena_best.txt"
 const FINAL_WAVE := 5
 const ARENA_R := 17.0
@@ -5422,15 +5426,14 @@ func _build_world() -> void:
     player.add_child(cam)
 
 func _make_enemy() -> Dictionary:
-    var node := MeshInstance3D.new()
-    var cm := CapsuleMesh.new()
-    cm.radius = 0.5
-    cm.height = 1.8
-    node.mesh = cm
-    node.material_override = _mat(Color(0.85, 0.3, 0.3))
+    # v2.29: husets riggade figur i stallet for en rod kapsel. Man moter dem
+    # pa 1,2 meters hall, sa det ar har skillnaden syns mest.
+    var node = Rig3D.actor(Cast3D.spec("enemy"))
     var ang := randf() * TAU
-    node.position = Vector3(cos(ang) * (ARENA_R - 2.0), 1.0, sin(ang) * (ARENA_R - 2.0))
+    # Riggens fotter ligger pa y=0 lokalt - ingen halva-hojden-korrigering.
+    node.position = Vector3(cos(ang) * (ARENA_R - 2.0), 0.0, sin(ang) * (ARENA_R - 2.0))
     add_child(node)
+    node.play("walk")
     return {"node": node, "hp": 2, "speed": 2.2 + wave * 0.35 + float(difficulty) * 0.4}
 
 func _spawn_pickup(kind: String) -> void:
@@ -5614,7 +5617,9 @@ func _fire() -> void:
         var en: Dictionary = enemies[i]
         if not is_instance_valid(en["node"]):
             continue
-        var to: Vector3 = en["node"].global_position + Vector3(0, 0.9, 0) - origin
+        # Siktar mot brostet - hojden kommer ur figurens EGNA matt i stallet
+        # for en literal som tyst blir fel om proportionerna andras.
+        var to: Vector3 = en["node"].global_position + Vector3(0, en["node"].chest_height(), 0) - origin
         var d := to.length()
         if d > 40.0:
             continue
@@ -5625,6 +5630,7 @@ func _fire() -> void:
     if best_e >= 0:
         var en2: Dictionary = enemies[best_e]
         en2["hp"] = int(en2["hp"]) - 1
+        en2["node"].play("hit")
         _burst3d(en2["node"].global_position + Vector3(0, 1.0, 0), Color(1, 0.7, 0.3))
         if int(en2["hp"]) <= 0:
             score += 25
@@ -5674,10 +5680,18 @@ func _physics_process(delta: float) -> void:
     for en in enemies:
         if not is_instance_valid(en["node"]):
             continue
-        var node: MeshInstance3D = en["node"]
-        var to_p := player.position - node.position
+        # OTYPAD: noden ar en Rig3D, inte en MeshInstance3D. En typad
+        # deklaration hade avbrutit hela loopen varje bildruta (samma bugg som
+        # sankte 3D-partyts minispel fran v2.24).
+        var node = en["node"]
+        # EXPLICIT typ: node ar otypad (Variant), sa ":=" kan inte inferera
+        # och GDScript faller vid parse.
+        var to_p: Vector3 = player.position - node.position
         to_p.y = 0.0
         node.position += to_p.normalized() * float(en["speed"]) * delta
+        # Figuren vander sig mot spelaren och gar snabbare pa hogre vagor.
+        node.face_dir(to_p, delta)
+        node.set_speed(clampf(float(en["speed"]) / 5.0, 0.3, 1.0))
         if invuln <= 0.0 and to_p.length() < 1.2:
             hp -= 12
             invuln = 0.9
@@ -5832,6 +5846,10 @@ const TILE_STAR := 3
 
 # Preload (inte class_name-globalen): kitet ska parsa aven fore forsta importen.
 const Shell = preload("res://Shell.gd")
+# v2.29: husets 3D-karaktar. Se REPRESENTATION i make_actor - partyt kor
+# billboard-sprite som default eftersom figuren ar liten vid kitets kamera.
+const Rig3D = preload("res://Rig3D.gd")
+const Cast3D = preload("res://Cast3D.gd")
 
 # Minispelsregistret - utbyggnadskonventionen: en Mg*.gd-fil per minispel.
 const MINIGAMES: Array = [
@@ -6004,7 +6022,17 @@ func _tile_mat(t: int) -> StandardMaterial3D:
 # Pixelgubben som billboard-sprite (delas med minispelen via main.make_actor):
 # samma animerade figur som 2D-partyt, fargad per spelare. Fallback till
 # kapsel om player_frames.tres saknas i en aldre projektkopia.
+# v2.29: BYT HAR for att prova husets riggade 3D-figur i stallet for den
+# billboardade pixelspriten. Spriten ar default med FLIT: vid kitets kamera
+# ar figuren bara ~35 px hog, och designad pixelart vinner ofta mot en
+# blockfigur i den storleken. Byt till "rig" och jamfor sjalv.
+const REPRESENTATION := "sprite"   # "sprite" | "rig"
+
 func make_actor(col: Color) -> Node3D:
+    if REPRESENTATION == "rig" and ResourceLoader.exists("res://Rig3D.gd"):
+        var rig = Rig3D.actor(Cast3D.spec("player"), col)
+        rig.play("idle")
+        return rig
     if ResourceLoader.exists("res://player_frames.tres"):
         var s := AnimatedSprite3D.new()
         s.sprite_frames = load("res://player_frames.tres")
@@ -6012,7 +6040,10 @@ func make_actor(col: Color) -> Node3D:
         s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
         s.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
         s.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-        s.pixel_size = 0.07
+        # Fotankare: spriten ar 24 px hog och ska sta PA brickan, inte sväva
+        # med mitten i ankarpunkten.
+        s.offset = Vector2(0, 12)
+        s.pixel_size = 0.081
         s.play("idle")
         return s
     var n := MeshInstance3D.new()
@@ -6024,7 +6055,8 @@ func make_actor(col: Color) -> Node3D:
     return n
 
 func set_actor_anim(node: Node3D, anim: String) -> void:
-    if node is AnimatedSprite3D:
+    # Bada representationerna har play() - riggen dessutom set_speed/face_dir.
+    if node.has_method("play"):
         node.play(anim)
 
 func _build_world() -> void:

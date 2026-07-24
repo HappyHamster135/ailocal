@@ -126,6 +126,50 @@ public class Rig3DTests
     }
 
     [Fact]
+    public void StrikeArena_HarRiggadeFiender_IStalletForKapslar()
+    {
+        var dir = Directory.CreateTempSubdirectory("ailocal-fps-").FullName;
+        try
+        {
+            new GameScaffoldService().Scaffold("auto", "bygg ett litet fps spel i godot", dir);
+            var main = File.ReadAllText(Path.Combine(dir, "Main.gd"));
+            Assert.Contains("Rig3D.actor(Cast3D.spec(\"enemy\"))", main);
+            Assert.DoesNotContain("cm.height = 1.8", main);   // den gamla kapseln
+            // Fienden vander sig mot spelaren och reagerar pa traff.
+            Assert.Contains("face_dir(", main);
+            Assert.Contains(".play(\"hit\")", main);
+            // Sikthojden kommer ur figurens matt, inte en literal.
+            Assert.Contains("chest_height()", main);
+            // Loopvariabeln MASTE vara otypad - en typad deklaration fran en
+            // Rig3D avbryter _physics_process varje bildruta (buggen som
+            // sankte 3D-partyts minispel fran v2.24).
+            Assert.DoesNotContain("var node: MeshInstance3D = en[\"node\"]", main);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Party3D_KanValjaRigg_MenBehallerSpriten()
+    {
+        var dir = Directory.CreateTempSubdirectory("ailocal-p3d-").FullName;
+        try
+        {
+            new GameScaffoldService().Scaffold("auto", "bygg ett 3d mario party spel i godot med minigames", dir);
+            var main = File.ReadAllText(Path.Combine(dir, "Main.gd"));
+            // Kapaciteten finns...
+            Assert.Contains("const REPRESENTATION", main);
+            Assert.Contains("Rig3D.actor(Cast3D.spec(\"player\"), col)", main);
+            // ...men spriten ar default: vid kitets kamera ar figuren ~35 px
+            // och designad pixelart slar en blockfigur i den storleken.
+            // Beslutet ar taget pa en sida-vid-sida-bild, inte pa en gissning.
+            Assert.Contains("const REPRESENTATION := \"sprite\"", main);
+            // Fotankare sa spriten star PA brickan i stallet for att sväva.
+            Assert.Contains("s.offset = Vector2(0, 12)", main);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
     public void Kuben_AnvanderRiggen_IStalletForEnBoxSpelare()
     {
         var dir = Directory.CreateTempSubdirectory("ailocal-cube-").FullName;

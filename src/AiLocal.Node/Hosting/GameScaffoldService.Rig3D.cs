@@ -60,6 +60,10 @@ var m := {}
 var joints := {}
 var sockets := {}
 var clip := "idle"
+# Klipp som spelas EN gang och sedan faller tillbaka sjalva. Utan detta
+# fastnar en traffad fiende i hit-posen tills nagon minns att aterstalla.
+const TRANSIENT := {"hit": 0.40, "attack": 0.45, "land": 0.30}
+var base_clip := "idle"
 var clip_speed := 1.0
 var move01 := 0.0
 var phase := 0.0
@@ -240,6 +244,9 @@ func play(new_clip: String, speed := 1.0) -> void:
 		new_clip = "idle"
 	if clip != new_clip:
 		clip_t = 0.0
+	# Ett transient klipp avbryter inte minnet av vad figuren HOLL PA MED.
+	if not TRANSIENT.has(new_clip):
+		base_clip = new_clip
 	clip = new_clip
 	clip_speed = maxf(0.05, speed)
 
@@ -256,6 +263,9 @@ func face_dir(dir: Vector3, delta: float) -> void:
 
 func _process(delta: float) -> void:
 	clip_t += delta
+	if TRANSIENT.has(clip) and clip_t > float(TRANSIENT[clip]):
+		clip = base_clip
+		clip_t = 0.0
 	var cadence := 1.0
 	if clip == "walk":
 		cadence = 6.0 * (0.55 + move01 * 0.75)
