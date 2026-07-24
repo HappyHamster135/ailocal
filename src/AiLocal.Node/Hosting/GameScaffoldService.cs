@@ -360,7 +360,49 @@ static func character_select(parent: Node, names: Array, colors: Array, selected
     /// Nu får varje projekt player/enemy-spritesheets + SpriteFrames (idle +
     /// walk) att koppla i AnimatedSprite2D - och agentprompten förbjuder
     /// platta cirklar som karaktärer.</summary>
+    /// <summary>v2.29: går via ROLLISTAN (CharacterCast) i stället för
+    /// PixelAnimator.Build(prompt). Skillnaden är hela poängen med ägarens
+    /// "gubben ser annorlunda ut hela tiden": identiteten hänger inte längre
+    /// på promptsträngen - den skrivs till art/cast/&lt;slug&gt;.json och läses
+    /// tillbaka oförändrad vid varje uppföljning. Filnamnen (player.png,
+    /// enemy.png, *_frames.tres) och ramformatet är MEDVETET oförändrade så
+    /// inget av de 21 kitens GDScript behöver röras.</summary>
     static string[] AppendCharacterSprites(string root, string prompt, string[] files)
+    {
+        try
+        {
+            var extra = new List<string>();
+            var genre = DetectGenre(prompt ?? "");
+            // Fröet får INTE innehålla suffixen WorkerRole lägger på kit-
+            // prompten (" (3d)", " (isometrisk 2.5d-vy)") - de skulle ge en ny
+            // gubbe för samma uppdrag. Efter första scaffolden spelar fröet
+            // ingen roll alls: rollistan på disk vinner.
+            var identity = System.Text.RegularExpressions.Regex
+                .Replace(prompt ?? "", @"\s*\([^)]*\)\s*$", "").Trim();
+            var seed = VisualStyleLib.StableHash(identity);
+            var bible = ArtBibleStore.LoadOrCreate(root, genre, identity);
+            ArtBibleStore.MirrorToDesign(root, bible);
+
+            foreach (var (slug, role) in new[] { ("player", "player"), ("enemy", "enemy") })
+            {
+                if (File.Exists(Path.Combine(root, CharacterCast.SheetBase(slug) + "_frames.tres")))
+                    continue;
+                var (spec, _) = CharacterCast.Resolve(root, slug, null, role, bible, seed);
+                var (png, tres) = CharacterSheetBuilder.WriteInto(root, spec);
+                extra.Add(png); extra.Add(tres);
+            }
+            if (File.Exists(ArtBibleStore.PathFor(root))) extra.Add("art/artbible.json");
+            return [.. files, .. extra];
+        }
+        catch
+        {
+            // Rollistan får aldrig vara skillnaden mellan "spel" och "inga
+            // sprites": faller tillbaka på den gamla vägen.
+            return AppendCharacterSpritesLegacy(root, prompt, files);
+        }
+    }
+
+    static string[] AppendCharacterSpritesLegacy(string root, string prompt, string[] files)
     {
         try
         {

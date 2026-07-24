@@ -274,7 +274,7 @@ public sealed class AgentToolExecutor
                 if (hasAssetGen)
                     tools.Add(new("generate_asset",
                         "Generate a game/app asset using AI. Creates images (sprites, textures, backgrounds, UI), audio (sound effects, music), or 3D models. Saves directly to the project files. type: 'image'/'sprite'/'texture'/'background'/'ui'/'sfx'/'music'/'model3d'. IMPORTANT for game sprites: pass style:'pixelart' - the raw model output is NOT usable as a sprite (wrong size, no transparency); pixelart mode post-processes it into true pixel art (exact grid via width/height, limited palette, transparent background, outline) AND writes <name>_frames.tres with idle/walk animations ready for AnimatedSprite2D. Never ask the model for multi-frame sprite sheets - it cannot keep the character consistent; animation comes from the pipeline. BACKGROUNDS: type 'background' + style:'pixelart' gives a full-frame low-res pixel plate (opaque, no outline; width = target, ~240) - load fullscreen via TextureRect with STRETCH_KEEP_ASPECT_COVERED; without cloud keys a deterministic procedural pixel scene is generated (theme from prompt keywords: forest/night/space/desert/city/...). Returns the saved file path.",
-                        """{"type":"object","properties":{"type":{"type":"string","description":"Asset type: 'image', 'sprite', 'texture', 'background', 'ui', 'sfx', 'music', 'model3d'."},"prompt":{"type":"string","description":"Description of the asset to generate, e.g. 'a cute round candy hero character'."},"style":{"type":"string","description":"'pixelart' = post-process into true pixel art (exact grid, palette, transparency, outline) + animated _frames.tres. Recommended for all game sprites."},"width":{"type":"integer","description":"Image width; in pixelart mode this is the TARGET sprite size in pixels (e.g. 48)."},"height":{"type":"integer","description":"Image height (default 512)."},"output":{"type":"string","description":"Relative path for the output file (default: auto-generated name in assets/)."}},"required":["type","prompt"]}"""));
+                        """{"type":"object","properties":{"type":{"type":"string","description":"Asset type: 'image', 'sprite', 'texture', 'background', 'ui', 'sfx', 'music', 'model3d'."},"prompt":{"type":"string","description":"Description of the asset to generate, e.g. 'a cute round candy hero character'."},"character":{"type":"string","description":"CHARACTER ID (e.g. 'player', 'enemy', 'shopkeeper'). ALWAYS use this for people/creatures. The same id is GUARANTEED to give the same character - in this build and in every future build - because the identity is stored in the project's cast. Never ask for a new image of a character that already exists; just reference the id."},"style":{"type":"string","description":"'pixelart' = post-process into true pixel art (exact grid, palette, transparency, outline) + animated _frames.tres. Recommended for all game sprites."},"width":{"type":"integer","description":"Image width; in pixelart mode this is the TARGET sprite size in pixels (e.g. 48)."},"height":{"type":"integer","description":"Image height (default 512)."},"output":{"type":"string","description":"Relative path for the output file (default: auto-generated name in assets/)."}},"required":["type","prompt"]}"""));
 
                 // ---- P0: Visual feedback ----------------------------------------------
                 if (hasScreenshot)
@@ -1369,24 +1369,62 @@ public sealed class AgentToolExecutor
             if (args.TryGetProperty("style", out var st) && st.ValueKind == JsonValueKind.String
                 && string.Equals(st.GetString(), "pixelart", StringComparison.OrdinalIgnoreCase))
                 type += ":pixelart";
+            // v2.29: NAMNGIVEN karaktär går via projektets rollista i stället
+            // för att måla en ny figur varje gång. Slugen bärs som type-suffix
+            // (samma idiom som ":pixelart") så delegatsignaturen är oförändrad.
+            // Detta är agentsidan av ägarens "gubben ser annorlunda ut hela
+            // tiden": samma id ger garanterat samma gubbe, även i ett bygge
+            // månader senare.
+            var character = args.TryGetProperty("character", out var chEl) && chEl.ValueKind == JsonValueKind.String
+                ? (chEl.GetString() ?? "").Trim()
+                : "";
+            if (character.Length > 0)
+            {
+                var slug = new string(character.ToLowerInvariant()
+                    .Where(c => char.IsLetterOrDigit(c) || c is '_' or '-').ToArray());
+                if (slug.Length > 0)
+                {
+                    type = "character:" + slug;
+                    if (string.IsNullOrWhiteSpace(output)) output = "char_" + slug + ".png";
+                }
+            }
+            // v2.29: BASTYPEN (utan ":pixelart"-suffixet) styr filändelse,
+            // filnamn och art-bibeln. Två riktiga buggar bodde här:
+            //  1. Filnamnet byggdes av "sprite:pixelart" -> "assets\sprite:
+            //     pixelart-<guid>.png". På NTFS är det en ALTERNATE DATA
+            //     STREAM: filen "sprite" skapas med en dold ström, File.Exists
+            //     svarar true, men Godot ser ingen bild. Slog varje gång en
+            //     agent utelämnade "output" - vilket verktyget uttryckligen
+            //     tillåter och rekommenderar.
+            //  2. AssetStyle vitlistar "sprite", inte "sprite:pixelart", så
+            //     art-bibeln returnerade prompten ORÖRD i exakt det läge
+            //     verktygstexten kräver för alla spelsprites.
+            var baseType = type.Split(':')[0].Trim().ToLowerInvariant();
             // The tool promises "default: auto-generated name in assets/" -
             // resolve it HERE so the generated file lands inside the agent's
             // workspace (and respects sandbox confinement), not wherever this
             // node's process happens to have its current directory. An empty
             // path passed straight through used to throw in Path.GetFullPath.
-            var extension = type.Trim().ToLowerInvariant() switch
+            var extension = baseType switch
             {
                 "sfx" or "music" or "audio" => ".wav",
                 "model3d" => ".glb",
                 _ => ".png"
             };
             output = string.IsNullOrWhiteSpace(output)
-                ? ResolvePath(Path.Combine("assets", $"{type.Trim().ToLowerInvariant()}-{Guid.NewGuid().ToString("n")[..8]}{extension}"))
+                ? ResolvePath(Path.Combine("assets", $"{baseType}-{Guid.NewGuid().ToString("n")[..8]}{extension}"))
                 : ResolvePath(output);
+            // Falskt grönt-vakt: ett filnamn med ogiltiga tecken (t.ex. ':')
+            // ger en ström/krasch i stället för en läsbar bild - fånga det HÄR
+            // i stället för att rapportera "Asset created" om en fil motorn
+            // aldrig kan öppna.
+            var outName = Path.GetFileName(output);
+            if (outName.Length == 0 || outName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                return Error(call, $"Ogiltigt filnamn för asset: '{outName}'. Ange ett enkelt namn i 'output', t.ex. assets/hero.png.");
             // Stilkonsekvens: alla bildpromptar i ett projekt får SAMMA
             // stilsuffix (från DESIGN.md:s art direction när den finns) så
             // spelet ser ut att vara ritat av en hand, inte ett collage.
-            prompt = AssetStyle.Apply(_workspaceRoot, type, prompt);
+            prompt = AssetStyle.Apply(_workspaceRoot, baseType, prompt);
             var (success, result, filePath) = await _assetGenerator(type, prompt, width, height, output, ct);
             return success
                 ? new ToolResult(call.Id, call.Name, filePath is not null ? $"Asset created: {filePath}\n{result}" : result)

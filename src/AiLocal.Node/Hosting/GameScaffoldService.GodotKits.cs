@@ -71,14 +71,11 @@ public partial class GameScaffoldService
         // Animerade karaktarer: flerbilds-sprites (gangcykel + idle) -> Godot
         // SpriteFrames, sa spelaren och fienderna GAR pa riktigt i stallet for
         // statiska fyrkanter (PixelAnimator + GodotSpriteFrames, deterministiskt).
-        var playerSheet = PixelAnimator.Build(prompt);
-        Write(root, "player.png", playerSheet.Png);
-        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", playerSheet));
-        files.Add("player.png"); files.Add("player_frames.tres");
-        var enemySheet = PixelAnimator.Build(prompt + " fiende monster");
-        Write(root, "enemy.png", enemySheet.Png);
-        Write(root, "enemy_frames.tres", GodotSpriteFrames.Build("enemy.png", enemySheet));
-        files.Add("enemy.png"); files.Add("enemy_frames.tres");
+        // v2.29: sprites skrivs INTE har langre. Den delade vagen
+        // (AppendCharacterSprites -> CharacterCast) ager player/enemy sa
+        // identiteten hamnar i rollistan. Skrevs de har foregrep de
+        // producenten och File.Exists-vakten gjorde rollistan till en no-op
+        // i exakt de kit som anvander gubbarna mest.
         Write(root, "icon.ico", MakeIco());
         files.Add("icon.ico");
         Write(root, "DESIGN.md", GodotTopDownDesignDoc(prompt));
@@ -120,14 +117,11 @@ public partial class GameScaffoldService
             Write(root, name, SfxrGenerator.Render(category, seed: 7));
             files.Add(name);
         }
-        var playerSheet = PixelAnimator.Build(prompt);
-        Write(root, "player.png", playerSheet.Png);
-        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", playerSheet));
-        files.Add("player.png"); files.Add("player_frames.tres");
-        var enemySheet = PixelAnimator.Build(prompt + " fiende monster");
-        Write(root, "enemy.png", enemySheet.Png);
-        Write(root, "enemy_frames.tres", GodotSpriteFrames.Build("enemy.png", enemySheet));
-        files.Add("enemy.png"); files.Add("enemy_frames.tres");
+        // v2.29: sprites skrivs INTE har langre. Den delade vagen
+        // (AppendCharacterSprites -> CharacterCast) ager player/enemy sa
+        // identiteten hamnar i rollistan. Skrevs de har foregrep de
+        // producenten och File.Exists-vakten gjorde rollistan till en no-op
+        // i exakt de kit som anvander gubbarna mest.
         Write(root, "icon.ico", MakeIco());
         files.Add("icon.ico");
         Write(root, "DESIGN.md", GodotPlatformerDesignDoc(prompt));
@@ -5723,10 +5717,7 @@ func _save_best(v: int) -> void:
         // v2.24 pixellyftet: samma pixelgubbe som 2D-partyt, som billboard-
         // sprite i 3D-varlden (SNES-Mario-Party-looken) - fargas per spelare
         // via modulate i make_actor.
-        var tokenSheet = PixelAnimator.Build(prompt);
-        Write(root, "player.png", tokenSheet.Png);
-        Write(root, "player_frames.tres", GodotSpriteFrames.Build("player.png", tokenSheet));
-        files.Add("player.png"); files.Add("player_frames.tres");
+        // v2.29: sheeten skrivs av den delade rollist-vagen, inte har.
         Write(root, "MgRace3D.gd", GodotParty3DMgRace);
         files.Add("MgRace3D.gd");
         Write(root, "MgFall3D.gd", GodotParty3DMgFall);

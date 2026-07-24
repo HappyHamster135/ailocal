@@ -87,6 +87,18 @@ public sealed class AssetGenerator
         }
     }
 
+    /// <summary>v2.29: rollen avgör dragtabellen (fiender får horn, röda ögon
+    /// utan glans, mörkare ramper) så en fiende inte blir en omfärgad spelare.
+    /// Slugen väger tyngst; annars läses beskrivningen.</summary>
+    private static string RoleFor(string slug, string? prompt)
+    {
+        if (slug is "enemy" or "boss" or "monster" or "foe") return "enemy";
+        var p = (prompt ?? "").ToLowerInvariant();
+        foreach (var w in new[] { "enemy", "fiende", "monster", "boss", "skurk", "villain" })
+            if (p.Contains(w, StringComparison.Ordinal)) return "enemy";
+        return "player";
+    }
+
     /// <summary>
     /// Returns the Replicate API token from the environment variable or null if unset.
     /// </summary>
@@ -118,6 +130,29 @@ public sealed class AssetGenerator
         var outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrEmpty(outDir))
             Directory.CreateDirectory(outDir);
+
+        // ---- v2.29: NAMNGIVEN KARAKTÄR via projektets rollista -------------
+        // "character:<slug>" löser upp mot art/cast/<slug>.json. Finns figuren
+        // redan returneras den OFÖRÄNDRAD - ingen ny bild målas. Det är låset
+        // mot att agenten ber om "hjälten" tre gånger och får tre olika gubbar.
+        if (type.StartsWith("character:", StringComparison.Ordinal))
+        {
+            var slug = type["character:".Length..];
+            var root = CharacterCast.FindProjectRoot(outputPath);
+            var bible = ArtBibleStore.Load(root)
+                ?? ArtBibleStore.LoadOrCreate(root, GameScaffoldService.DetectGenre(prompt), prompt);
+            var seed = VisualStyleLib.StableHash(prompt ?? slug);
+            var (spec, created) = CharacterCast.Resolve(root, slug, null, RoleFor(slug, prompt), bible, seed);
+            var (png, tres) = CharacterSheetBuilder.WriteInto(root, spec);
+            var full = Path.Combine(root, png);
+            return new AssetResult(true,
+                created
+                    ? $"Karaktären '{spec.Slug}' skapad och sparad i projektets rollista ({spec.Traits.Body}, {spec.Traits.Hair}, {spec.Traits.Face}). "
+                      + $"Sheet: {png}, animationer: {tres} (idle+walk). Samma id ger samma figur i alla framtida byggen."
+                    : $"Karaktären '{spec.Slug}' finns redan och återanvändes OFÖRÄNDRAD ({png} / {tres}). "
+                      + "Ingen ny figur genererades - det är så identiteten hålls stabil.",
+                full);
+        }
 
         // ---- Ljud och musik: alltid de lokala synthesizerarna --------------
         // Deterministiska, gratis och markant bättre än både molnvägen (som

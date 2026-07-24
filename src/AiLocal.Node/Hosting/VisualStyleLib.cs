@@ -147,8 +147,22 @@ public static class VisualStyleLib
         "management" or "simulator" => All.First(s => s.Name == "clean_slate"),
         "artillery" => All.First(s => s.Name == "rusted_machine"),
         "puzzle" => All.First(s => s.Name == "clean_slate"),
-        _ => All[Random.Shared.Next(All.Length)],
+        // v2.29: STABIL fallback. Tidigare Random.Shared.Next -> varje anrop
+        // gav olika stil for samma genre (snake, breakout, memory, quiz,
+        // towerdefense, iso, fps ... allt som inte listas ovan). Art-bibeln
+        // och karaktarspaletten bygger pa det har valet, sa det MASTE vara
+        // en ren funktion av genren.
+        _ => All[(int)(StableHash(genre ?? "") % (uint)All.Length)],
     };
+
+    /// <summary>FNV-1a: samma genre ger samma stil i alla processer och
+    /// over omstarter (string.GetHashCode ar randomiserad per process).</summary>
+    internal static uint StableHash(string s)
+    {
+        var h = 2166136261u;
+        foreach (var c in s) h = (h ^ c) * 16777619u;
+        return h;
+    }
 
     /// <summary>Generate GDScript color constants from a style.
     /// Returns a string that can be pasted into a GDScript file.</summary>
