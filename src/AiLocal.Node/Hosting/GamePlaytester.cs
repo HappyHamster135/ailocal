@@ -126,9 +126,19 @@ public sealed class GamePlaytester
 
         try
         {
+            // v2.31: RIKTIG FPS-mätning. Tidigare returnerade EstimateFps
+            // konstant 60 ("cpuTime > 0 ? 60 : 0") och grinden if (avgFps < 30)
+            // kunde därför bara utlösa för ett spel som ALDRIG STARTADE - den
+            // mätte ingenting. Godots egen --print-fps skriver
+            // "Project FPS: N (M mspf)" till stdout varje sekund, vilket ger
+            // motorns faktiska siffra utan att ett enda kit behöver ändras.
+            var args = (arguments ?? "").Trim();
+            if (!args.Contains("--print-fps", StringComparison.Ordinal))
+                args = (args + " --print-fps").Trim();
+
             var psi = new ProcessStartInfo(exePath)
             {
-                Arguments = arguments ?? "",
+                Arguments = args,
                 WorkingDirectory = dir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -153,6 +163,37 @@ public sealed class GamePlaytester
             var memorySamples = new List<long>();
             var fpsSamples = new List<double>();
 
+            // Stdout MÅSTE läsas löpande, inte först vid slutet: med
+            // --print-fps skrivs en rad i sekunden, och en full pipe-buffert
+            // blockerar barnprocessen (spelet fryser mitt i sonden). Läsaren
+            // plockar samtidigt ut FPS-raderna medan spelet lever.
+            var stdoutBuf = new StringBuilder();
+            var stdoutReader = Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await proc.StandardOutput.ReadLineAsync()) is not null)
+                    {
+                        stdoutBuf.AppendLine(line);
+                        if (ParseGodotFps(line) is { } f)
+                            lock (fpsSamples) fpsSamples.Add(f);
+                    }
+                }
+                catch { /* processen dog under läsning - normalt vid Kill */ }
+            });
+            var stderrBuf = new StringBuilder();
+            var stderrReader = Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await proc.StandardError.ReadLineAsync()) is not null)
+                        stderrBuf.AppendLine(line);
+                }
+                catch { /* se ovan */ }
+            });
+
             // Övervaka processen under duration
             using var timeoutCts = new CancellationTokenSource(duration);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
@@ -174,7 +215,8 @@ public sealed class GamePlaytester
                     {
                         proc.Refresh();
                         memorySamples.Add(proc.WorkingSet64);
-                        fpsSamples.Add(EstimateFps(proc)); // grov uppskattning
+                        // FPS samlas av stdout-läsaren ur --print-fps, inte här:
+                        // processens CPU-tid säger ingenting om bildfrekvens.
                     }
                     catch { /* process kan ha avslutats */ }
                     await Task.Delay(500, linked.Token);
@@ -197,24 +239,38 @@ public sealed class GamePlaytester
             // överlevde hela testet (dvs. de som fungerar).
             var exitedOnItsOwn = proc.HasExited;
 
-            // Samla eventuell stdout/stderr
-            var stdout = exitedOnItsOwn ? await proc.StandardOutput.ReadToEndAsync() : "";
-            var stderr = exitedOnItsOwn ? await proc.StandardError.ReadToEndAsync() : "";
-
             if (!proc.HasExited)
             {
                 try { proc.Kill(); } catch { /* redan död */ }
             }
 
+            // Läsarna avslutas när strömmarna stängs (vid exit/Kill). Kort
+            // väntan så inget som redan skrivits tappas bort.
+            try { await Task.WhenAll(stdoutReader, stderrReader).WaitAsync(TimeSpan.FromSeconds(3)); }
+            catch { /* timeout - vi tar det vi hunnit få */ }
+            var stdout = stdoutBuf.ToString();
+            var stderr = stderrBuf.ToString();
+
             var avgMem = memorySamples.Count > 0 ? memorySamples.Average() / (1024.0 * 1024.0) : 0;
-            var avgFps = fpsSamples.Count > 0 ? fpsSamples.Where(f => f > 0).DefaultIfEmpty(60).Average() : 0;
             var peakMem = memorySamples.Count > 0 ? memorySamples.Max() / (1024.0 * 1024.0) : 0;
+            // Första sekunden är uppstart (shader-kompilering, resursladdning)
+            // och är inte representativ för hur spelet KÄNNS - hoppa över den.
+            double[] fps;
+            lock (fpsSamples)
+                fps = [.. fpsSamples.Where(f => f > 0).Skip(1)];
+            var avgFps = fps.Length > 0 ? fps.Average() : 0;
+            // Hackighet syns i BOTTENNIVÅN, inte i medelvärdet: ett spel som
+            // ligger på 144 men dippar till 12 känns trasigt trots bra snitt.
+            var minFps = fps.Length > 0 ? fps.Min() : 0;
+            var fpsMeasured = fps.Length > 0;
 
             summary.AppendLine($"## Speltest: {Path.GetFileName(exePath)}");
             summary.AppendLine();
             summary.AppendLine($"- **Körtid:** {elapsed.TotalSeconds:F1}s");
             summary.AppendLine($"- **Exit:** {(exitedOnItsOwn ? $"felkod {proc.ExitCode}" : "körde hela testet (avslutades av testet)")}");
-            summary.AppendLine($"- **Genomsnittlig FPS:** {avgFps:F0}");
+            summary.AppendLine(fpsMeasured
+                ? $"- **FPS:** {avgFps:F0} i snitt, lägst {minFps:F0} ({fps.Length} mätpunkter, motorns egen siffra)"
+                : "- **FPS:** kunde inte mätas (spelet hann inte rapportera) — ingen slutsats dras");
             summary.AppendLine($"- **Genomsnittligt minne:** {avgMem:F1} MB");
             summary.AppendLine($"- **Högsta minne:** {peakMem:F1} MB");
             if (probe is not null)
@@ -241,8 +297,16 @@ public sealed class GamePlaytester
                 }
             }
 
-            if (avgFps < 30)
-                issues.Add($"Låg FPS ({avgFps:F0}) — sikta på ≥60 FPS");
+            // Grinden fäller bara på MÄTTA värden. Tidigare var avgFps alltid
+            // exakt 60 (EstimateFps returnerade konstant), så villkoret kunde
+            // aldrig utlösa - ett hackigt spel gick rakt igenom.
+            if (fpsMeasured)
+            {
+                if (avgFps < 50)
+                    issues.Add($"Låg FPS ({avgFps:F0} i snitt) — sikta på ≥60. Skapa noder/texturer i _ready, inte varje bildruta.");
+                else if (minFps < 30)
+                    issues.Add($"Hackar ({minFps:F0} FPS som lägst mot {avgFps:F0} i snitt) — något tungt körs periodvis, t.ex. allokeringar i _process.");
+            }
 
             if (peakMem > 500)
                 issues.Add($"Hög minnesanvändning ({peakMem:F0} MB) — optimera resurser");
@@ -611,20 +675,22 @@ public sealed class GamePlaytester
         return 5;
     }
 
-    private static double EstimateFps(Process proc)
+    /// <summary>v2.31: plockar motorns EGEN bildfrekvens ur en --print-fps-rad
+    /// ("Project FPS: 145 (6.89 mspf)"). Ersätter den gamla EstimateFps som
+    /// returnerade konstant 60 så fort processen förbrukat CPU-tid - den
+    /// mätte ingenting och gjorde FPS-grinden omöjlig att utlösa.
+    /// Returnerar null för rader som inte är FPS-rapporter.</summary>
+    internal static double? ParseGodotFps(string line)
     {
-        // Grov uppskattning: CPU-användning korrelerar med FPS
-        try
-        {
-            proc.Refresh();
-            var cpuTime = proc.TotalProcessorTime.TotalMilliseconds;
-            // Kan inte mäta faktisk FPS utan hook i spelet
-            return cpuTime > 0 ? 60 : 0;
-        }
-        catch
-        {
-            return 0;
-        }
+        if (string.IsNullOrEmpty(line)) return null;
+        var i = line.IndexOf("FPS:", StringComparison.OrdinalIgnoreCase);
+        if (i < 0) return null;
+        var rest = line[(i + 4)..].TrimStart();
+        var end = 0;
+        while (end < rest.Length && (char.IsDigit(rest[end]) || rest[end] == '.')) end++;
+        if (end == 0) return null;
+        return double.TryParse(rest[..end], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null;
     }
 
     private static int CountOccurrences(string text, string substring)

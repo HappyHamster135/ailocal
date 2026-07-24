@@ -404,6 +404,14 @@ static func character_select(parent: Node, names: Array, colors: Array, selected
                 extra.Add(png); extra.Add(tres);
             }
             if (File.Exists(ArtBibleStore.PathFor(root))) extra.Add("art/artbible.json");
+            // v2.31: UI-temat ur SAMMA bibel som sprites - meny och spel
+            // slutar se ut som tva olika produkter.
+            try
+            {
+                Write(root, "theme.tres", UiTheme.Build(bible));
+                extra.Add("theme.tres");
+            }
+            catch { /* temat är en förbättring, aldrig en byggstoppare */ }
             return [.. files, .. extra];
         }
         catch

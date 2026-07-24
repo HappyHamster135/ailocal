@@ -1320,6 +1320,13 @@ func _save_best(v: int) -> void:
         // projektvalidering med ett HELT TOMT felmeddelande (v1.90, verifierat
         // mot 4.3-kallkoden: should_import_etc2_astc -> valid=false utan text).
         // Ofarligt for desktop/webb - bara ett extra texturformat vid import.
+        // v2.31: PROJEKTETS UI-TEMA. Varenda knapp i varje kit var en ra
+        // Godot-standardknapp - den tydligaste prototypsignalen som finns, och
+        // den syns pa forsta bildrutan. Via gui/theme/custom arver VARJE
+        // Control temat automatiskt, sa inget kit behover andras och
+        // agentbyggd UI far det gratis.
+        "[gui]\n" +
+        "theme/custom=\"res://theme.tres\"\n" +
         "[rendering]\n" +
         "textures/vram_compression/import_etc2_astc=true\n" +
         // v2.17: NEAREST som standardfilter - pixelart-sprites renderades
