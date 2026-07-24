@@ -613,9 +613,20 @@ static func label(c: CanvasItem, pos: Vector2, text: String, size: int, col: Col
         }
 
         var genre = DetectGenre(prompt);
-        if (genre is "management" or "simulator" or "idle")
+        if (genre is "management" or "simulator")
             return ScaffoldGodotManagement(root, prompt);
-        if (genre is "rpg" or "roguelike" or "shooter")
+        // v2.28: genren "rpg" tacker BADE top-down (The Glade: vagoverlevnad)
+        // och riktig RPG (Hero's Quest: overworld/turbaserad strid/dialog).
+        // "top-down"/"topdown" i prompten behaller The Glade; ren rpg/aventyr
+        // far Hero's Quest. shooter gar till top-down som forut.
+        if (genre == "rpg")
+        {
+            if (prompt.Contains("top-down", StringComparison.OrdinalIgnoreCase)
+                || prompt.Contains("topdown", StringComparison.OrdinalIgnoreCase))
+                return ScaffoldGodotTopDown(root, prompt);
+            return ScaffoldGodotRpg(root, prompt);
+        }
+        if (genre == "shooter")
             return ScaffoldGodotTopDown(root, prompt);
         if (genre == "racing")
             return ScaffoldGodotRacing(root, prompt);
@@ -623,6 +634,25 @@ static func label(c: CanvasItem, pos: Vector2, text: String, size: int, col: Col
             return ScaffoldGodotPuzzle(root, prompt);
         if (genre == "artillery")
             return ScaffoldGodotArtillery(root, prompt);
+        // v2.28: dedicated kits for popular genres
+        if (genre == "towerdefense")
+            return ScaffoldGodotTowerDefense(root, prompt);
+        if (genre == "snake")
+            return ScaffoldGodotSnake(root, prompt);
+        if (genre == "breakout")
+            return ScaffoldGodotBreakout(root, prompt);
+        if (genre == "quiz")
+            return ScaffoldGodotQuiz(root, prompt);
+        if (genre == "memory")
+            return ScaffoldGodotMemory(root, prompt);
+        if (genre == "minesweeper")
+            return ScaffoldGodotMinesweeper(root, prompt);
+        if (genre is "idle" or "clicker")
+            return ScaffoldGodotIdle(root, prompt);
+        if (genre == "blockpuzzle")
+            return ScaffoldGodotBlockPuzzle(root, prompt);
+        if (genre == "roguelike")
+            return ScaffoldGodotRoguelike(root, prompt);
         if (genre == "party")
             return ScaffoldGodotParty(root, prompt);
 

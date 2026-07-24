@@ -616,7 +616,21 @@ public class GodotKitTests
             "bygg ett artillerispel som shellshock live i godot",     // v1.98: Cannonade
             "bygg ett mario party liknande spel i godot med minigames", // v2.1: Board Bash (fangade 6 riktiga parse-fel forra passet)
             "bygg ett 3d mario party spel i godot med minigames",       // v2.3: Board Bash 3D (flerfilskittet)
-            "bygg ett litet fps spel i godot"                           // v2.5: Strike Arena (first person)
+            "bygg ett litet fps spel i godot",                          // v2.5: Strike Arena (first person)
+            "bygg ett isometriskt aventyr i godot",                     // v2.26: Isle Raider (iso)
+            // v2.28: de tio nya kiten - MASTE koras skarpt har. De laddes
+            // en gang overfat (bara C#-grep + --check-only), och --check-only
+            // MISSAR typ-/scenfelen som ett riktigt --path-korning fangar.
+            "bygg ett tower defense spel i godot",
+            "bygg ett snake spel i godot",
+            "bygg ett breakout spel i godot",
+            "bygg ett quiz fragesport spel i godot",
+            "bygg ett memory kortspel i godot",
+            "bygg ett minesweeper minroj spel i godot",
+            "bygg ett idle clicker spel i godot",
+            "bygg ett tetris block spel i godot",
+            "bygg ett roguelike dungeon spel i godot",
+            "bygg ett rpg aventyr i godot"   // v2.28: Hero's Quest (nu inkopplat)
         })
         {
             var (root, _) = ScaffoldTo(prompt);
@@ -635,9 +649,15 @@ public class GodotKitTests
                 var stderrTask = proc.StandardError.ReadToEndAsync();
                 await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromMinutes(3)).Token);
                 var output = await stdoutTask + "\n" + await stderrTask;
+                // v2.28: bredare an bara "SCRIPT ERROR"/"Parse Error" - scen/
+                // skript-mismatchen (Main.tscn Node2D men skript extends Control)
+                // loggas som "ERROR: Script inherits from native type ... can't
+                // be assigned" och gjorde tva kit HELT blanka utan att den gamla
+                // assertionen sag det.
                 Assert.False(
-                    output.Contains("SCRIPT ERROR") || output.Contains("Parse Error"),
-                    "GDScript-fel i kitet:\n" + output);
+                    output.Contains("SCRIPT ERROR") || output.Contains("Parse Error")
+                    || output.Contains("can't be assigned") || output.Contains("Failed to load"),
+                    "GDScript-/scenfel i kitet (" + prompt + "):\n" + output);
             }
             finally { Cleanup(root); }
         }

@@ -76,6 +76,12 @@ public static class GenreIdeaBank
         "platformer" => Platformer,
         "artillery" => Artillery,
         "party" => Party,
+        "towerdefense" => TowerDefense,
+        "snake" => Snake,
+        "breakout" => Breakout,
+        "quiz" => Quiz,
+        "minesweeper" => Minesweeper,
+        "blockpuzzle" => BlockPuzzle,
         _ => General,
     };
 
@@ -115,6 +121,84 @@ public static class GenreIdeaBank
         "bygg-minispel i Lego-stil: stapla fallande block hogst innan tiden gar ut",
         "ett elakt slumphjul i rundans slut (Pummel-stil): byt platser, tappa mynt, dubbla nasta minispel",
         "kosmetiska upplasningar for spelarens figur (hattar/farger) vid milstolpar - syns pa bradan",
+    ];
+
+    
+    // v2.27: Tower Defense, Snake, Breakout, Quiz, Memory, Minesweeper, Idle, Blockpuzzle, Roguelike
+    private static readonly string[] TowerDefense =
+    [
+        "upgradablea torn med 3 nivaer (snabbare skott, mer skada, storre räckvidd)",
+        "specialtorn som saktar fiender (frost) eller skadar område (kanon)",
+        "en boss-vag med en enda fiende med massiv HP",
+        "power-ups som droppas av döda fiender (extra guld, gratis torn)",
+        "olika banor med flera vägar som tvingar tornplacering",
+        "ett prestigee-system: starta om med permanenta bonusar",
+    ];
+
+    private static readonly string[] Snake =
+    [
+        "specialmat som ger tillfällig fartökning eller osynlighet",
+        "hinder som spawnar på banan efter viss längd",
+        "olika orm-teman som låses upp vid höga poäng",
+        "ett läge där man spelar mot AI-ormar",
+    ];
+
+    private static readonly string[] Breakout =
+    [
+        "specialtegel som ger power-ups (större racket, flera bollar, laser)",
+        "tegel som kräver flera träffar att förstöra",
+        "en boss-tegelsten som rör sig",
+        "olika banor med olika tegelmönster",
+    ];
+
+    private static readonly string[] Quiz =
+    [
+        "kategorier: vetenskap, historia, sport, geografi",
+        "ett läge där frågorna blir svårare per rätt svar",
+        "en multiplayer-modell där två spelare turas om",
+        "tidsbonus för snabba svar",
+    ];
+
+    private static readonly string[] Memory =
+    [
+        "större bräden (6x6, 8x8) med fler par",
+        "specialkort som blandar om alla kort tillfälligt",
+        "ett läge med tidsbegränsning",
+        "olika kortteman (djur, frukter, fordon)",
+    ];
+
+    private static readonly string[] Minesweeper =
+    [
+        "olika brädstorlekar och minorantal",
+        "ett läge med tidspress",
+        "specialrutor som visar antal minor i raden/kolumnen",
+        "ett läge där minor rör sig efter första klicket",
+    ];
+
+    private static readonly string[] Idle =
+    [
+        "prestigee-system: starta om för permanenta multiplikatorer",
+        "automatiseringar som låses upp (auto-click, auto-upgrade)",
+        "ett prestige-val som ger olika bonusar",
+        "säsongsbaserade händelser med tidsbegränsade bonusar",
+    ];
+
+    private static readonly string[] BlockPuzzle =
+    [
+        "specialblock som tar bort en hel rad eller kolumn",
+        "ett kombo-system för flera rensade rader i rad",
+        "olika spellägen (maraton, sprint, ultra)",
+        "ett läge med förbestämda blocksekvenser (seedade banor)",
+    ];
+
+    private static readonly string[] Roguelike =
+    [
+        "klassval: krigare (mer HP), tjuv (mer skada), magiker (speciella attacker)",
+        "proceduella vapen och rustning med slumpmässiga egenskaper",
+        "rum-butiker där man kan köpa hälsa och uppgraderingar",
+        "boss-varvning med speciella mönster",
+        "permanenta uppgraderingar som överlever döden (meta-progression)",
+        "olika miljöer per djup: grotta, fängelse, helvete",
     ];
 
     /// <summary>v2.10: GENRENS KVALITETSRIBBA - svaret på "hur vet den vad

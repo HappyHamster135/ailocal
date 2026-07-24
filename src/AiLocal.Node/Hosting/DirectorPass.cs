@@ -363,6 +363,20 @@ public static class DirectorPass
                 "En motstandarstege med minst 3 namngivna motstandare med stigande traffsakerhet/HP och egen personlighet",
             "party" =>
                 "Minst 2 olika bradlayouter och 3 fungerande minispel med olika mekaniker (reaktion, minne, skicklighet)",
+            "towerdefense" =>
+                "Minst 10 vagor med stigande svårighet, 3 torn-typer och 3 fiendetyper",
+            "snake" =>
+                "Stigande fart, highscore-system, minst 3 svarighetsgrader",
+            "breakout" =>
+                "Minst 3 rader tegelstenar, bollfysik med vinkelbaserad studs, 3 liv",
+            "quiz" =>
+                "Minst 10 fragor med tidspress, 4 svarsval, poang baserad pa svarstid",
+            "memory" =>
+                "4x4 rutnat med 8 par, dragrakning, snabb matchning belonas",
+            "minesweeper" =>
+                "10x10 rutnat med 15 minor, vansterklick+hogerklick, flood fill",
+            "blockpuzzle" =>
+                "7 standardblock, rotering, snabbfall, rensa rader for poang, stigande fart",
             _ =>
                 "Minst 3 handbyggda banor/nivåer med stigande svårighetsgrad och egen karaktär",
         };

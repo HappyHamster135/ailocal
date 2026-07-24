@@ -14,7 +14,7 @@ public class IdeaBankTests
     [InlineData("rpg", "boss")]
     [InlineData("roguelike", "boss")]
     [InlineData("platformer", "dubbelhopp")]
-    [InlineData("quiz", "riskmekanik")]
+    [InlineData("quiz", "kategori")]
     public void SeedsFor_RattBankPerGenre(string genre, string expectedFragment)
     {
         var bank = GenreIdeaBank.SeedsFor(genre);

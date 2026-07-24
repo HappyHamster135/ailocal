@@ -133,6 +133,107 @@ public static class GenreContracts
                 new("undo", "Undo capability", @"undo|angra"),
             ]
         ),
+        ["towerdefense"] = new("towerdefense",
+            MustHave: [
+                new("tower_place", "Tower placement on grid", @"tower|torn|place|_place"),
+                new("enemy_wave", "Wave-based enemy spawning", @"wave|spawn|enemy"),
+                new("path", "Enemy path through grid", @"path|PATH|route"),
+                new("economy", "Gold/currency system", @"gold|cost|buy|GOLD"),
+            ],
+            ShouldHave: [
+                new("tower_types", "Multiple tower types", @"arrow|cannon|frost", 2),
+                new("enemy_types", "Multiple enemy types", @"basic|fast|boss", 2),
+                new("splash_damage", "Area/splash damage", @"splash|area"),
+                new("slow_effect", "Slow/debuff effect", @"slow|frost|freeze"),
+            ]
+        ),
+        ["snake"] = new("snake",
+            MustHave: [
+                new("grid_move", "Grid-based movement", @"grid|COLS|ROWS|CELL"),
+                new("grow", "Snake grows on eating", @"grow|append|insert"),
+                new("food", "Food spawning", @"food|spawn_food"),
+                new("collision", "Wall/self collision", @"in snake|collision"),
+            ],
+            ShouldHave: [
+                new("speed_up", "Speed increases over time", @"speed|move_speed"),
+                new("highscore", "Saved high score", @"best|highscore|save"),
+            ]
+        ),
+        ["breakout"] = new("breakout",
+            MustHave: [
+                new("paddle", "Player paddle", @"paddle|racket"),
+                new("ball", "Bouncing ball", @"ball|bounce"),
+                new("bricks", "Destructible bricks", @"brick|BROKE"),
+                new("lives", "Life system", @"lives|life"),
+            ],
+            ShouldHave: [
+                new("angle_bounce", "Angle-based bounce", @"angle|hit.*dir"),
+                new("multi_row", "Multiple brick rows", @"row|color"),
+            ]
+        ),
+        ["quiz"] = new("quiz",
+            MustHave: [
+                new("questions", "Question data", @"question|QUESTIONS"),
+                new("choices", "Multiple choice", @"answer|choice"),
+                new("timer", "Time limit per question", @"time_left|timer"),
+                new("score", "Score tracking", @"score"),
+            ],
+            ShouldHave: [
+                new("lives", "Lives for wrong answers", @"lives|life"),
+                new("feedback", "Correct/wrong feedback", @"correct|wrong|CORRECT"),
+            ]
+        ),
+        ["minesweeper"] = new("minesweeper",
+            MustHave: [
+                new("grid", "Grid of cells", @"grid|COLS|ROWS"),
+                new("mines", "Hidden mines", @"mine|MINES"),
+                new("reveal", "Reveal cells", @"reveal|_reveal"),
+                new("adjacent", "Adjacent mine count", @"adjacent|_count"),
+            ],
+            ShouldHave: [
+                new("flag", "Flag mechanic", @"flag|_flag"),
+                new("flood_fill", "Auto-reveal empty", @"flood|_reveal"),
+            ]
+        ),
+        ["idle"] = new("idle",
+            MustHave: [
+                new("click", "Click to earn", @"click|_on_mine|mine"),
+                new("upgrade", "Upgradeable stats", @"upgrade|UPGRADE"),
+                new("passive", "Passive income", @"per.*second|passive"),
+                new("save", "Save/load", @"save|load|SAVE"),
+            ],
+            ShouldHave: [
+                new("multi_upgrades", "Multiple upgrade types", @"pickaxe|miner|dynamite", 3),
+                new("scaling_cost", "Scaling costs", @"pow|base_cost"),
+            ]
+        ),
+        ["blockpuzzle"] = new("blockpuzzle",
+            MustHave: [
+                new("shapes", "Falling shapes", @"shape|SHAPES|piece"),
+                new("grid", "Grid placement", @"grid|COLS|ROWS"),
+                new("clear", "Line clearing", @"clear|line|_check_lines"),
+                new("rotation", "Block rotation", @"rotate|_rotate"),
+            ],
+            ShouldHave: [
+                new("ghost", "Ghost piece", @"ghost|shadow"),
+                new("next_preview", "Next piece preview", @"next|NEXT"),
+                new("speed_increase", "Speed increase", @"level|drop_speed"),
+            ]
+        ),
+        ["roguelike"] = new("roguelike",
+            MustHave: [
+                new("procedural", "Procedural generation", @"generate|_generate"),
+                new("permadeath", "Permadeath", @"_game_over"),
+                new("combat", "Combat system", @"attack|damage|_attack"),
+                new("xp", "XP/level progression", @"xp|_check_level"),
+            ],
+            ShouldHave: [
+                new("rooms", "Room-based generation", @"room|ROOM|corridor"),
+                new("items", "Collectible items", @"item|pickup|potion"),
+                new("enemy_variety", "Multiple enemy types", @"Rat|Skeleton|Demon", 2),
+            ]
+        ),
+
     };
 
     /// <summary>Get the genre spec, or null for unsupported genres.</summary>

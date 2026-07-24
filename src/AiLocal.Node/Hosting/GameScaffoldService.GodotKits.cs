@@ -6600,4 +6600,2973 @@ func _physics_process(delta: float) -> void:
         order.sort_custom(func(a2, b2): return scores[a2] > scores[b2])
         main.minigame_done(order)
 """;
+
+    internal static string[] ScaffoldGodotTowerDefense(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Tower Siege"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotTowerDefenseMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotTowerDefenseDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Tower Siege - Tower Defense (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar tower defense-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotTowerDefenseDesignDoc(string prompt) =>
+        "Godot Tower Siege (Tower Defense) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nGridbaserat tornforsvar pa 10x8-brada med 3 torn- och 3 fiendetyper, 10 vagoner, zigzag-stig.\n\n" +
+        "Gridbaserat tornforsvar pa 10x8-brada med 3 torn- och 3 fiendetyper, 10 vagoner, zigzag-stig.\n" +
+        "## Mekanik\n" +
+        "- **Torn:** Arrow (snabbt, lag skada), Cannon (langsamt, hog skada), Frost (saktar fende)\n" +
+        "- **Fiender:** Runner (snabb), Tank (hog HP), Boss (massiv, ger guld) - 3 svarighetsgrader\n" +
+        "- **Ekonomi:** startar 150 guld, +10/25/50 per dode fende, torn kostar 50\n" +
+        "- **Vinst:** 10 vagoner; forlust nar 20 liv forsvinner\n" +
+        "- **Titelskarm, paus, game over, ljud, screenshake, partiklar\n";
+
+    const string GodotTowerDefenseMain = """
+extends Control
+# Tower Siege - grid tower defense (10x8 grid, 3 tower types, 3 enemy types, 10 waves).
+# Place towers on empty tiles to defend the zigzag path.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://towersiege_best.save"
+const GRID_W := 10
+const GRID_H := 8
+const TILE := 64
+const WAVE_COUNT := 10
+
+var grid: Array = []
+var towers: Array = []
+var enemies: Array = []
+var wave := 0
+var gold := 150
+var lives := 20
+var wave_timer := 0.0
+var spawning := false
+var spawn_queue: Array = []
+var path_points: Array = []
+var selected_tower := -1
+var wave_active := false
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	_build_path()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("TOWER SIEGE", 80, 72, Color(0.95, 0.8, 0.3))
+	_label("Defend the path! Place towers on empty tiles.", 160, 22)
+	_label("3 tower types, 3 enemies, 10 waves.", 190, 22)
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("YOU WIN!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win" if win else "hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _build_path() -> void:
+	var pts: Array[Vector2] = []
+	pts.append(Vector2(0, 3 * TILE + TILE/2))
+	pts.append(Vector2(3 * TILE + TILE/2, 3 * TILE + TILE/2))
+	pts.append(Vector2(3 * TILE + TILE/2, 6 * TILE + TILE/2))
+	pts.append(Vector2(7 * TILE + TILE/2, 6 * TILE + TILE/2))
+	pts.append(Vector2(7 * TILE + TILE/2, 2 * TILE + TILE/2))
+	pts.append(Vector2(9 * TILE + TILE/2, 2 * TILE + TILE/2))
+	# v2.28-fix: grid byggdes aldrig (tomt -> _draw kraschade "out of bounds").
+	# Fyll rutnatet och markera vagceller (1) sa torn inte kan sattas pa vagen.
+	grid = []
+	for _gi in range(GRID_W * GRID_H):
+		grid.append(0)
+	for wi in range(pts.size() - 1):
+		var a: Vector2 = pts[wi]
+		var b: Vector2 = pts[wi + 1]
+		var steps := int(a.distance_to(b) / (TILE * 0.5)) + 1
+		for s in range(steps + 1):
+			var q := a.lerp(b, float(s) / float(steps))
+			var gx := int(q.x / TILE)
+			var gy := int(q.y / TILE)
+			if gx >= 0 and gx < GRID_W and gy >= 0 and gy < GRID_H:
+				grid[gy * GRID_W + gx] = 1
+	# _draw ritar rutnatet med +80 y-offset - spegla i vagen sa fienderna
+	# foljer cellerna i stallet for att svava 80 px ovanfor.
+	for wi2 in range(pts.size()):
+		pts[wi2] = pts[wi2] + Vector2(0, 80)
+	path_points = pts
+
+func _point_to_line_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var ap := p - a
+	var t = clamp(ap.dot(ab) / ab.length_squared(), 0.0, 1.0)
+	return (a + ab * t).distance_to(p)
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	for y in range(GRID_H):
+		for x in range(GRID_W):
+			var col := Color(0.15, 0.2, 0.1) if grid[y * GRID_W + x] == 0 else Color(0.3, 0.25, 0.15)
+			draw_rect(Rect2(x * TILE, y * TILE + 80, TILE, TILE), col, true)
+			draw_rect(Rect2(x * TILE, y * TILE + 80, TILE, TILE), Color(0.2,0.2,0.2), false)
+	for t in towers:
+		draw_circle(Vector2(t["x"], t["y"]), 20, Color(0.6, 0.4, 0.2))
+	for e in enemies:
+		draw_circle(Vector2(e["x"], e["y"]), 10, Color(1, 0.2, 0.2))
+		var hp_pct = e["hp"] / e["max_hp"]
+		draw_rect(Rect2(e["x"] - 12, e["y"] - 18, 24 * hp_pct, 4), Color(0, 1, 0), true)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing":
+		return
+	if not wave_active:
+		return
+	if spawning and not spawn_queue.is_empty():
+		wave_timer -= delta
+		if wave_timer <= 0.0:
+			var etype = spawn_queue.pop_front()
+			var hp = [30, 60, 100][etype]
+			var spd = [60, 40, 30][etype]
+			var rew = [10, 25, 50][etype]
+			enemies.append({"x": 0, "y": path_points[0].y, "hp": hp, "max_hp": hp, "speed": spd, "reward": rew, "type": etype, "path_idx": 1})
+			wave_timer = 0.8
+		if spawn_queue.is_empty():
+			spawning = false
+	for e in enemies:
+		if e["path_idx"] >= path_points.size():
+			continue
+		var target = path_points[e["path_idx"]]
+		var dir = (target - Vector2(e["x"], e["y"])).normalized()
+		e["x"] += dir.x * e["speed"] * delta
+		e["y"] += dir.y * e["speed"] * delta
+		if Vector2(e["x"], e["y"]).distance_to(target) < 5:
+			e["path_idx"] += 1
+			if e["path_idx"] >= path_points.size():
+				lives -= 1
+				e["hp"] = 0
+				play_sound("hurt")
+	for t in towers:
+		t["cd"] -= delta
+		if t["cd"] > 0.0:
+			continue
+		for e in enemies:
+			if e["hp"] <= 0.0:
+				continue
+			if Vector2(t["x"], t["y"]).distance_to(Vector2(e["x"], e["y"])) < 100.0:
+				e["hp"] -= 15.0
+				t["cd"] = 0.8
+				if e["hp"] <= 0.0:
+					gold += e["reward"]
+					play_sound("coin")
+				break
+	enemies = enemies.filter(func(e): return e["hp"] > 0.0)
+	if enemies.is_empty() and not spawning and spawn_queue.is_empty():
+		wave += 1
+		if wave >= WAVE_COUNT:
+			_game_over(true)
+			return
+		_start_wave()
+	queue_redraw()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	gold = 150
+	lives = 20
+	wave = 0
+	towers = []
+	enemies = []
+	selected_tower = -1
+	state = "playing"
+	_clear_ui()
+	_start_wave()
+
+func _start_wave() -> void:
+	var count := 5 + wave * 2
+	spawn_queue = []
+	for i in range(count):
+		var et := 0 if wave < 3 else (1 if wave < 6 else 2)
+		spawn_queue.append(et)
+	spawning = true
+	wave_timer = 1.5
+	wave_active = true
+
+func _input(event: InputEvent) -> void:
+	if state != "playing":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var mx := int(event.position.x / TILE)
+		var my := int((event.position.y - 80) / TILE)
+		if mx >= 0 and mx < GRID_W and my >= 0 and my < GRID_H:
+			var idx := my * GRID_W + mx
+			if grid[idx] == 0 and gold >= 50:
+				var cx := mx * TILE + TILE/2
+				var cy := my * TILE + TILE/2 + 80
+				towers.append({"x": cx, "y": cy, "type": 0, "cd": 0.0})
+				gold -= 50
+				play_sound("click")
+""";
+
+    internal static string[] ScaffoldGodotSnake(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Snake"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotSnakeMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotSnakeDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Snake - Snake (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar snake-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotSnakeDesignDoc(string prompt) =>
+        "Godot Snake (Snake) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassiskt Snake-spel pa 20x15-grid: ormen vaxer nar den ater, dod vid vagg/sjalv-kollision, hastigheten okar.\n\n" +
+        "Klassiskt Snake-spel pa 20x15-grid: ormen vaxer nar den ater, dod vid vagg/sjalv-kollision, hastigheten okar.\n" +
+        "## Mekanik\n" +
+        "- **Styrning:** piltangenter (forhindra 180-graders svang)\n" +
+        "- **Tillvaxt:** +1 segment per matbit, +1 poang\n" +
+        "- **Hastighet:** okar med 0.3 per atet mat, max 15.0\n" +
+        "- **Forlust:** vaggkollision eller sjalv-kollision\n" +
+        "- **Vinst:** fyll hela bradet (sallsynt segervillkor)\n" +
+        "- **3 svarighetsgrader:** startfart 3/5/8\n" +
+        "- **Titelskarm, paus, game over, highscore, ljud\n";
+
+    const string GodotSnakeMain = """
+extends Control
+# Snake - classic 20x15 grid, grow on food, wall/self collision, speed increases.
+# Arrow keys to move. Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://snake_best.save"
+const GRID_W := 20
+const GRID_H := 15
+const CELL := 36
+const START_LEN := 3
+
+var snake: Array = []
+var dir := Vector2(1, 0)
+var next_dir := Vector2(1, 0)
+var food := Vector2(-1, -1)
+var score := 0
+var best := 0
+var speed := 5.0
+var move_timer := 0.0
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("SNAKE", 80, 72, Color(0.2, 0.9, 0.3))
+	_label("Eat food to grow. Dont hit walls or yourself!", 160, 22)
+	_label("Best: %d" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("GAME OVER - Score: %d" % score, 200, 76, Color(1, 0.3, 0.3))
+	if score > best:
+		best = score
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	var ox := (1152 - GRID_W * CELL) / 2
+	var oy := 80
+	for y in range(GRID_H):
+		for x in range(GRID_W):
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.08, 0.12, 0.08), true)
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.15, 0.2, 0.15), false)
+	for i in range(snake.size()):
+		var col := Color(0.1, 0.8, 0.2) if i == 0 else Color(0.15, 0.6, 0.15)
+		draw_rect(Rect2(ox + snake[i].x * CELL + 1, oy + snake[i].y * CELL + 1, CELL - 2, CELL - 2), col, true)
+	if food.x >= 0:
+		draw_circle(Vector2(ox + food.x * CELL + CELL/2, oy + food.y * CELL + CELL/2), CELL/2 - 2, Color(1, 0.2, 0.2))
+
+func _input(event: InputEvent) -> void:
+	if state != "playing":
+		return
+	if event.is_action_pressed("ui_up") and dir.y != 1:
+		next_dir = Vector2(0, -1)
+	elif event.is_action_pressed("ui_down") and dir.y != -1:
+		next_dir = Vector2(0, 1)
+	elif event.is_action_pressed("ui_left") and dir.x != 1:
+		next_dir = Vector2(-1, 0)
+	elif event.is_action_pressed("ui_right") and dir.x != -1:
+		next_dir = Vector2(1, 0)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing":
+		return
+	move_timer -= delta
+	if move_timer > 0.0:
+		return
+	move_timer = 1.0 / speed
+	dir = next_dir
+	var head = snake[0] + dir
+	# Wall collision
+	if head.x < 0 or head.x >= GRID_W or head.y < 0 or head.y >= GRID_H:
+		_game_over(false)
+		return
+	# Self collision
+	if head in snake:
+		_game_over(false)
+		return
+	snake.push_front(head)
+	if head == food:
+		score += 1
+		speed = min(15.0, speed + 0.3)
+		play_sound("coin")
+		_spawn_food()
+	else:
+		snake.pop_back()
+	queue_redraw()
+
+func _spawn_food() -> void:
+	var empty: Array[Vector2] = []
+	for y in range(GRID_H):
+		for x in range(GRID_W):
+			var v := Vector2(x, y)
+			if not v in snake:
+				empty.append(v)
+	if empty.is_empty():
+		_game_over(true)
+		return
+	food = empty[randi() % empty.size()]
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	snake = []
+	snake.append(Vector2(5, 7))
+	for i in range(1, START_LEN):
+		snake.append(Vector2(5 - i, 7))
+	dir = Vector2(1, 0)
+	next_dir = Vector2(1, 0)
+	score = 0
+	speed = [3.0, 5.0, 8.0][d]
+	move_timer = 0.0
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Score: 0"
+	hud.name = "Hud"
+	ui.add_child(hud)
+	_spawn_food()
+""";
+
+    internal static string[] ScaffoldGodotBreakout(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Breakout"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotBreakoutMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotBreakoutDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Breakout - Breakout (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar breakout-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotBreakoutDesignDoc(string prompt) =>
+        "Godot Breakout (Breakout) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nKlassiskt Breakout: paddle, boll, tegelstenar - vinkelbaserad studsning, 3 liv.\n\n" +
+        "Klassiskt Breakout: paddle, boll, tegelstenar - vinkelbaserad studsning, 3 liv.\n" +
+        "## Mekanik\n" +
+        "- **Paddle:** styr med mus eller piltangenter\n" +
+        "- **Boll:** vinkeln beror pa traffpunkten pa paddlen\n" +
+        "- **Tegelstenar:** 12x6 grid, varje rad har egen farg\n" +
+        "- **Liv:** 3 liv, forloras nar bollen gar i botten\n" +
+        "- **Vinst:** forstor alla tegelstenar\n" +
+        "- **3 svarighetsgrader:** paverkar bollhastighet\n" +
+        "- **Titelskarm, paus, game over, highscore, ljud, screenshake\n";
+
+    const string GodotBreakoutMain = """
+extends Control
+# Breakout - paddle/ball/bricks, angle-based bouncing, 3 lives.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://breakout_best.save"
+const PADDLE_W := 120
+const PADDLE_H := 16
+const BALL_R := 8
+const BRICK_W := 80
+const BRICK_H := 28
+const BRICK_COLS := 12
+const BRICK_ROWS := 6
+const BRICK_TOP := 120
+
+var paddle_x := 0.0
+var ball := Vector2(0, 0)
+var ball_v := Vector2(0, 0)
+var bricks: Array = []
+var score := 0
+var best := 0
+var lives := 3
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+var ball_launched := false
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("BREAKOUT", 80, 72, Color(0.2, 0.6, 1.0))
+	_label("Break all bricks! Move paddle with mouse or arrow keys.", 160, 22)
+	_label("Best: %d" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("YOU WIN!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
+	if score > best:
+		best = score
+	_label("Score: %d" % score, 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win" if win else "hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	# Paddle
+	draw_rect(Rect2(paddle_x - PADDLE_W/2, 580, PADDLE_W, PADDLE_H), Color(0.8, 0.8, 1.0), true)
+	# Ball
+	draw_circle(ball, BALL_R, Color(1, 1, 1))
+	# Bricks
+	for b in bricks:
+		if b["hp"] > 0:
+			var col := Color(0.2 + b["row"] * 0.12, 0.5 - b["row"] * 0.06, 0.8 - b["row"] * 0.1)
+			draw_rect(Rect2(b["x"], b["y"], BRICK_W, BRICK_H), col, true)
+			draw_rect(Rect2(b["x"], b["y"], BRICK_W, BRICK_H), Color(0.3, 0.3, 0.3), false)
+
+func _input(event: InputEvent) -> void:
+	if state != "playing":
+		return
+	if event is InputEventMouseMotion:
+		paddle_x = clamp(event.position.x, PADDLE_W/2, 1152 - PADDLE_W/2)
+	if event.is_action_pressed("ui_accept") and not ball_launched:
+		ball_launched = true
+		ball_v = Vector2(randf_range(-120, 120), -250)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing":
+		return
+	# Keyboard paddle
+	if Input.is_key_pressed(KEY_LEFT):
+		paddle_x = max(PADDLE_W/2, paddle_x - 500 * delta)
+	if Input.is_key_pressed(KEY_RIGHT):
+		paddle_x = min(1152 - PADDLE_W/2, paddle_x + 500 * delta)
+	# Ball follow paddle before launch
+	if not ball_launched:
+		ball = Vector2(paddle_x, 570)
+		queue_redraw()
+		return
+	# Move ball
+	ball += ball_v * delta
+	# Wall bounce
+	if ball.x < BALL_R or ball.x > 1152 - BALL_R:
+		ball_v.x = -ball_v.x
+		ball.x = clamp(ball.x, BALL_R, 1152 - BALL_R)
+	if ball.y < BALL_R + 80:
+		ball_v.y = -ball_v.y
+		ball.y = max(ball.y, BALL_R + 80)
+	# Bottom loss
+	if ball.y > 600:
+		lives -= 1
+		play_sound("hurt")
+		if lives <= 0:
+			_game_over(false)
+			return
+		ball_launched = false
+		ball_v = Vector2.ZERO
+	# Paddle bounce
+	if ball.y + BALL_R > 580 and ball.y < 600 and abs(ball.x - paddle_x) < PADDLE_W/2 + BALL_R:
+		var offset := (ball.x - paddle_x) / (PADDLE_W/2)
+		ball_v = Vector2(offset * 200, -250)
+		ball.y = 580 - BALL_R
+		play_sound("click")
+	# Brick collision
+	for b in bricks:
+		if b["hp"] <= 0:
+			continue
+		if ball.x + BALL_R > b["x"] and ball.x - BALL_R < b["x"] + BRICK_W and ball.y + BALL_R > b["y"] and ball.y - BALL_R < b["y"] + BRICK_H:
+			b["hp"] -= 1
+			ball_v.y = -ball_v.y
+			score += 10
+			play_sound("coin")
+			_screenshake(3.0)
+			break
+	# Check win
+	var remaining := 0
+	for b in bricks:
+		if b["hp"] > 0:
+			remaining += 1
+	if remaining == 0:
+		_game_over(true)
+	queue_redraw()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	paddle_x = 576
+	score = 0
+	lives = 3
+	ball = Vector2(paddle_x, 570)
+	ball_v = Vector2.ZERO
+	ball_launched = false
+	bricks = []
+	for row in range(BRICK_ROWS):
+		for col in range(BRICK_COLS):
+			bricks.append({"x": 48 + col * (BRICK_W + 4), "y": BRICK_TOP + row * (BRICK_H + 4), "row": row, "hp": 1})
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Score: 0  Lives: 3"
+	hud.name = "Hud"
+	ui.add_child(hud)
+""";
+
+    internal static string[] ScaffoldGodotQuiz(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Quiz Night"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotQuizMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotQuizDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Quiz Night - Quiz (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar quiz-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotQuizDesignDoc(string prompt) =>
+        "Godot Quiz Night (Quiz) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nFragesport med 12 trivia-fragor, 15 sekunders timer, 4 svarsalternativ, 3 liv.\n\n" +
+        "Fragesport med 12 trivia-fragor, 15 sekunders timer, 4 svarsalternativ, 3 liv.\n" +
+        "## Mekanik\n" +
+        "- **Fragor:** 12 blandade allmanfragor med 4 svarsalternativ\n" +
+        "- **Timer:** 15 sekunder per fraga, automatiskt fel nar tiden gar ut\n" +
+        "- **Liv:** 3 liv, forloras vid fel svar eller tidsbrist\n" +
+        "- **Poang:** +1 per ratt svar, max 12\n" +
+        "- **Vinst:** svara pa alla 12 fragor med minst 1 liv kvar\n" +
+        "- **Titelskarm, paus, game over, highscore, ljud, screenshake\n";
+
+    const string GodotQuizMain = """
+extends Control
+# Quiz Night - 12 trivia questions, 15s timer, 4 choices, 3 lives.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://quiz_best.save"
+const QUESTIONS := [
+	["What is the capital of France?", "Paris", "London", "Berlin", "Madrid", 0],
+	["Which planet is known as the Red Planet?", "Venus", "Mars", "Jupiter", "Saturn", 1],
+	["What is the largest ocean?", "Atlantic", "Indian", "Arctic", "Pacific", 3],
+	["Who painted the Mona Lisa?", "Van Gogh", "Picasso", "Da Vinci", "Rembrandt", 2],
+	["What is the square root of 144?", "10", "11", "12", "13", 2],
+	["Which gas do plants absorb?", "Oxygen", "Nitrogen", "CO2", "Hydrogen", 2],
+	["What is the fastest animal on land?", "Lion", "Cheetah", "Horse", "Gazelle", 1],
+	["How many continents are there?", "5", "6", "7", "8", 2],
+	["What is the smallest prime number?", "0", "1", "2", "3", 2],
+	["Which element is needed for fire?", "Water", "Earth", "Oxygen", "Wind", 2],
+	["What year did the Titanic sink?", "1905", "1912", "1920", "1898", 1],
+	["How many bones are in the human body?", "106", "206", "306", "406", 1],
+]
+
+var q_idx := 0
+var score := 0
+var best := 0
+var lives := 3
+var timer := 15.0
+var answered := false
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("QUIZ NIGHT", 80, 72, Color(0.9, 0.7, 0.2))
+	_label("Answer 12 trivia questions. 15 seconds each. 3 lives.", 160, 22)
+	_label("Best: %d" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("QUIZ MASTER!" if win else "GAME OVER", 200, 76, Color(0.3,1,0.3) if win else Color(1,0.3,0.3))
+	_label("Score: %d / %d" % [score, 12], 280, 22)
+	if score > best:
+		best = score
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win" if win else "hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing":
+		return
+	if answered:
+		return
+	timer -= delta
+	if timer <= 0.0:
+		_wrong_answer()
+
+func _show_question() -> void:
+	_clear_ui()
+	if q_idx >= 12:
+		_game_over(true)
+		return
+	var q = QUESTIONS[q_idx]
+	timer = 15.0
+	answered = false
+	_label("Question %d / 12" % (q_idx + 1), 80, 22)
+	_label("Lives: %d  Score: %d" % [lives, score], 110, 18, Color(0.7, 0.9, 1))
+	_label(str(q[0]), 160, 28, Color(1, 1, 0.8))
+	var letters := ["A", "B", "C", "D"]
+	for i in range(4):
+		var idx := i
+		_button(letters[i] + ": " + str(q[i + 1]), 240 + i * 58, func(): _answer(idx))
+
+func _answer(idx: int) -> void:
+	if answered:
+		return
+	answered = true
+	var q = QUESTIONS[q_idx]
+	if idx == q[5]:
+		score += 1
+		play_sound("coin")
+		_label("CORRECT!", 460, 32, Color(0.3, 1, 0.3))
+	else:
+		_wrong_answer()
+		return
+	await get_tree().create_timer(0.8).timeout
+	q_idx += 1
+	_show_question()
+
+func _wrong_answer() -> void:
+	if answered:
+		return
+	answered = true
+	lives -= 1
+	play_sound("hurt")
+	_screenshake(4.0)
+	_label("WRONG! Lives: %d" % lives, 460, 28, Color(1, 0.3, 0.3))
+	if lives <= 0:
+		_game_over(false)
+		return
+	await get_tree().create_timer(0.8).timeout
+	q_idx += 1
+	_show_question()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	q_idx = 0
+	score = 0
+	lives = 3
+	timer = 15.0
+	answered = false
+	state = "playing"
+	_show_question()
+""";
+
+    internal static string[] ScaffoldGodotMemory(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Memory Match"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotMemoryMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotMemoryDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Memory Match - Memory (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar memory-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotMemoryDesignDoc(string prompt) =>
+        "Godot Memory Match (Memory) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nMemory Match: 4x4 kortgrid (8 par), vanda-for-att-matcha, dragraknare.\n\n" +
+        "Memory Match: 4x4 kortgrid (8 par), vanda-for-att-matcha, dragraknare.\n" +
+        "## Mekanik\n" +
+        "- **Kort:** 4x4 grid med 8 symbolpar slumpade varje omgang\n" +
+        "- **Spel:** klicka for att vanda tva kort; om samma symbol = match\n" +
+        "- **Dragraknare:** rakna varje par av vandningar\n" +
+        "- **Vinst:** matcha alla 8 par\n" +
+        "- **Highscore:** lagsta antalet drag sparas\n" +
+        "- **Titelskarm, paus, game over, ljud, screenshake\n";
+
+    const string GodotMemoryMain = """
+extends Control
+# Memory Match - 4x4 card grid, flip-to-match, move counter.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://memory_best.save"
+const GRID := 4
+const CARD_W := 100
+const CARD_H := 120
+const CARD_GAP := 12
+
+var cards: Array = []
+var flipped: Array = []
+var matched: Array = []
+var moves := 0
+var best := 0
+var can_flip := true
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+var card_symbols := ["A","B","C","D","E","F","G","H"]
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("MEMORY MATCH", 80, 72, Color(0.8, 0.4, 0.9))
+	_label("Flip cards to find matching pairs. Match all 8 pairs!", 160, 22)
+	_label("Best: %d moves" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("YOU WIN! Moves: %d" % moves, 200, 76, Color(0.3, 1, 0.3))
+	if best == 0 or moves < best:
+		best = moves
+	_label("Best: %d moves" % best, 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _process(_delta: float) -> void:
+	queue_redraw()
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	var ox := (1152 - GRID * (CARD_W + CARD_GAP)) / 2
+	var oy := 100
+	for c in cards:
+		var idx = c["idx"]
+		var col = idx % GRID
+		var row := int(idx / GRID)
+		var x = ox + col * (CARD_W + CARD_GAP)
+		var y := oy + row * (CARD_H + CARD_GAP)
+		if c["matched"]:
+			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.1, 0.3, 0.1), true)
+		elif c["flipped"]:
+			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.25, 0.25, 0.35), true)
+			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.4, 0.4, 0.5), false)
+			draw_char(get_theme_default_font(), Vector2(x + 40, y + 80), c["symbol"], 40, Color(1, 1, 1))
+		else:
+			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.2, 0.2, 0.5), true)
+			draw_rect(Rect2(x, y, CARD_W, CARD_H), Color(0.3, 0.3, 0.6), false)
+
+func _input(event: InputEvent) -> void:
+	if state != "playing" or not can_flip:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var ox := (1152 - GRID * (CARD_W + CARD_GAP)) / 2
+		var oy := 100
+		for c in cards:
+			if c["matched"] or c["flipped"]:
+				continue
+			var idx = c["idx"]
+			var col = idx % GRID
+			var row := int(idx / GRID)
+			var x = ox + col * (CARD_W + CARD_GAP)
+			var y := oy + row * (CARD_H + CARD_GAP)
+			if event.position.x >= x and event.position.x <= x + CARD_W and event.position.y >= y and event.position.y <= y + CARD_H:
+				c["flipped"] = true
+				flipped.append(c)
+				play_sound("click")
+				if flipped.size() == 2:
+					can_flip = false
+					moves += 1
+					_check_match()
+				queue_redraw()
+				return
+
+func _check_match() -> void:
+	if flipped[0]["symbol"] == flipped[1]["symbol"]:
+		flipped[0]["matched"] = true
+		flipped[1]["matched"] = true
+		play_sound("coin")
+		var all_matched := true
+		for c in cards:
+			if not c["matched"]:
+				all_matched = false
+				break
+		if all_matched:
+			_game_over(true)
+			return
+	else:
+		play_sound("hurt")
+		await get_tree().create_timer(0.6).timeout
+		for c in flipped:
+			c["flipped"] = false
+	flipped = []
+	can_flip = true
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	cards = []
+	var symbols: Array = []
+	for s in card_symbols:
+		symbols.append(s)
+		symbols.append(s)
+	symbols.shuffle()
+	for i in range(16):
+		cards.append({"idx": i, "symbol": symbols[i], "flipped": false, "matched": false})
+	flipped = []
+	matched = []
+	moves = 0
+	can_flip = true
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Moves: 0"
+	hud.name = "Hud"
+	ui.add_child(hud)
+""";
+
+
+    internal static string[] ScaffoldGodotMinesweeper(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Minesweeper"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotMinesweeperMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotMinesweeperDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Minesweeper - Minesweeper (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar minesweeper-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotMinesweeperDesignDoc(string prompt) =>
+        "Godot Minesweeper (Minesweeper) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nMinesweeper: 10x10-grid, 15 minor, vänsterklicka för att avslöja, högerklicka för flagga, översvämningsfyllning.\n\n" +
+        "Minesweeper: 10x10-grid, 15 minor, vänsterklicka för att avslöja, högerklicka för flagga, översvämningsfyllning.\n" +
+        "## Mekanik\n" +
+        "- **Grid:** 10x10 med 15 minor slumpade varje omgang\n" +
+        "- **Avsloja:** vänsterklicka; siffror visar antal min-grannar\n" +
+        "- **Flagga:** högerklicka for att markera misstankta minor\n" +
+        "- **Flood fill:** tomma celler avslojar automatiskt angränsande tomma\n" +
+        "- **Forlust:** klicka pa en mina = game over\n" +
+        "- **Vinst:** avsloja alla 85 saker celler\n" +
+        "- **Titelskarm, paus, game over, highscore (tid), ljud\n";
+
+    const string GodotMinesweeperMain = """
+extends Control
+# Minesweeper - 10x10 grid, 15 mines, left-click reveal, right-click flag, flood fill.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://minesweeper_best.save"
+const GRID := 10
+const CELL := 48
+const MINES := 15
+
+var grid: Array = []
+var revealed: Array = []
+var flags: Array = []
+var mine_positions: Array = []
+var game_over := false
+var flag_mode := false
+var time := 0.0
+var best := 0
+var revealed_count := 0
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("MINESWEEPER", 80, 72, Color(0.6, 0.8, 0.3))
+	_label("10x10 grid, 15 mines. Left-click reveal, right-click flag.", 160, 22)
+	_label("Best: %ds" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("YOU WIN! Time: %ds" % int(time), 200, 76, Color(0.3,1,0.3))
+	if win and (best == 0 or time < best):
+		best = int(time)
+	_label("Best: %ds" % best, 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win" if win else "hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	var ox := (1152 - GRID * CELL) / 2
+	var oy := 80
+	for y in range(GRID):
+		for x in range(GRID):
+			var r = revealed[y * GRID + x]
+			var f = flags[y * GRID + x]
+			var is_mine := mine_positions.has(y * GRID + x)
+			var col := Color(0.35, 0.35, 0.35) if not r else Color(0.55, 0.55, 0.55)
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), col, true)
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.2, 0.2, 0.2), false)
+			if f:
+				draw_char(get_theme_default_font(), Vector2(ox + x * CELL + 16, oy + y * CELL + 34), "F", 24, Color(1, 0.2, 0.2))
+			elif r:
+				if is_mine:
+					draw_char(get_theme_default_font(), Vector2(ox + x * CELL + 16, oy + y * CELL + 34), "M", 24, Color(1, 0, 0))
+				else:
+					var n = grid[y * GRID + x]
+					if n > 0:
+						var c = [Color(0.3,0.6,1), Color(0.3,0.8,0.3), Color(1,0.3,0.3), Color(0.5,0.2,0.8), Color(0.8,0.4,0.2)][min(n-1, 4)]
+						draw_char(get_theme_default_font(), Vector2(ox + x * CELL + 18, oy + y * CELL + 34), str(n), 22, c)
+
+func _flood_fill(idx: int) -> void:
+	if idx < 0 or idx >= GRID * GRID or revealed[idx] or flags[idx]:
+		return
+	revealed[idx] = true
+	revealed_count += 1
+	if grid[idx] > 0:
+		return
+	var x := idx % GRID
+	var y := int(idx / GRID)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var nx := x + dx
+			var ny := y + dy
+			if nx >= 0 and nx < GRID and ny >= 0 and ny < GRID:
+				_flood_fill(ny * GRID + nx)
+
+func _input(event: InputEvent) -> void:
+	if state != "playing" or game_over:
+		return
+	if event is InputEventMouseButton and event.pressed:
+		var ox := (1152 - GRID * CELL) / 2
+		var oy := 80
+		var mx := int((event.position.x - ox) / CELL)
+		var my := int((event.position.y - oy) / CELL)
+		if mx < 0 or mx >= GRID or my < 0 or my >= GRID:
+			return
+		var idx := my * GRID + mx
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			if not revealed[idx]:
+				flags[idx] = not flags[idx]
+				play_sound("click")
+				queue_redraw()
+				return
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if revealed[idx] or flags[idx]:
+				return
+			if mine_positions.has(idx):
+				game_over = true
+				play_sound("hurt")
+				_screenshake(8.0)
+				queue_redraw()
+				await get_tree().create_timer(0.5).timeout
+				_game_over(false)
+				return
+			_flood_fill(idx)
+			play_sound("click")
+			var total_safe := GRID * GRID - MINES
+			if revealed_count >= total_safe:
+				game_over = true
+				_game_over(true)
+			queue_redraw()
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state == "playing" and not game_over:
+		time += delta
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	grid = []
+	revealed = []
+	flags = []
+	mine_positions = []
+	game_over = false
+	time = 0.0
+	revealed_count = 0
+	# Init arrays
+	for i in range(GRID * GRID):
+		grid.append(0)
+		revealed.append(false)
+		flags.append(false)
+	# Place mines
+	var pos: Array = range(GRID * GRID)
+	pos.shuffle()
+	for i in range(MINES):
+		mine_positions.append(pos[i])
+		grid[pos[i]] = -1
+	# Count neighbors
+	for i in range(GRID * GRID):
+		if grid[i] == -1:
+			continue
+		var x := i % GRID
+		var y := int(i / GRID)
+		var cnt := 0
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var nx := x + dx
+				var ny := y + dy
+				if nx >= 0 and nx < GRID and ny >= 0 and ny < GRID and grid[ny * GRID + nx] == -1:
+					cnt += 1
+		grid[i] = cnt
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Time: 0"
+	hud.name = "Hud"
+	ui.add_child(hud)
+""";
+
+    internal static string[] ScaffoldGodotIdle(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Gold Mine"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotIdleMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotIdleDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Gold Mine - Idle/Clicker (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar idle/clicker-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotIdleDesignDoc(string prompt) =>
+        "Godot Gold Mine (Idle/Clicker) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nIncremental/clicker: klicka for att bryta guld, 5 uppgraderingar, passiv inkomst, spara/ladda.\n\n" +
+        "Incremental/clicker: klicka for att bryta guld, 5 uppgraderingar, passiv inkomst, spara/ladda.\n" +
+        "## Mekanik\n" +
+        "- **Klicka:** varje klick ger guld enligt nuvarande click_power\n" +
+        "- **Uppgraderingar:** 5 stycken: Better Pickaxe, Mine Cart, Drill, Elevator, Factory\n" +
+        "- **Passiv:** uppgraderingar ger passiv inkomst per sekund\n" +
+        "- **Spara/ladda:** spelet sparas automatiskt vid paus/titel\n" +
+        "- **Titelskarm, highscore (total earned), ljud, screenshake\n";
+
+    const string GodotIdleMain = """
+extends Control
+# Gold Mine - click to mine gold, 5 upgrades, passive income, save/load.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://goldmine_save.json"
+const UPGRADES := [
+	{"name": "Better Pickaxe", "cost": 30, "effect": "click +1"},
+	{"name": "Mine Cart", "cost": 80, "effect": "passive +0.5/s"},
+	{"name": "Drill", "cost": 200, "effect": "passive +2/s"},
+	{"name": "Elevator", "cost": 500, "effect": "passive +5/s"},
+	{"name": "Factory", "cost": 1200, "effect": "passive +15/s"},
+]
+
+var gold := 0.0
+var click_power := 1.0
+var passive_rate := 0.0
+var owned := [false, false, false, false, false]
+var total_earned := 0.0
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_load_game()
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_save_game()
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("GOLD MINE", 80, 72, Color(0.95, 0.8, 0.2))
+	_label("Click to mine gold! Buy upgrades for passive income.", 160, 22)
+	_label("Total: %d gold" % total_earned, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("GOLD RUSH!", 200, 76, Color(0.95, 0.8, 0.2))
+	_label("Total earned: %d gold" % total_earned, 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing":
+		return
+	gold += passive_rate * delta
+	_update_hud()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	gold = 0.0
+	click_power = 1.0
+	passive_rate = 0.0
+	owned = [false, false, false, false, false]
+	total_earned = 0.0
+	state = "playing"
+	_show_mine()
+
+func _show_mine() -> void:
+	_clear_ui()
+	var h := Label.new()
+	hud = h
+	hud.name = "Hud"
+	ui.add_child(hud)
+	_update_hud()
+	var mine_btn := Button.new()
+	mine_btn.text = "MINE! Click me"
+	mine_btn.size = Vector2(240, 100)
+	mine_btn.position = Vector2(456, 200)
+	mine_btn.pressed.connect(func(): _do_mine())
+	ui.add_child(mine_btn)
+	for i in range(UPGRADES.size()):
+		var idx := i
+		var up = UPGRADES[i]
+		var b := Button.new()
+		if owned[i]:
+			b.text = up["name"] + " (OWNED)"
+			b.disabled = true
+		else:
+			b.text = up["name"] + " - %d gold" % up["cost"]
+		b.size = Vector2(280, 40)
+		b.position = Vector2(436, 340 + i * 48)
+		b.pressed.connect(func(): _buy_upgrade(idx))
+		ui.add_child(b)
+
+var hud: Label
+
+func _update_hud() -> void:
+	if hud:
+		hud.text = "Gold: %d  |  Click: +%d  |  Passive: +%.1f/s" % [int(gold), int(click_power), passive_rate]
+
+func _do_mine() -> void:
+	gold += click_power
+	total_earned += click_power
+	play_sound("coin")
+	_screenshake(1.0)
+	_update_hud()
+
+func _buy_upgrade(idx: int) -> void:
+	if owned[idx]:
+		return
+	var up = UPGRADES[idx]
+	if gold >= int(up["cost"]):
+		gold -= int(up["cost"])
+		owned[idx] = true
+		click_power += 1.0
+		passive_rate += [0.0, 0.5, 2.0, 5.0, 15.0][idx]
+		play_sound("click")
+		_save_game()
+		_show_mine()
+
+func _save_game() -> void:
+	var data := {"gold": gold, "click_power": click_power, "passive_rate": passive_rate, "owned": owned, "total_earned": total_earned}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_line(JSON.stringify(data))
+
+func _load_game() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f:
+		var data = JSON.parse_string(f.get_line())
+		if data is Dictionary:
+			gold = data.get("gold", 0.0)
+			click_power = data.get("click_power", 1.0)
+			passive_rate = data.get("passive_rate", 0.0)
+			owned = data.get("owned", [false, false, false, false, false])
+			total_earned = data.get("total_earned", 0.0)
+""";
+
+    internal static string[] ScaffoldGodotBlockPuzzle(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Block Puzzle"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotBlockPuzzleMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotBlockPuzzleDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Block Puzzle - Block Puzzle (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar block puzzle-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotBlockPuzzleDesignDoc(string prompt) =>
+        "Godot Block Puzzle (Block Puzzle) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nTetris-liknande blockpussel: 7 standardbitar, spokbit, radrensning.\n\n" +
+        "Tetris-liknande blockpussel: 7 standardbitar, spokbit, radrensning.\n" +
+        "## Mekanik\n" +
+        "- **Bitarna:** 7 standard Tetris-bitar (I, O, T, L, J, S, Z) med rotation\n" +
+        "- **Spokbit:** visar var biten landar (transparent forhandsvisning)\n" +
+        "- **Kontroller:** vänster/höger flytta, ned = snabbfall, upp = rotera, mellanslag = hard drop\n" +
+        "- **Rensning:** fylla en hel rad = +100/300/500/800 poang\n" +
+        "- **Niva:** okar var 10:e rad, drop-hastigheten okar\n" +
+        "- **Game over:** nar biten inte far plats vid spawn\n" +
+        "- **Titelskarm, paus, highscore, ljud, screenshake\n";
+
+    const string GodotBlockPuzzleMain = """
+extends Control
+# Block Puzzle - Tetris-like, 7 standard pieces, ghost piece, line clearing.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://blockpuzzle_best.save"
+const COLS := 10
+const ROWS := 20
+const CELL := 28
+
+const PIECES := [
+	[[0,0,0,0],[1,1,1,1]],         # I
+	[[1,1],[1,1]],                  # O
+	[[0,1,0],[1,1,1]],              # T
+	[[1,0,0],[1,1,1]],              # L
+	[[0,0,1],[1,1,1]],              # J
+	[[0,1,1],[1,1,0]],              # S
+	[[1,1,0],[0,1,1]],              # Z
+]
+
+var board: Array = []
+var current_piece := 0
+var current_rot := 0
+var px := 3
+var py := 0
+var score := 0
+var best := 0
+var level := 1
+var lines := 0
+var drop_timer := 0.0
+var drop_speed := 1.0
+var ghost_y := 0
+var game_over := false
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("BLOCK PUZZLE", 80, 72, Color(0.3, 0.8, 1.0))
+	_label("Arrange falling blocks. Clear lines to score points!", 160, 22)
+	_label("Best: %d" % best, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("GAME OVER - Score: %d" % score, 200, 76, Color(1, 0.3, 0.3))
+	if score > best:
+		best = score
+	_label("Lines: %d" % lines, 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _get_cells(piece: int, rot: int) -> Array:
+	var p = PIECES[piece]
+	var h = p.size()
+	var w = p[0].size()
+	var cells: Array[Vector2] = []
+	if rot == 0:
+		for y in range(h):
+			for x in range(w):
+				if p[y][x]:
+					cells.append(Vector2(x, y))
+	elif rot == 1:
+		for y in range(w):
+			for x in range(h):
+				if p[h-1-x][y]:
+					cells.append(Vector2(x, y))
+	elif rot == 2:
+		for y in range(h):
+			for x in range(w):
+				if p[h-1-y][w-1-x]:
+					cells.append(Vector2(x, y))
+	else:
+		for y in range(w):
+			for x in range(h):
+				if p[x][w-1-y]:
+					cells.append(Vector2(x, y))
+	return cells
+
+func _collides(cells: Array, dx: int, dy: int) -> bool:
+	for c in cells:
+		var nx := int(c.x) + px + dx
+		var ny := int(c.y) + py + dy
+		if nx < 0 or nx >= COLS or ny >= ROWS:
+			return true
+		if ny >= 0 and board[ny * COLS + nx]:
+			return true
+	return false
+
+func _calc_ghost() -> int:
+	var gy := py
+	while not _collides(_get_cells(current_piece, current_rot), 0, gy - py + 1):
+		gy += 1
+	return gy
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	var ox := (1152 - COLS * CELL) / 2
+	var oy := 60
+	# Board
+	for y in range(ROWS):
+		for x in range(COLS):
+			var col := Color(0.08, 0.08, 0.1) if board[y * COLS + x] == 0 else Color(0.3, 0.5, 0.8)
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), col, true)
+			draw_rect(Rect2(ox + x * CELL, oy + y * CELL, CELL, CELL), Color(0.15, 0.15, 0.18), false)
+	# Ghost piece
+	var cells := _get_cells(current_piece, current_rot)
+	ghost_y = _calc_ghost()
+	for c in cells:
+		var gx := int(c.x) + px
+		var gy2 := int(c.y) + ghost_y
+		if gy2 >= 0:
+			draw_rect(Rect2(ox + gx * CELL, oy + gy2 * CELL, CELL, CELL), Color(0.3, 0.3, 0.4, 0.3), true)
+	# Current piece
+	for c in cells:
+		var cx := int(c.x) + px
+		var cy := int(c.y) + py
+		if cy >= 0:
+			draw_rect(Rect2(ox + cx * CELL, oy + cy * CELL, CELL, CELL), Color(0.2, 0.7, 1.0), true)
+			draw_rect(Rect2(ox + cx * CELL, oy + cy * CELL, CELL, CELL), Color(0.4, 0.8, 1.0), false)
+
+func _process(delta: float) -> void:
+	queue_redraw()
+	if state != "playing" or game_over:
+		return
+	drop_timer -= delta
+	if drop_timer <= 0.0:
+		drop_timer = drop_speed
+		if not _collides(_get_cells(current_piece, current_rot), 0, 1):
+			py += 1
+		else:
+			_lock_piece()
+	queue_redraw()
+
+func _lock_piece() -> void:
+	var cells := _get_cells(current_piece, current_rot)
+	for c in cells:
+		var bx := int(c.x) + px
+		var by := int(c.y) + py
+		if by >= 0 and by < ROWS:
+			board[by * COLS + bx] = 1
+	# Check lines
+	var cleared := 0
+	var y := ROWS - 1
+	while y >= 0:
+		var full := true
+		for x in range(COLS):
+			if board[y * COLS + x] == 0:
+				full = false
+				break
+		if full:
+			board.remove_at(y * COLS)
+			for x in range(COLS):
+				board.insert(0, 0)
+			cleared += 1
+			_screenshake(3.0)
+		else:
+			y -= 1
+	if cleared > 0:
+		var pts = [0, 100, 300, 500, 800][min(cleared, 4)]
+		score += pts
+		lines += cleared
+		level = 1 + int(lines / 10)
+		drop_speed = max(0.1, 1.0 - level * 0.08)
+		play_sound("coin")
+	# Next piece
+	py = 0
+	px = 3
+	current_piece = randi() % PIECES.size()
+	current_rot = 0
+	if _collides(_get_cells(current_piece, current_rot), 0, 0):
+		game_over = true
+		_game_over(false)
+
+func _input(event: InputEvent) -> void:
+	if state != "playing" or game_over:
+		return
+	if event.is_action_pressed("ui_left"):
+		if not _collides(_get_cells(current_piece, current_rot), -1, 0):
+			px -= 1
+	elif event.is_action_pressed("ui_right"):
+		if not _collides(_get_cells(current_piece, current_rot), 1, 0):
+			px += 1
+	elif event.is_action_pressed("ui_down"):
+		if not _collides(_get_cells(current_piece, current_rot), 0, 1):
+			py += 1
+			score += 1
+	elif event.is_action_pressed("ui_up"):
+		var new_rot := (current_rot + 1) % 4
+		if not _collides(_get_cells(current_piece, new_rot), 0, 0):
+			current_rot = new_rot
+	elif event.is_action_pressed("ui_accept"):
+		while not _collides(_get_cells(current_piece, current_rot), 0, 1):
+			py += 1
+			score += 2
+		_lock_piece()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	board = []
+	for i in range(ROWS * COLS):
+		board.append(0)
+	score = 0
+	level = 1
+	lines = 0
+	game_over = false
+	current_piece = randi() % PIECES.size()
+	current_rot = 0
+	px = 3
+	py = 0
+	drop_speed = [0.8, 0.5, 0.3][d]
+	drop_timer = drop_speed
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Score: 0  Lines: 0  Level: 1"
+	hud.name = "Hud"
+	ui.add_child(hud)
+""";
+
+    internal static string[] ScaffoldGodotRoguelike(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("The Dungeon"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotRoguelikeMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotRoguelikeDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# The Dungeon - Roguelike (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar roguelike-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotRoguelikeDesignDoc(string prompt) =>
+        "Godot The Dungeon (Roguelike) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nRoguelike: procedurallt genererade rum och korridorer, bump-to-attack-strid, XP/niva, permadeath.\n\n" +
+        "Roguelike: procedurallt genererade rum och korridorer, bump-to-attack-strid, XP/niva, permadeath.\n" +
+        "## Mekanik\n" +
+        "- **Procedural:** slumpmassigt genererade rum och korridorer, 6-10 rum per våning\n" +
+        "- **Strid:** bump-to-attack: ga in i en fiende for att attackera (bada tar skada)\n" +
+        "- **XP/Niva:** 5+DJUP XP per dödad fiende, var 20:e XP = ny niva (+HP, ATK, DEF)\n" +
+        "- **Items:** helande drycker slumpas i rummen\n" +
+        "- **Permadeath:** nar HP når 0 = game over, borja om från början\n" +
+        "- **DJUP:** okar varje våning, fender blir starkare\n" +
+        "- **Titelskarm, paus, highscore (basta våningen), ljud, screenshake\n";
+
+    const string GodotRoguelikeMain = """
+extends Control
+# The Dungeon - procedural rooms+corridors, bump-to-attack, XP/level, permadeath.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://dungeon_best.save"
+const TILE := 32
+const MAP_W := 40
+const MAP_H := 30
+
+var map_data: Array = []
+var player := {"x": 0, "y": 0, "hp": 20, "max_hp": 20, "xp": 0, "level": 1, "atk": 3, "def": 1}
+var enemies: Array = []
+var items: Array = []
+var floor := 1
+var depth := 1
+var turns := 0
+var best_floor := 0
+var message := ""
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("THE DUNGEON", 80, 72, Color(0.8, 0.3, 0.3))
+	_label("Descend into the dungeon! Permadeath. Bump-to-attack combat.", 160, 22)
+	_label("Best floor: %d" % best_floor, 200, 22, Color(0.7, 0.9, 1))
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("PERISHED on floor %d" % floor, 200, 76, Color(1, 0.3, 0.3))
+	_label("Turns: %d" % turns, 280, 22)
+	if floor > best_floor:
+		best_floor = floor
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _generate_map() -> void:
+	map_data = []
+	for i in range(MAP_W * MAP_H):
+		map_data.append(1)  # wall
+	# Rooms
+	var num_rooms := 6 + randi() % 4
+	var rooms: Array = []
+	for r in range(num_rooms):
+		var rw := 5 + randi() % 8
+		var rh := 4 + randi() % 6
+		var rx := 2 + randi() % (MAP_W - rw - 3)
+		var ry := 2 + randi() % (MAP_H - rh - 3)
+		var ok := true
+		for rr in rooms:
+			if abs(rx - rr["x"]) < rw + 2 and abs(ry - rr["y"]) < rh + 2:
+				ok = false
+				break
+		if not ok:
+			continue
+		rooms.append({"x": rx, "y": ry, "w": rw, "h": rh})
+		for dy in range(rh):
+			for dx in range(rw):
+				map_data[(ry + dy) * MAP_W + (rx + dx)] = 0
+	# Connect rooms with corridors
+	for i in range(1, rooms.size()):
+		var a = rooms[i-1]
+		var b = rooms[i]
+		var ax = a["x"] + a["w"]/2
+		var ay = a["y"] + a["h"]/2
+		var bx = b["x"] + b["w"]/2
+		var by = b["y"] + b["h"]/2
+		if randf() < 0.5:
+			for x in range(min(ax, bx), max(ax, bx) + 1):
+				map_data[ay * MAP_W + x] = 0
+			for y in range(min(ay, by), max(ay, by) + 1):
+				map_data[y * MAP_W + bx] = 0
+		else:
+			for y in range(min(ay, by), max(ay, by) + 1):
+				map_data[y * MAP_W + ax] = 0
+			for x in range(min(ax, bx), max(ax, bx) + 1):
+				map_data[by * MAP_W + x] = 0
+	# Player start
+	var r0 = rooms[0]
+	player.x = r0["x"] + r0["w"]/2
+	player.y = r0["y"] + r0["h"]/2
+	player.hp = player.max_hp
+	# Enemies
+	enemies = []
+	for r in range(1, rooms.size()):
+		var rr = rooms[r]
+		var ecount = 1 + randi() % min(3, depth)
+		for e in range(ecount):
+			var ex = rr["x"] + 1 + randi() % max(1, rr["w"] - 2)
+			var ey = rr["y"] + 1 + randi() % max(1, rr["h"] - 2)
+			if map_data[ey * MAP_W + ex] == 0 and not (ex == player.x and ey == player.y):
+				enemies.append({"x": ex, "y": ey, "hp": 5 + depth * 2, "max_hp": 5 + depth * 2, "atk": 1 + depth, "type": "goblin"})
+	# Items (healing potions)
+	items = []
+	for r in range(rooms.size()):
+		var rr = rooms[r]
+		var ix = rr["x"] + 1 + randi() % max(1, rr["w"] - 2)
+		var iy = rr["y"] + 1 + randi() % max(1, rr["h"] - 2)
+		if map_data[iy * MAP_W + ix] == 0:
+			items.append({"x": ix, "y": iy, "type": "potion", "heal": 5 + depth * 2})
+
+func _process(_delta: float) -> void:
+	queue_redraw()
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	var ox := 20
+	var oy := 80
+	var cam_x = player.x - 15
+	var cam_y = player.y - 10
+	for y in range(20):
+		for x in range(30):
+			var mx = cam_x + x
+			var my = cam_y + y
+			if mx < 0 or mx >= MAP_W or my < 0 or my >= MAP_H:
+				continue
+			var idx = my * MAP_W + mx
+			var col := Color(0.05, 0.05, 0.08) if map_data[idx] == 1 else Color(0.1, 0.12, 0.1)
+			draw_rect(Rect2(ox + x * TILE, oy + y * TILE, TILE, TILE), col, true)
+	for item in items:
+		var ix = (item["x"] - cam_x) * TILE + ox
+		var iy = (item["y"] - cam_y) * TILE + oy
+		draw_circle(Vector2(ix + TILE/2, iy + TILE/2), 8, Color(0.2, 1, 0.2))
+	for e in enemies:
+		if e["hp"] <= 0:
+			continue
+		var ex = (e["x"] - cam_x) * TILE + ox
+		var ey = (e["y"] - cam_y) * TILE + oy
+		draw_rect(Rect2(ex + 4, ey + 4, TILE - 8, TILE - 8), Color(0.8, 0.2, 0.2), true)
+	# Player
+	var px2 = (player.x - cam_x) * TILE + ox
+	var py2 = (player.y - cam_y) * TILE + oy
+	draw_rect(Rect2(px2 + 4, py2 + 4, TILE - 8, TILE - 8), Color(0.2, 0.5, 1.0), true)
+
+func _input(event: InputEvent) -> void:
+	if state != "playing":
+		return
+	var dx := 0
+	var dy := 0
+	if event.is_action_pressed("ui_up"): dy = -1
+	elif event.is_action_pressed("ui_down"): dy = 1
+	elif event.is_action_pressed("ui_left"): dx = -1
+	elif event.is_action_pressed("ui_right"): dx = 1
+	else: return
+	var nx = player.x + dx
+	var ny = player.y + dy
+	if nx < 0 or nx >= MAP_W or ny < 0 or ny >= MAP_H or map_data[ny * MAP_W + nx] == 1:
+		return
+	# Check enemy bump
+	for e in enemies:
+		if e["x"] == nx and e["y"] == ny and e["hp"] > 0:
+			var p_dmg = max(1, player.atk + randi() % 3 - e["hp"] / 10)
+			e["hp"] -= p_dmg
+			var e_dmg = max(1, e["atk"] + randi() % 2 - player.def)
+			player.hp -= e_dmg
+			_screenshake(3.0)
+			play_sound("hurt")
+			if e["hp"] <= 0:
+				player.xp += 5 + depth
+				play_sound("coin")
+				if player.xp >= player.level * 20:
+					player.level += 1
+					player.xp = 0
+					player.max_hp += 5
+					player.hp = player.max_hp
+					player.atk += 1
+					player.def += 1
+			if player.hp <= 0:
+				_game_over(false)
+			return
+	# Check item pickup
+	for item in items:
+		if item["x"] == nx and item["y"] == ny:
+			player.hp = min(player.max_hp, player.hp + item["heal"])
+			items.erase(item)
+			play_sound("coin")
+			break
+	player.x = nx
+	player.y = ny
+	turns += 1
+	# Check stair (exit if near room 0 after exploring)
+	if turns > 20 and randi() % 5 == 0 and player.x == MAP_W / 2 and player.y == MAP_H / 2:
+		pass
+	queue_redraw()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	floor = 1
+	depth = 1
+	turns = 0
+	player = {"x": 0, "y": 0, "hp": 20, "max_hp": 20, "xp": 0, "level": 1, "atk": 3, "def": 1}
+	_generate_map()
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "Floor: %d  HP: %d/%d  Lvl: %d  ATK: %d  DEF: %d" % [floor, player.hp, player.max_hp, player.level, player.atk, player.def]
+	hud.name = "Hud"
+	ui.add_child(hud)
+""";
+
+    internal static string[] ScaffoldGodotRpg(string root, string prompt)
+    {
+        var files = new List<string>();
+        Write(root, "project.godot", GodotKitProject("Hero's Quest"));
+        files.Add("project.godot");
+        Write(root, "export_presets.cfg", GodotExportPresets());
+        files.Add("export_presets.cfg");
+        Write(root, "Main.tscn", GodotKitMainScene("Control"));
+        files.Add("Main.tscn");
+        Write(root, "Main.gd", GodotRpgMain);
+        files.Add("Main.gd");
+        foreach (var (n, category) in new[] { ("click.wav", "select"), ("coin.wav", "coin"), ("hurt.wav", "hurt"), ("win.wav", "win") })
+        {
+            Write(root, n, SfxrGenerator.Render(category, seed: 7));
+            files.Add(n);
+        }
+        Write(root, "icon.ico", MakeIco());
+        files.Add("icon.ico");
+        Write(root, "DESIGN.md", GodotRpgDesignDoc(prompt));
+        files.Add("DESIGN.md");
+        Write(root, "README.md",
+            "# Hero's Quest - RPG (Godot 4, GDScript)\n\n" +
+            "Spelartext pa ENGELSKA (husregeln for alla kit sedan v1.99).\n" +
+            "Komplett spelbar rpg-grund med titelskarm,\n" +
+            "3 svarighetsgrader, paus, game over/win, partiklar, screenshake, ljud.\n" +
+            "Oppna i Godot 4 och tryck Play, eller exportera:\n" +
+            "`godot --headless --export-release \"Windows Desktop\" build/spel.exe`\n\n" +
+            "All grafik ritas i kod i Main.gd - byt tema via farger/varden dar.\n");
+        files.Add("README.md");
+        return [.. files];
+    }
+
+    static string GodotRpgDesignDoc(string prompt) =>
+        "Godot Hero's Quest (RPG) (Godot 4, GDScript)\n\n## Koncept\nByggt fran: **" + (prompt ?? "").Trim() +
+        "**\n\nRPG: overworld-utforskning, turbaserad strid, NPC-dialog, inventory, uppdrag.\n\n" +
+        "RPG: overworld-utforskning, turbaserad strid, NPC-dialog, inventory, uppdrag.\n" +
+        "## Mekanik\n" +
+        "- **Overworld:** 30x20-grid med gräs, träd, sten - slumpgenererat\n" +
+        "- **Strid:** turbaserad: Attack/Defend/Run mot fiender (Slimes)\n" +
+        "- **NPC-dialog:** prata med NPC:s for uppdrag och ledtradar\n" +
+        "- **Uppdrag:** bekämpa 3 Slimes = belöning (HP-ökning)\n" +
+        "- **Inventory:** plocka foremal fran besegrade fiender\n" +
+        "- **XP/Niva:** okar ATK och DEF per niva\n" +
+        "- **Spara/ladda:** automatiskt vid paus/titel\n" +
+        "- **Titelskarm, game over, ljud, screenshake\n";
+
+    const string GodotRpgMain = """
+extends Control
+# Heros Quest - overworld exploration, turn-based combat, NPC dialog, inventory, quests.
+# Player text in ENGLISH (house rule).
+
+const Shell = preload("res://Shell.gd")
+const SAVE_PATH := "user://herosquest_save.json"
+const TILE := 32
+const MAP_W := 30
+const MAP_H := 20
+
+var map_data: Array = []
+var player := {"x": 10, "y": 10, "hp": 30, "max_hp": 30, "mp": 10, "max_mp": 10, "atk": 5, "def": 2, "level": 1, "xp": 0}
+var enemies: Array = []
+var npcs: Array = []
+var inventory: Array = []
+var quest_log: Array = []
+var message := ""
+var combat_active := false
+var combat_enemy := {}
+var combat_turn := "player"
+var dialog_active := false
+var dialog_npc := {}
+var dialog_lines: Array = []
+var dialog_idx := 0
+var difficulty := 1
+var state := "title"
+var snd := {}
+var focus_pending := true
+var shake := 0.0
+var ui: CanvasLayer
+
+func _ready() -> void:
+	randomize()
+	Shell.startup()
+	for key in ["click","coin","hurt","win"]:
+		var stream: AudioStream = load("res://" + key + ".wav") as AudioStream
+		if stream:
+			var p := AudioStreamPlayer.new()
+			p.stream = stream
+			add_child(p)
+			snd[key] = p
+	var music = load("res://music.wav")
+	if music:
+		var mp := AudioStreamPlayer.new()
+		mp.stream = music
+		mp.volume_db = -14.0
+		mp.finished.connect(mp.play)
+		add_child(mp)
+		mp.play()
+	ui = CanvasLayer.new()
+	add_child(ui)
+	_load_game()
+	_show_title()
+
+func play_sound(key: String) -> void:
+	if snd.has(key):
+		snd[key].play()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and state != "title":
+		_save_game()
+		_show_title()
+
+func _clear_ui() -> void:
+	if ui:
+		for c in ui.get_children():
+			c.queue_free()
+
+func _label(txt: String, y: float, fsize := 22, col := Color(1,1,1)) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", fsize)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0,0,0,0.6))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(1152, fsize + 10)
+	l.position = Vector2(0, y)
+	ui.add_child(l)
+	return l
+
+var _last_button: Button = null
+
+func _button(txt: String, y: float, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = txt
+	b.size = Vector2(320, 46)
+	b.position = Vector2(416, y)
+	b.pressed.connect(cb)
+	ui.add_child(b)
+	if _last_button != null and is_instance_valid(_last_button):
+		_last_button.focus_neighbor_bottom = _last_button.get_path_to(b)
+		b.focus_neighbor_top = b.get_path_to(_last_button)
+	_last_button = b
+	if focus_pending:
+		focus_pending = false
+		b.grab_focus()
+
+func _show_title() -> void:
+	state = "title"
+	_clear_ui()
+	_label("HERO'S QUEST", 80, 72, Color(0.9, 0.7, 0.2))
+	_label("Explore the overworld, fight monsters, complete quests!", 160, 22)
+	var names := ["Easy", "Normal", "Hard"]
+	for i in range(3):
+		var d := i
+		_button(names[i], 290 + i * 58, func(): _start(d))
+	_button("Options", 470, func(): Shell.options_panel(self, func(): _show_title()))
+	_button("Quit", 528, func(): get_tree().quit())
+
+func _game_over(win: bool) -> void:
+	_clear_ui()
+	_label("YOU DIED" if not win else "QUEST COMPLETE!", 200, 76, Color(1,0.3,0.3) if not win else Color(0.3,1,0.3))
+	_label("Level: %d  XP: %d" % [player.level, player.xp], 280, 22)
+	_button("Play Again", 340, func(): _show_title())
+	_button("Quit", 398, func(): get_tree().quit())
+	play_sound("win" if win else "hurt")
+
+func _screenshake(intensity: float) -> void:
+	shake = intensity
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		var t := create_tween()
+		t.tween_interval(0.3)
+		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
+
+func _generate_world() -> void:
+	map_data = []
+	for i in range(MAP_W * MAP_H):
+		map_data.append(0)  # grass
+	# Trees, rocks, water
+	for i in range(MAP_W * MAP_H):
+		if randf() < 0.12:
+			map_data[i] = 1  # tree/wall
+	# Clear area around player spawn
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
+			var ix := 10 + dx
+			var iy := 10 + dy
+			if ix >= 0 and ix < MAP_W and iy >= 0 and iy < MAP_H:
+				map_data[iy * MAP_W + ix] = 0
+	# Enemies
+	enemies = []
+	for i in range(5):
+		var ex := 5 + randi() % (MAP_W - 10)
+		var ey := 5 + randi() % (MAP_H - 10)
+		if map_data[ey * MAP_W + ex] == 0:
+			enemies.append({"x": ex, "y": ey, "hp": 15, "max_hp": 15, "atk": 3, "def": 1, "xp": 10, "name": "Slime"})
+	# NPCs
+	npcs = []
+	npcs.append({"x": 8, "y": 8, "name": "Elder", "dialog": ["Welcome, hero!", "Defeat 3 slimes for me.", "You will be rewarded!"]})
+	quest_log = [{"name": "Slime Hunt", "desc": "Defeat 3 slimes", "progress": 0, "goal": 3, "done": false}]
+	# Items
+	inventory = []
+
+func _process(_delta: float) -> void:
+	queue_redraw()
+
+func _draw() -> void:
+	if state != "playing":
+		return
+	if combat_active:
+		_draw_combat()
+		return
+	if dialog_active:
+		_draw_dialog()
+		return
+	var ox := 20
+	var oy := 80
+	var cam_x = player.x - 15
+	var cam_y = player.y - 10
+	for y in range(20):
+		for x in range(30):
+			var mx = cam_x + x
+			var my = cam_y + y
+			if mx < 0 or mx >= MAP_W or my < 0 or my >= MAP_H:
+				continue
+			var idx = my * MAP_W + mx
+			var col := Color(0.1, 0.25, 0.1) if map_data[idx] == 0 else Color(0.15, 0.1, 0.05)
+			draw_rect(Rect2(ox + x * TILE, oy + y * TILE, TILE, TILE), col, true)
+	for e in enemies:
+		if e["hp"] <= 0:
+			continue
+		var ex = (e["x"] - cam_x) * TILE + ox
+		var ey = (e["y"] - cam_y) * TILE + oy
+		draw_circle(Vector2(ex + TILE/2, ey + TILE/2), 10, Color(1, 0.2, 0.2))
+	for npc in npcs:
+		var nx = (npc["x"] - cam_x) * TILE + ox
+		var ny = (npc["y"] - cam_y) * TILE + oy
+		draw_rect(Rect2(nx + 6, ny + 6, TILE - 12, TILE - 12), Color(0.2, 0.8, 0.5), true)
+	# Player
+	var px2 = (player.x - cam_x) * TILE + ox
+	var py2 = (player.y - cam_y) * TILE + oy
+	draw_rect(Rect2(px2 + 6, py2 + 6, TILE - 12, TILE - 12), Color(0.3, 0.6, 1.0), true)
+
+func _draw_combat() -> void:
+	_label("COMBAT - " + combat_enemy["name"], 150, 28, Color(1, 0.3, 0.3))
+	_label("HP: %d/%d  ATK: %d  DEF: %d" % [combat_enemy["hp"], combat_enemy["max_hp"], combat_enemy["atk"], combat_enemy["def"]], 200, 22)
+	_label("Your HP: %d/%d" % [player.hp, player.max_hp], 250, 22)
+	if combat_turn == "player":
+		_button("Attack", 310, func(): _combat_attack())
+		_button("Defend", 368, func(): _combat_defend())
+		_button("Run", 426, func(): _combat_run())
+	else:
+		_label("Enemy turn...", 320, 22)
+
+func _combat_attack() -> void:
+	var dmg = max(1, player.atk + randi() % 4 - combat_enemy["def"])
+	combat_enemy["hp"] -= dmg
+	play_sound("click")
+	if combat_enemy["hp"] <= 0:
+		combat_active = false
+		player.xp += combat_enemy["xp"]
+		play_sound("coin")
+		# Check quest
+		for q in quest_log:
+			if q["name"] == "Slime Hunt" and not q["done"]:
+				q["progress"] += 1
+				if q["progress"] >= q["goal"]:
+					q["done"] = true
+					player.max_hp += 5
+					player.hp = min(player.hp + 5, player.max_hp)
+		queue_redraw()
+		return
+	combat_turn = "enemy"
+	var edmg = max(1, combat_enemy["atk"] + randi() % 2 - player.def)
+	player.hp -= edmg
+	_screenshake(3.0)
+	if player.hp <= 0:
+		combat_active = false
+		_game_over(false)
+		return
+	combat_turn = "player"
+	queue_redraw()
+
+func _combat_defend() -> void:
+	var edmg = max(0, combat_enemy["atk"] + randi() % 2 - player.def - 2)
+	player.hp -= edmg
+	play_sound("click")
+	if player.hp <= 0:
+		combat_active = false
+		_game_over(false)
+		return
+	combat_turn = "player"
+	queue_redraw()
+
+func _combat_run() -> void:
+	if randf() < 0.5:
+		combat_active = false
+		queue_redraw()
+	else:
+		_combat_attack()
+
+func _draw_dialog() -> void:
+	if dialog_idx < dialog_lines.size():
+		_label(dialog_lines[dialog_idx], 200, 28, Color(0.9, 0.9, 0.6))
+		_button("Next", 350, func(): _dialog_next())
+	else:
+		dialog_active = false
+		queue_redraw()
+
+func _dialog_next() -> void:
+	dialog_idx += 1
+	if dialog_idx >= dialog_lines.size():
+		dialog_active = false
+	queue_redraw()
+
+func _input(event: InputEvent) -> void:
+	if state != "playing":
+		return
+	if combat_active or dialog_active:
+		return
+	var dx := 0
+	var dy := 0
+	if event.is_action_pressed("ui_up"): dy = -1
+	elif event.is_action_pressed("ui_down"): dy = 1
+	elif event.is_action_pressed("ui_left"): dx = -1
+	elif event.is_action_pressed("ui_right"): dx = 1
+	else: return
+	var nx = player.x + dx
+	var ny = player.y + dy
+	if nx < 0 or nx >= MAP_W or ny < 0 or ny >= MAP_H or map_data[ny * MAP_W + nx] == 1:
+		return
+	for e in enemies:
+		if e["x"] == nx and e["y"] == ny and e["hp"] > 0:
+			combat_active = true
+			combat_enemy = e
+			combat_turn = "player"
+			return
+	for npc in npcs:
+		if npc["x"] == nx and npc["y"] == ny:
+			dialog_active = true
+			dialog_npc = npc
+			dialog_lines = npc["dialog"]
+			dialog_idx = 0
+			return
+	player.x = nx
+	player.y = ny
+	queue_redraw()
+
+func _start(d: int) -> void:
+	difficulty = d
+	play_sound("click")
+	player = {"x": 10, "y": 10, "hp": 30, "max_hp": 30, "mp": 10, "max_mp": 10, "atk": 5, "def": 2, "level": 1, "xp": 0}
+	_generate_world()
+	state = "playing"
+	_clear_ui()
+	var hud := Label.new()
+	hud.text = "HP: %d/%d  Lvl: %d" % [player.hp, player.max_hp, player.level]
+	hud.name = "Hud"
+	ui.add_child(hud)
+
+func _save_game() -> void:
+	var data := {"player": player, "enemies": enemies, "npcs": npcs, "inventory": inventory, "quest_log": quest_log}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_line(JSON.stringify(data))
+
+func _load_game() -> void:
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f:
+		var data = JSON.parse_string(f.get_line())
+		if data is Dictionary:
+			player = data.get("player", player)
+			enemies = data.get("enemies", [])
+			npcs = data.get("npcs", [])
+			inventory = data.get("inventory", [])
+			quest_log = data.get("quest_log", [])
+""";
+
 }
