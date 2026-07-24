@@ -186,6 +186,15 @@ public static class DirectorPass
             // byggstenar så kravet kostar minuter, inte timmar.
             (["huvudmeny", "main menu", "meny med", "startmeny", "options", "settings", "inställning", "installning"],
                 "Riktigt SPELSKAL: titelskärmen är en HUVUDMENY med valbara knappar (Play, Options, Quit - plus karaktärs-/ban-/lägesval när spelet har figurer eller flera banor), och Options-skärmen har volym, mute och fullskärm som SPARAS mellan körningar - Shell.gd-hjälparna (Shell.menu/options_panel/character_select/startup) finns i projektet och ska användas"),
+            // v2.34: pausen var husets egen svaghet - kiten satte en flagga
+            // och lät tweens/timers/partiklar rulla vidare bakom PAUSED-
+            // texten. Agenten ska inte ärva det misstaget, och de namngivna
+            // handlingarna är förutsättningen för både omkoppling och
+            // handkontroll.
+            (["paus", "pause", "get_tree().paused"],
+                "RIKTIG PAUS: Esc pausar via Shell.pause(self) som sätter get_tree().paused - en egen \"paused\"-flagga räcker INTE, då fortsätter tweens, timers, animationer och partiklar rulla bakom pausskärmen. Pausmenyn har Resume, Options, Controls och (i spel med huvudmeny) Quit to Menu"),
+            (["move_left", "input_map", "inputmap", "handkontroll", "gamepad", "binda om", "omkoppling"],
+                "STYRNING: läs input via de namngivna handlingarna Shell registrerar (move_left/move_right/move_up/move_down/fire/interact/pause_game) i stället för råa KEY_-konstanter - de har både tangentbord och handkontroll bundet, och är det som gör Controls-skärmens omkoppling möjlig. ui_* lämnas orörda så menyn aldrig kan bindas bort"),
         ];
 
         var result = new List<string>(criteria);

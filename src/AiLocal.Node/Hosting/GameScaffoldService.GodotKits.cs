@@ -1305,6 +1305,10 @@ func _save_best(v: int) -> void:
     static string GodotKitProject(string name) =>
         "[application]\n" +
         $"config/name=\"{name}\"\n" +
+        // v2.34: credits-skarmen visar versionen. Utan nyckeln foll den
+        // tillbaka pa en hardkodad strang - och ett spel utan version ser
+        // ofardigt ut i precis den ruta som ska bevisa motsatsen.
+        "config/version=\"1.0.0\"\n" +
         "config/icon=\"res://icon.ico\"\n" +
         "run/main_scene=\"res://Main.tscn\"\n" +
         "config/features=PackedStringArray(\"4.3\")\n" +
@@ -1692,7 +1696,7 @@ const ARENA := Rect2(60, 60, 1032, 528)
 const FINAL_WAVE := 5
 
 var difficulty := 1
-var state := "title" # title | playing | paused | over
+var state := "title" # title | playing | over (pausen ar Shell.pause, inte ett tillstand)
 var player: CharacterBody2D
 var enemies: Array = []
 var coins: Array = []
@@ -2006,13 +2010,13 @@ func _physics_process(delta: float) -> void:
 	hud_label.text = "HP: %d   Score: %d   Wave: %d/%d" % [hp, score, mini(wave, FINAL_WAVE), FINAL_WAVE]
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
-		if state == "playing":
-			state = "paused"
-			show_overlay("PAUSED", "Esc: resume", false)
-		elif state == "paused":
-			state = "playing"
-			close_overlay()
+	if event.is_action_pressed("ui_cancel") and state == "playing":
+		# v2.34: RIKTIG paus. Forr var det bara en flagga - _process stannade
+		# men tweens, timers, animationer och partiklar rullade vidare, vilket
+		# syns direkt. Shell.pause pausar hela tradet och lagger overlayen i
+		# PROCESS_MODE_WHEN_PAUSED sa menyn anda svarar. Esc ligger som
+		# genvag pa Resume-knappen.
+		Shell.pause(self)
 
 func _draw() -> void:
 	# v2.20 pixelspraket: schackrutigt pixelgras i tva nyanser, mork kontur
@@ -2209,7 +2213,7 @@ const JUMP_VELOCITY := -620.0
 const SPRING_VELOCITY := -940.0
 
 var difficulty := 1
-var state := "title" # title | playing | paused | over
+var state := "title" # title | playing | over (pausen ar Shell.pause, inte ett tillstand)
 var player: CharacterBody2D
 var enemies: Array = []   # [{body, min_x, max_x, dir}]
 var coins: Array = []
@@ -2887,13 +2891,13 @@ func damage() -> void:
 		finish(false)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
-		if state == "playing":
-			state = "paused"
-			show_overlay("PAUSED", "Esc: resume", false)
-		elif state == "paused":
-			state = "playing"
-			close_overlay()
+	if event.is_action_pressed("ui_cancel") and state == "playing":
+		# v2.34: RIKTIG paus. Forr var det bara en flagga - _process stannade
+		# men tweens, timers, animationer och partiklar rullade vidare, vilket
+		# syns direkt. Shell.pause pausar hela tradet och lagger overlayen i
+		# PROCESS_MODE_WHEN_PAUSED sa menyn anda svarar. Esc ligger som
+		# genvag pa Resume-knappen.
+		Shell.pause(self)
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_R and state == "over":
 			new_game(difficulty)
@@ -3470,14 +3474,12 @@ func _physics_process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if state == "aim":
-			state = "paused"
-			show_overlay("PAUSED", "Esc: resume", [])
-		elif state == "paused":
-			state = "aim"
-			close_overlay()
-			# Pausades AI:ns siktepaus bort? Ge den en ny - annars softlock.
-			if not player_turn and proj.is_empty() and shots_queue.is_empty():
-				ai_take_aim()
+			# v2.34: riktig traduppdelad paus i stallet for en flagga.
+			# Softlock-vakten bor kvar som on_resume - AI:ns siktepaus kan ha
+			# hunnit ta slut precis nar spelaren pausade.
+			Shell.pause(self, func():
+				if not player_turn and proj.is_empty() and shots_queue.is_empty():
+					ai_take_aim())
 		return
 	if event is InputEventKey and event.pressed:
 		if state == "over" and event.keycode == KEY_R:
@@ -5377,7 +5379,7 @@ const SAVE_PATH := "user://strikearena_best.txt"
 const FINAL_WAVE := 5
 const ARENA_R := 17.0
 
-var state := "title" # title | playing | paused | over
+var state := "title" # title | playing | over (pausen ar Shell.pause, inte ett tillstand)
 var difficulty := 1
 var hp := 100
 var ammo := 24
@@ -5656,16 +5658,12 @@ func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventMouseMotion and state == "playing":
         yaw -= event.relative.x * 0.0028
         pitch = clampf(pitch - event.relative.y * 0.0028, -1.2, 1.2)
-    if event.is_action_pressed("ui_cancel"):
-        if state == "playing":
-            state = "paused"
-            Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-            _label_ui("PAUSED", 240, 44)
-            _label_ui("Esc: resume", 300, 18)
-        elif state == "paused":
-            state = "playing"
-            Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-            _clear_overlay()
+    if event.is_action_pressed("ui_cancel") and state == "playing":
+        # v2.34: riktig paus. Musen slapps fore pausmenyn och fangas igen
+        # nar den stangs - annars styr spelaren kameran genom menyn.
+        Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+        Shell.pause(self, func():
+            Input.mouse_mode = Input.MOUSE_MODE_CAPTURED)
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and state == "playing":
         _fire()
 

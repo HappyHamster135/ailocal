@@ -166,18 +166,44 @@ public sealed partial class GameScaffoldService
     /// navigerbara val, options-skärm (volym/mute/fullskärm som SPARAS mellan
     /// körningar) och karaktärsval. Kiten använder dem; regissörskriteriet +
     /// release-checklistan tvingar agentbyggen att göra detsamma.</summary>
+    /// <summary>v2.34: skalet fick de tre delar som saknades helt — riktig
+    /// paus (get_tree().paused förekom 0 gånger; pausen var en flagga så
+    /// tweens/timers/partiklar rullade vidare), namngivna input-actions med
+    /// handkontrollsstöd + omkoppling (kiten kollade ui_* och råa KEY_W om
+    /// vartannat, vilket gjorde omkoppling omöjlig), och en credits/version-
+    /// skärm. Controls och Credits hängdes in i options_panel — som 20 av 21
+    /// kit redan anropar — så de nås utan en enda kit-ändring.</summary>
     static string[] AppendShellLib(string root, string[] files)
     {
         try
         {
             Write(root, "Shell.gd", GodotShellLib);
-            return [.. files, "Shell.gd"];
+            var added = new List<string>(files) { "Shell.gd" };
+            // CREDITS.txt: byggagenten har nu en SJÄLVKLAR plats att skriva
+            // riktiga namn på. Utan filen bygger Shell.credits_lines() en
+            // rimlig text ur projektinställningarna i stället.
+            Write(root, "CREDITS.txt", CreditsTemplate);
+            added.Add("CREDITS.txt");
+            return [.. added];
         }
         catch
         {
             return files;
         }
     }
+
+    const string CreditsTemplate = """
+Game Design & Programming
+  <your name here>
+
+Art
+  <your name here>
+
+Audio
+  <your name here>
+
+Built with Godot Engine
+""";
 
     const string GodotShellLib = """
 class_name Shell
@@ -220,6 +246,10 @@ static func apply_settings(data: Dictionary) -> void:
 static func startup() -> Dictionary:
 	var data := load_settings()
 	apply_settings(data)
+	# v2.34: registrera de namngivna handlingarna och lagg pa spelarens egna
+	# tangentbindningar INNAN forsta rutan - annars kor spelet en ruta med
+	# fel styrning varje gang det startar.
+	apply_binds(data)
 	return data
 
 # ---------- huvudmenyn ----------
@@ -312,6 +342,29 @@ static func options_panel(parent: Node, on_back: Callable) -> Control:
 		save_settings(data))
 	box.add_child(full)
 
+	# v2.34: styrning och credits nas HARIFRAN. 20 av 21 kit anropar redan
+	# options_panel, sa de far bada skarmarna utan en enda kit-andring -
+	# och agentbyggen som foljer skalet likasa.
+	var ctrl := Button.new()
+	ctrl.text = "Controls"
+	ctrl.custom_minimum_size = Vector2(320, 46)
+	ctrl.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ctrl.pressed.connect(func():
+		box.visible = false
+		controls_panel(overlay, func():
+			box.visible = true))
+	box.add_child(ctrl)
+
+	var cred := Button.new()
+	cred.text = "Credits"
+	cred.custom_minimum_size = Vector2(320, 46)
+	cred.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cred.pressed.connect(func():
+		box.visible = false
+		credits_panel(overlay, func():
+			box.visible = true))
+	box.add_child(cred)
+
 	var back := Button.new()
 	back.text = "Back"
 	back.custom_minimum_size = Vector2(320, 46)
@@ -363,6 +416,343 @@ static func character_select(parent: Node, names: Array, colors: Array, selected
 		if first or i == selected:
 			first = false
 			b.call_deferred("grab_focus")
+	return overlay
+
+# ---------- namngivna handlingar (input map) ----------
+# v2.34: kiten kollade "ui_left" OCH raa KEY_W huller om buller. Foljden var
+# att inget gick att binda om och att handkontroll inte fungerade alls.
+# Handlingarna registreras i KOD (project.godots InputEvent-serialisering ar
+# for skor att handskriva) och ui_* lamnas ororda - menyn kan darfor ALDRIG
+# bindas bort sa att spelaren later sig sjalv utanfor.
+# Rad: [handling, etikett, tangent, alt-tangent, padknapp(-1=ingen),
+#       padaxel(-1=ingen), axelriktning]
+const ACTIONS := [
+	["move_left", "Move Left", KEY_A, KEY_LEFT, -1, JOY_AXIS_LEFT_X, -1.0],
+	["move_right", "Move Right", KEY_D, KEY_RIGHT, -1, JOY_AXIS_LEFT_X, 1.0],
+	["move_up", "Move Up / Jump", KEY_W, KEY_UP, JOY_BUTTON_A, JOY_AXIS_LEFT_Y, -1.0],
+	["move_down", "Move Down", KEY_S, KEY_DOWN, -1, JOY_AXIS_LEFT_Y, 1.0],
+	["fire", "Fire / Confirm", KEY_SPACE, KEY_ENTER, JOY_BUTTON_X, -1, 0.0],
+	["interact", "Interact", KEY_E, KEY_F, JOY_BUTTON_Y, -1, 0.0],
+	["pause_game", "Pause", KEY_ESCAPE, KEY_P, JOY_BUTTON_START, -1, 0.0],
+]
+
+static func ensure_actions() -> void:
+	for row in ACTIONS:
+		var act: String = str(row[0])
+		if not InputMap.has_action(act):
+			InputMap.add_action(act)
+		if InputMap.action_get_events(act).size() > 0:
+			continue
+		for code in [int(row[2]), int(row[3])]:
+			var k := InputEventKey.new()
+			k.physical_keycode = code
+			InputMap.action_add_event(act, k)
+		var pad: int = int(row[4])
+		if pad >= 0:
+			var jb := InputEventJoypadButton.new()
+			jb.button_index = pad
+			InputMap.action_add_event(act, jb)
+		var axis: int = int(row[5])
+		if axis >= 0:
+			var jm := InputEventJoypadMotion.new()
+			jm.axis = axis
+			jm.axis_value = float(row[6])
+			InputMap.action_add_event(act, jm)
+
+# Byter BARA ut tangenthandelserna - handkontrollen sitter kvar orord.
+static func apply_binds(data: Dictionary) -> void:
+	ensure_actions()
+	var binds: Dictionary = data.get("binds", {})
+	for row in ACTIONS:
+		var act: String = str(row[0])
+		if not binds.has(act):
+			continue
+		var code: int = int(binds[act])
+		if code <= 0:
+			continue
+		for ev in InputMap.action_get_events(act):
+			if ev is InputEventKey:
+				InputMap.action_erase_event(act, ev)
+		var k := InputEventKey.new()
+		k.physical_keycode = code
+		InputMap.action_add_event(act, k)
+
+static func bind_label(act: String, data: Dictionary) -> String:
+	var binds: Dictionary = data.get("binds", {})
+	if binds.has(act):
+		return OS.get_keycode_string(int(binds[act]))
+	for row in ACTIONS:
+		if str(row[0]) == act:
+			return OS.get_keycode_string(int(row[2]))
+	return "-"
+
+# ---------- riktig paus ----------
+# v2.34: kiten satte bara state = "paused". Spelarfiguren stannade, men
+# tweens, timers, animationer och partiklar rullade vidare - det syns direkt
+# och ar en av de tydligaste prototypsignalerna. Nu pausas HELA tradet.
+# Overlayen kor med PROCESS_MODE_WHEN_PAUSED, sa den lever medan resten star
+# still, och Escape ligger som genvag pa Resume-knappen (genvagar behandlas
+# av Control sjalv och funkar darfor ocksa i pausat trad).
+static func pause(parent: Node, on_resume: Callable = Callable(), on_quit: Callable = Callable()) -> Control:
+	var tree := parent.get_tree()
+	if tree == null:
+		return null
+	tree.paused = true
+	# EGEN CanvasLayer, inte bara en Control under anroparen. Kiten skickar
+	# in an "ui" (CanvasLayer), an "hud", an "self" (Node2D-roten) - och en
+	# Control under en Node2D lever i VARLDSkoordinater: pausmenyn hade
+	# glidit ivag med kameran och hamnat UNDER spelets egen HUD.
+	var layer := CanvasLayer.new()
+	layer.layer = 100
+	layer.process_mode = Node.PROCESS_MODE_WHEN_PAUSED
+	parent.add_child(layer)
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.process_mode = Node.PROCESS_MODE_WHEN_PAUSED
+	layer.add_child(overlay)
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.55)
+	overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 12)
+	overlay.add_child(box)
+	var title := Label.new()
+	title.text = "PAUSED"
+	title.add_theme_font_size_override("font_size", 46)
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+
+	var close_up := func():
+		tree.paused = false
+		layer.queue_free()
+		if on_resume.is_valid():
+			on_resume.call()
+
+	var resume := Button.new()
+	resume.text = "Resume"
+	resume.custom_minimum_size = Vector2(320, 46)
+	resume.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	resume.pressed.connect(close_up)
+	var sc := Shortcut.new()
+	var esc := InputEventKey.new()
+	esc.physical_keycode = KEY_ESCAPE
+	sc.events = [esc]
+	resume.shortcut = sc
+	resume.shortcut_in_tooltip = false
+	box.add_child(resume)
+
+	# Undermenyerna lever UNDER overlayen sa de arver WHEN_PAUSED och kan
+	# klickas medan tradet star still; box goms medan de ar oppna.
+	# options_panel stader inte sig sjalv (aldre kontrakt, 20 kit anropar
+	# den), sa panelen maste nas fran on_back. En vanlig lokal fangas BY
+	# VALUE i GDScript och hade varit null har inne - en Dictionary fangas
+	# som referens och funkar.
+	var opt := Button.new()
+	opt.text = "Options"
+	opt.custom_minimum_size = Vector2(320, 46)
+	opt.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	opt.pressed.connect(func():
+		box.visible = false
+		var holder := {"panel": null}
+		holder["panel"] = options_panel(overlay, func():
+			var p: Node = holder["panel"]
+			if p != null:
+				p.queue_free()
+			box.visible = true
+			resume.call_deferred("grab_focus"))
+		var made: Control = holder["panel"]
+		made.process_mode = Node.PROCESS_MODE_WHEN_PAUSED)
+	box.add_child(opt)
+
+	var ctrl := Button.new()
+	ctrl.text = "Controls"
+	ctrl.custom_minimum_size = Vector2(320, 46)
+	ctrl.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ctrl.pressed.connect(func():
+		box.visible = false
+		var sub := controls_panel(overlay, func():
+			box.visible = true
+			resume.call_deferred("grab_focus"))
+		sub.process_mode = Node.PROCESS_MODE_WHEN_PAUSED)
+	box.add_child(ctrl)
+
+	if on_quit.is_valid():
+		var quit := Button.new()
+		quit.text = "Quit to Menu"
+		quit.custom_minimum_size = Vector2(320, 46)
+		quit.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		quit.pressed.connect(func():
+			tree.paused = false
+			layer.queue_free()
+			on_quit.call())
+		box.add_child(quit)
+
+	resume.call_deferred("grab_focus")
+	return overlay
+
+# ---------- tangentbindning ----------
+# Klicka pa en rad, tryck ny tangent. Overlayen tar fokus under infangningen
+# sa gui_input far tangenthandelsen - det slipper ett eget skript per spel.
+static func controls_panel(parent: Node, on_back: Callable) -> Control:
+	ensure_actions()
+	var data := load_settings()
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.focus_mode = Control.FOCUS_ALL
+	parent.add_child(overlay)
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.65)
+	overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 8)
+	overlay.add_child(box)
+	var title := Label.new()
+	title.text = "CONTROLS"
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+
+	# Dictionary = referens, sa lambdorna ser samma tillstand. Vanliga
+	# lokaler fangas by value i GDScript och hade varit tomma har inne.
+	var capture := {"act": "", "btn": null}
+	var buttons := {}
+	for row in ACTIONS:
+		var act: String = str(row[0])
+		var line := HBoxContainer.new()
+		line.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		line.add_theme_constant_override("separation", 12)
+		box.add_child(line)
+		var lbl := Label.new()
+		lbl.text = str(row[1])
+		lbl.custom_minimum_size = Vector2(190, 0)
+		line.add_child(lbl)
+		var b := Button.new()
+		b.text = bind_label(act, data)
+		b.custom_minimum_size = Vector2(150, 36)
+		line.add_child(b)
+		buttons[act] = b
+		b.pressed.connect(func():
+			capture["act"] = act
+			capture["btn"] = b
+			b.text = "Press a key..."
+			overlay.grab_focus())
+
+	overlay.gui_input.connect(func(ev: InputEvent):
+		if str(capture["act"]) == "":
+			return
+		var k := ev as InputEventKey
+		if k == null or not k.pressed or k.echo:
+			return
+		var act: String = str(capture["act"])
+		var btn: Button = capture["btn"]
+		capture["act"] = ""
+		capture["btn"] = null
+		# Escape avbryter infangningen i stallet for att bli en bindning -
+		# annars kan spelaren binda bort sin egen vag ut ur menyn.
+		if k.physical_keycode == KEY_ESCAPE:
+			btn.text = bind_label(act, data)
+			return
+		var binds: Dictionary = data.get("binds", {})
+		binds[act] = int(k.physical_keycode)
+		data["binds"] = binds
+		save_settings(data)
+		apply_binds(data)
+		btn.text = bind_label(act, data)
+		overlay.accept_event())
+
+	var reset := Button.new()
+	reset.text = "Reset to defaults"
+	reset.custom_minimum_size = Vector2(320, 40)
+	reset.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	reset.pressed.connect(func():
+		data["binds"] = {}
+		save_settings(data)
+		for row in ACTIONS:
+			var act: String = str(row[0])
+			for ev in InputMap.action_get_events(act):
+				if ev is InputEventKey:
+					InputMap.action_erase_event(act, ev)
+			var b2: Button = buttons[act]
+			b2.text = bind_label(act, data)
+		ensure_actions())
+	box.add_child(reset)
+
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(320, 46)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func():
+		overlay.queue_free()
+		if on_back.is_valid():
+			on_back.call())
+	box.add_child(back)
+	back.call_deferred("grab_focus")
+	return overlay
+
+# ---------- credits / version ----------
+# v2.34: ett fardigt spel talar om vem som gjort det och vilken version man
+# kor. Texten kommer ur res://CREDITS.txt om filen finns - dar lagger
+# byggagenten riktiga namn - annars byggs den ur projektinstallningarna.
+static func credits_lines() -> Array:
+	if FileAccess.file_exists("res://CREDITS.txt"):
+		var f := FileAccess.open("res://CREDITS.txt", FileAccess.READ)
+		if f:
+			var raw: String = f.get_as_text().strip_edges()
+			if raw != "":
+				return Array(raw.split("\n"))
+	var gname: String = str(ProjectSettings.get_setting("application/config/name", "Game"))
+	return [gname, "", "Made with Godot Engine"]
+
+static func credits_panel(parent: Node, on_back: Callable) -> Control:
+	var overlay := Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	parent.add_child(overlay)
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.65)
+	overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 6)
+	overlay.add_child(box)
+	var title := Label.new()
+	title.text = "CREDITS"
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	for line in credits_lines():
+		var l := Label.new()
+		l.text = str(line)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		box.add_child(l)
+	var ver := Label.new()
+	ver.text = "Version " + str(ProjectSettings.get_setting("application/config/version", "1.0.0"))
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ver.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(ver)
+	var back := Button.new()
+	back.text = "Back"
+	back.custom_minimum_size = Vector2(320, 46)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func():
+		overlay.queue_free()
+		if on_back.is_valid():
+			on_back.call())
+	box.add_child(back)
+	back.call_deferred("grab_focus")
 	return overlay
 """;
 

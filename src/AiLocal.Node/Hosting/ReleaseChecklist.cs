@@ -36,6 +36,13 @@ public static class ReleaseChecklist
                 notes.Add("RELEASE-CHECKLISTA: ingen volymkontroll/mute hittad (M for mute och -/+ for niva ar arkadribban).");
             if (!Has("paused", "ui_cancel", "KEY_ESCAPE", "pause"))
                 notes.Add("RELEASE-CHECKLISTA: ingen paus hittad - Esc ska pausa och ateruppta spelet.");
+            // v2.34: en paus som BARA ar en flagga ser ratt ut i en skarmdump
+            // men later tweens, timers och partiklar rulla vidare. Den
+            // skillnaden syns i rorelse och ar en av de tydligaste
+            // prototypsignalerna - checklistan ska namna den.
+            else if (engine == "godot" && !Has("get_tree().paused", "Shell.pause", "process_mode"))
+                notes.Add("RELEASE-CHECKLISTA: pausen ser ut att vara en ren tillstandsflagga - tweens, timers och partiklar " +
+                          "fortsatter da bakom pausskarmen. Anvand Shell.pause(self) som satter get_tree().paused.");
             if (!Has("user://", "localStorage"))
                 notes.Add("RELEASE-CHECKLISTA: inget sparat framsteg/basta resultat hittat (user:// eller localStorage) - " +
                           "aven sma arkadspel ska minnas sitt highscore mellan korningar.");

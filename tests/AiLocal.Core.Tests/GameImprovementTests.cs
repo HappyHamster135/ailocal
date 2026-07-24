@@ -358,7 +358,9 @@ const FINAL_LEVEL = 3
             File.WriteAllText(Path.Combine(dir, "Main.gd"),
                 "extends Node2D\nconst SAVE_PATH := \"user://hs.save\"\nvar muted := false\nvar state := \"title\"\n" +
                 "func _unhandled_input(event: InputEvent) -> void:\n" +
-                "\tif event.is_action_pressed(\"ui_cancel\"):\n\t\tstate = \"paused\"\n" +
+                // v2.34: RIKTIG paus. Fixturen hade tidigare state = "paused",
+                // vilket den nya vakten (helt korrekt) underkanner.
+                "\tif event.is_action_pressed(\"ui_cancel\"):\n\t\tShell.pause(self)\n" +
                 "\tif event is InputEventKey and event.keycode == KEY_R:\n\t\tnew_game()\n" +
                 "\tAudioServer.set_bus_volume_db(0, -6.0)\n" +
                 "func new_game() -> void:\n\tstate = \"playing\"\n" +
@@ -367,6 +369,31 @@ const FINAL_LEVEL = 3
                 "func quit_game() -> void:\n\tget_tree().quit()\n");
             File.WriteAllText(Path.Combine(dir, "project.godot"), "[application]\nconfig/name=\"Pixel Rush\"\n");
             Assert.Empty(ReleaseChecklist.Review(dir, "godot"));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    /// <summary>v2.34: motprovet. En vakt som aldrig sett fungera pa ett
+    /// trasigt fall ar ingen vakt - och just den har fallet (paus som ren
+    /// flagga) fanns i husets EGNA kit i fyra releaser utan att nagon
+    /// markte det.</summary>
+    [Fact]
+    public void ReleaseChecklistan_UnderkannerPausSomBaraArEnFlagga()
+    {
+        var dir = Directory.CreateTempSubdirectory("ailocal-rc4-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Main.gd"),
+                "extends Node2D\nconst SAVE_PATH := \"user://hs.save\"\nvar muted := false\nvar state := \"title\"\n" +
+                "func _unhandled_input(event: InputEvent) -> void:\n" +
+                "\tif event.is_action_pressed(\"ui_cancel\"):\n\t\tstate = \"paused\"\n" +
+                "\tAudioServer.set_bus_volume_db(0, -6.0)\n" +
+                "func open_options() -> void:\n\tShell.options_panel(self, func(): pass)\n" +
+                "func toggle_fullscreen() -> void:\n\tDisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)\n" +
+                "func quit_game() -> void:\n\tget_tree().quit()\n");
+            File.WriteAllText(Path.Combine(dir, "project.godot"), "[application]\nconfig/name=\"Flag Pause\"\n");
+            var notes = ReleaseChecklist.Review(dir, "godot");
+            Assert.Contains(notes, n => n.Contains("tillstandsflagga"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
