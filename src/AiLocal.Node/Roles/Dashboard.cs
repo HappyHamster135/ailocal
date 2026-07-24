@@ -1097,6 +1097,15 @@ internal static class Dashboard
         .style-card img { width: 56px; height: 35px; border-radius: 2px; display: block; }
         .style-card[data-style="pixelart"] img { image-rendering: pixelated; }
         .style-card.selected { border-color: var(--accent, #5b8def); background: rgba(91, 141, 239, .12); }
+        .feature-row { padding-top: 2px; }
+        .feature-boxes { display: flex; flex-wrap: wrap; gap: 5px; }
+        .feature-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+          border: 1px solid var(--line); border-radius: 999px; font-size: 11px; cursor: pointer;
+          user-select: none; transition: border-color .15s ease, background .15s ease; }
+        .feature-chip:hover { border-color: var(--accent, #5b8def); }
+        .feature-chip input { margin: 0; }
+        .feature-chip.on { border-color: var(--accent, #5b8def); background: rgba(91, 141, 239, .14); }
+        .feature-hint { opacity: .6; margin-left: 4px; }
         .composer-tools .check-field { min-height: 28px; gap: 6px; }
         .composer-tools select {
           min-height: 28px;
@@ -1790,6 +1799,11 @@ internal static class Dashboard
                   <label class="check-field small" title="Studion ställer 2-3 klargörande frågor innan bygget startar (svara inom 10 min, annars väljer den själv). Kräver Agentläge, lokala körningar.">
                     <input id="askFirst" type="checkbox" checked> Fråga först
                   </label>
+                </div>
+                <div class="style-row feature-row" id="featureRow" title="Funktioner du kryssar i blir HÅRDA kontraktspunkter som kvalitetsgrinden följer upp - och de som har en färdig modul hämtas ur biblioteket i stället för att skrivas om från noll. Förkryssas efter genren i din prompt; ändra fritt.">
+                  <span class="style-lbl">Funktioner</span>
+                  <span class="feature-boxes" id="featureBoxes"></span>
+                  <span class="small feature-hint" id="featureHint"></span>
                 </div>
                 <div class="composer-toolbar">
                   <div class="composer-tools">
@@ -6036,8 +6050,68 @@ internal static class Dashboard
           if (st) parts.push('[STIL: ' + st + ']');
           const sc = $('scopeSelect')?.value || '';
           if (sc) parts.push('[OMFANG: ' + sc + ']');
+          const feats = [...document.querySelectorAll('#featureBoxes input:checked')].map(i => i.value);
+          if (feats.length) parts.push('[FUNKTIONER: ' + feats.join(',') + ']');
           if ($('askFirst')?.checked) parts.push('[FORHANDSFRAGOR]');
           return parts.length ? parts.join('\n') + '\n' : '';
+        }
+
+        // ---- Funktionsvalen (v2.30) --------------------------------------
+        // Kryssrutorna blir HÅRDA kontraktspunkter, och de som har en färdig
+        // modul hämtas ur game_module-biblioteket i stället för att skrivas
+        // om sämre från noll. Förvalen följer genren i prompten men går
+        // alltid att ändra - du ser exakt vad som är ikryssat.
+        const FEATURES = [
+          { k: 'shop', n: 'Butik' }, { k: 'achievements', n: 'Prestationer' },
+          { k: 'inventory', n: 'Inventarie' }, { k: 'quest', n: 'Uppdrag' },
+          { k: 'dialog', n: 'Dialog' }, { k: 'xp', n: 'Nivåer/XP' },
+          { k: 'combat', n: 'Strid/HP' }, { k: 'enemyai', n: 'Smart fiende-AI' },
+          { k: 'hotseat', n: 'Lokal flerspelare' }, { k: 'tutorial', n: 'Inlärning' },
+        ];
+        const FEATURE_DEFAULTS = [
+          { rx: /rpg|äventyr|aventyr|rogue|dungeon/i, on: ['inventory', 'quest', 'dialog', 'xp', 'combat'] },
+          { rx: /fps|first person|shooter|skjut/i, on: ['combat', 'enemyai', 'xp'] },
+          { rx: /party|minigame|minispel|brädspel|bradspel/i, on: ['hotseat', 'achievements'] },
+          { rx: /tower defense|torn/i, on: ['shop', 'enemyai'] },
+          { rx: /tycoon|manage|butik|idle|clicker|simulator|bondgård/i, on: ['shop', 'achievements'] },
+          { rx: /artilleri|worms|shellshock|tanks/i, on: ['shop', 'combat'] },
+          { rx: /plattform|platformer|metroidvania/i, on: ['combat', 'achievements'] },
+          { rx: /pussel|puzzle|quiz|memory|minröj|minesweeper|snake|orm|breakout|tetris|block/i, on: ['achievements', 'tutorial'] },
+          { rx: /racing|bil|kart/i, on: ['achievements'] },
+        ];
+        let featuresTouched = false;
+
+        function renderFeatures() {
+          const box = $('featureBoxes');
+          if (!box || box.childElementCount) return;
+          box.innerHTML = FEATURES.map(f =>
+            '<label class="feature-chip" data-k="' + f.k + '"><input type="checkbox" value="' + f.k + '">' + f.n + '</label>'
+          ).join('');
+          box.addEventListener('change', (e) => {
+            featuresTouched = true;
+            const lab = e.target.closest('.feature-chip');
+            if (lab) lab.classList.toggle('on', e.target.checked);
+            updateFeatureHint();
+          });
+        }
+
+        function applyFeatureDefaults() {
+          if (featuresTouched) return;   // rör aldrig ett manuellt val
+          const txt = ($('prompt')?.value || '');
+          const hit = FEATURE_DEFAULTS.find(d => d.rx.test(txt));
+          const on = hit ? hit.on : [];
+          document.querySelectorAll('#featureBoxes .feature-chip').forEach(lab => {
+            const inp = lab.querySelector('input');
+            inp.checked = on.includes(inp.value);
+            lab.classList.toggle('on', inp.checked);
+          });
+          updateFeatureHint();
+        }
+
+        function updateFeatureHint() {
+          const n = document.querySelectorAll('#featureBoxes input:checked').length;
+          const h = $('featureHint');
+          if (h) h.textContent = n ? n + ' vald' + (n === 1 ? '' : 'a') + ' - blir kontraktskrav' : 'inga valda';
         }
 
         // Stilkorten: ett val i taget, markering via .selected.
@@ -6047,6 +6121,11 @@ internal static class Dashboard
           document.querySelectorAll('#styleRow .style-card').forEach(c => c.classList.remove('selected'));
           card.classList.add('selected');
         });
+
+        // Funktionsrutorna ritas en gang och forvalen foljer vad du skriver.
+        renderFeatures();
+        applyFeatureDefaults();
+        $('prompt')?.addEventListener('input', applyFeatureDefaults);
 
         function syncComposerLock() {
           const btn = $('sendBtn');

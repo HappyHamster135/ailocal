@@ -151,6 +151,12 @@ public sealed partial class GameScaffoldService
         // den som skapar rollistan Cast3D speglar.
         scaffolded = AppendRig3DLib(root, scaffolded);
         scaffolded = AppendCast3D(root, scaffolded);
+        // v2.30: fysikgolvet - knuffbara props, triggers och studsmaterial.
+        scaffolded = AppendPhysicsLib(root, scaffolded);
+        // v2.30: karaktarsskaparen - spelaren far valja utseende, sparat i user://.
+        scaffolded = AppendCharCustomLib(root, scaffolded);
+        // v2.30: 3D-djupet - riktig vagsokning runt hinder.
+        scaffolded = AppendNav3DLib(root, scaffolded);
         return AppendMechanicsDoc(root, prompt ?? "", scaffolded);
     }
 

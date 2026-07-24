@@ -611,6 +611,26 @@ efter vilket gap de stänger (S/M/L = grov storlek).
 > AnimatedSprite3D avbryter `_physics_process` varje bildruta; figurerna
 > SYNS ändå, så skärmdumpen såg korrekt ut. LÄRDOM: skärmdump bevisar
 > rendering, inte logik. KVAR: fysik, 3D-djup, spelarval av funktioner.
+>
+> **v2.30 FUNKTIONSVAL + FYSIK + SKAPARE + VÄGSÖKNING.** Fyra punkter mot
+> indie-nivå. (1) FUNKTIONSKRYSSRUTOR i composern: game_module hade åtta
+> färdiga system men de nåddes bara om agenten själv valde dem — nu blir
+> ett kryss BÅDE modulhämtning OCH hård kontraktspunkt grinden följer upp.
+> Taggen `[FUNKTIONER: ...]` bakas i texten som stil/omfång, så gamla
+> noder är oberörda. (2) FYSIKGOLVET `Phys.gd`: mätningen gav NOLL
+> RigidBody/Area/PhysicsMaterial i alla 21 kit — allt var kinematiskt och
+> varje träff en manuell avståndsloop. Nu knuffbara props, triggers,
+> studsmaterial, kraftpulser. Kuben får sju lådor; sond mätte 6/6 flyttade
+> av en puls. FIXAT: Kuben hade ingen fallhantering alls. (3)
+> `CharCustom.gd`: nyckeln var att 2D-spriten ritas med EXAKTA
+> palettfärger ur specen, så ett pixelexakt färgbyte vid körning ger ny
+> figur utan omritning i C#. Levande förhandsvisning, fem kategorier,
+> sparas i user://, sitter i partyts meny. (4) `Nav3D.gd`: navmesh bakad i
+> kod. Bygger MEDVETET på `NavigationServer3D.map_get_path` och INTE
+> `NavigationAgent3D` — agenten gav tom väg i skarp sond medan
+> serverfrågan gav korrekt väg runt hindret direkt. Strike Arenas fiender
+> går nu runt pelarna; 74 polygoner bakade i det riktiga kitet.
+> KVAR: butik/achievements som färdiga moduler, 3D-nivågeometri, LOD.
 
 ### C-gap 1. Spelet KÄNNS produktionsklart (störst upplevt gap, verifierbart)
 - **C1 Game-feel/juice-pass** (M): screenshake, partiklar, tweenade övergångar,

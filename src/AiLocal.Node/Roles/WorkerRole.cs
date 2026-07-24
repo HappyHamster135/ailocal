@@ -852,6 +852,10 @@ public static class WorkerRole
             if (buildIntent && string.Equals(settings.Worker.GameLanguage, "sv", StringComparison.OrdinalIgnoreCase))
                 assignmentText += "\n\nSPRÅK (operatörens nodinställning): ALL spelartext på SVENSKA med korrekta å/ä/ö och professionell ton. Kitets engelska spelartexter översätts i de skärmar du rör.";
 
+            // v2.30: peka ut de färdiga modulerna för de valda funktionerna.
+            if (buildIntent && BuildDirectives.ModuleHint(choices.FeatureList) is { } modHint)
+                assignmentText += "\n\n" + modHint;
+
             // ---- Regissören: designkontrakt med mätbara kriterier -----------
             // En stark-modell-tur gör den svaga prompten till ett leverans-
             // kontrakt ("5 banor", "3 fiendetyper") som grinden följer upp.
@@ -890,6 +894,11 @@ public static class WorkerRole
                         operatorCriteria.Add(styleCrit);
                     if (BuildDirectives.ScopeCriterion(choices.Scope) is { } scopeCrit)
                         operatorCriteria.Add(scopeCrit);
+                    // v2.30: funktionsvalen blir HÅRDA kontraktspunkter. De åtta
+                    // modulerna i game_module fanns redan men nåddes bara om
+                    // agenten själv råkade välja dem - nu är de ett krav grinden
+                    // följer upp, inte ett erbjudande.
+                    operatorCriteria.AddRange(BuildDirectives.FeatureCriteria(choices.FeatureList));
                     var contract = await DirectorPass.RunAsync(
                         req.Assignment, directorRoot, settings.Worker.ModelTiers.Complex, completeAccounted, ct,
                         engine: GameBuilder.DetectEngine(directorRoot),

@@ -942,6 +942,8 @@ const Shell = preload("res://Shell.gd")
 # 2D-pixelgubben, sa figuren kanns igen mellan 2D- och 3D-spel.
 const Rig3D = preload("res://Rig3D.gd")
 const Cast3D = preload("res://Cast3D.gd")
+# v2.30: fysikgolvet - ladorna gar att knuffa pa riktigt.
+const Phys = preload("res://Phys.gd")
 
 const SAVE_PATH := "user://cube_best.txt"
 const COINS := 8
@@ -1113,6 +1115,14 @@ func _build_world() -> void:
     player.position = Vector3(0, ph * 0.5, 0)
     add_child(player)
     rig.play("idle")
+    # v2.30: knuffbara lador - riktig RigidBody-fysik i stallet for en varld
+    # dar allt star fastskruvat. Springer man in i dem glider de undan,
+    # studsar mot varandra och kan putta mynt.
+    for i in range(7):
+        var ang2 := TAU * float(i) / 7.0
+        var crate = Phys.prop3d(Vector3(0.9, 0.9, 0.9), Color(0.62, 0.45, 0.28), 1.1)
+        crate.position = Vector3(cos(ang2) * 6.0, 0.5, sin(ang2) * 6.0)
+        add_child(crate)
 
 func _clear_ui() -> void:
     for c in ui.get_children():
@@ -1217,6 +1227,19 @@ func _physics_process(delta: float) -> void:
     else:
         player.velocity.y -= 24.0 * delta
     player.move_and_slide()
+    # v2.30: en CharacterBody3D knuffar INTE rigidbodies av sig sjalv - utan
+    # detta gar man rakt igenom ladorna som om de vore fastskruvade.
+    Phys.push_bodies(player, 3.5)
+    # v2.30 FALLVAKT: arenan har kanter och kitet hade ingen hantering alls -
+    # gick man over kanten foll man for evigt i tomma intet. Nu aterstalls
+    # man till mitten med en kannbar small.
+    if player.position.y < -8.0:
+        player.position = Vector3(0, float(Rig3D.metrics_of(Cast3D.spec("player")).get("cap_h", 1.7)) * 0.5, 0)
+        player.velocity = Vector3.ZERO
+        shake = maxf(shake, 0.6)
+        _play("hurt")
+        if rig:
+            rig.play("land")
     # v2.29: riggen speglar rorelsen - gar nar man ror sig, star still annars,
     # och vander sig at det hall man springer.
     if rig:
@@ -3746,6 +3769,9 @@ extends Node2D
 # Preload (inte class_name-globalen): kitet ska parsa AVEN fore forsta
 # importen, och class_name-registret finns forst efter import.
 const Shell = preload("res://Shell.gd")
+# v2.30: karaktarsskaparen - spelaren bygger sin egen gubbe (kroppstyp,
+# frisyr, har-/hud-/kladfarg) med levande forhandsvisning, sparat i user://.
+const CharCustom = preload("res://CharCustom.gd")
 
 const BOARD_RING := 0
 const BOARD_SERPENTINE := 1
@@ -3915,11 +3941,14 @@ func _ensure_tokens() -> void:
     var frames: SpriteFrames = load("res://player_frames.tres") as SpriteFrames
     if frames == null:
         return
+    # v2.30: spelare 1 far sitt EGNA utseende fran karaktarsskaparen.
+    var mine: SpriteFrames = CharCustom.frames_for("player", CharCustom.load_choice())
     for i in range(4):
         var spr := AnimatedSprite2D.new()
-        spr.sprite_frames = frames
+        spr.sprite_frames = (mine if (i == 0 and mine != null) else frames)
         # lerp mot vitt behaller gubbens ljus nar spelarfarger multipliceras in
-        spr.modulate = Color(PLAYERS[i]["col"]).lerp(Color.WHITE, 0.35)
+        # - men den egna figuren far behalla sina valda farger orörda.
+        spr.modulate = Color.WHITE if (i == 0 and mine != null) else Color(PLAYERS[i]["col"]).lerp(Color.WHITE, 0.35)
         spr.scale = Vector2(2.2, 2.2)
         spr.play("idle")
         add_child(spr)
@@ -4109,11 +4138,23 @@ func _show_title() -> void:
     Shell.menu(ui, [
         ["Play", func(): _show_setup()],
         ["Choose Character", func(): _show_character_select()],
+        # v2.30: spelaren far bygga sin EGEN gubbe (kroppstyp, frisyr, har-,
+        # hud- och klädfarg) med levande forhandsvisning. Valet sparas i
+        # user:// och anvands av tokens pa bradet.
+        ["Customise", func(): _show_customise()],
         ["Minigames", func(): _show_minigame_menu()],
         ["Options", func(): _show_options()],
         ["Quit", func(): get_tree().quit()],
     ], 70.0)
     queue_redraw()
+
+func _show_customise() -> void:
+    _play("click")
+    _clear_ui()
+    CharCustom.creator_panel(ui, func(_c):
+        # Tokens byggs om sa det egna utseendet syns direkt pa bradet.
+        _ensure_tokens()
+        _show_title())
 
 func _show_setup() -> void:
     _play("click")
@@ -5310,6 +5351,9 @@ const Shell = preload("res://Shell.gd")
 # v2.29: husets 3D-karaktar - fienderna ar riggade figurer, inte kapslar.
 const Rig3D = preload("res://Rig3D.gd")
 const Cast3D = preload("res://Cast3D.gd")
+# v2.30: vagsokning sa fienderna gar RUNT pelarna, inte genom dem.
+const Nav3D = preload("res://Nav3D.gd")
+var nav_region: NavigationRegion3D = null
 
 const SAVE_PATH := "user://strikearena_best.txt"
 const FINAL_WAVE := 5
@@ -5424,6 +5468,10 @@ func _build_world() -> void:
     add_child(player)
     cam = Camera3D.new()
     player.add_child(cam)
+    # v2.30: baka navmesh NAR banan star klar. Utan detta gick fienderna
+    # rakt genom pelarna - det tydligaste tecknet pa att 3D-varlden var
+    # en kuliss snarare an en plats.
+    nav_region = Nav3D.bake(self, 0.6, 1.8)
 
 func _make_enemy() -> Dictionary:
     # v2.29: husets riggade figur i stallet for en rod kapsel. Man moter dem
@@ -5688,9 +5736,22 @@ func _physics_process(delta: float) -> void:
         # och GDScript faller vid parse.
         var to_p: Vector3 = player.position - node.position
         to_p.y = 0.0
-        node.position += to_p.normalized() * float(en["speed"]) * delta
-        # Figuren vander sig mot spelaren och gar snabbare pa hogre vagor.
-        node.face_dir(to_p, delta)
+        # v2.30 VAGSOKNING: rakna om vagen med jamna mellanrum (inte varje
+        # bildruta - det ar bade onodigt och dyrt) och folj den runt pelarna.
+        en["repath"] = float(en.get("repath", 0.0)) - delta
+        if float(en["repath"]) <= 0.0:
+            en["repath"] = 0.5
+            en["route"] = Nav3D.route(self, node.global_position, player.position)
+            en["leg"] = 0
+        var r: PackedVector3Array = en.get("route", PackedVector3Array())
+        if r.size() > 0:
+            en["leg"] = Nav3D.follow(node, r, int(en.get("leg", 0)), float(en["speed"]), delta)
+            var nd: Vector3 = Nav3D.dir_along(node.global_position, r, int(en["leg"]))
+            node.face_dir(nd if nd != Vector3.ZERO else to_p, delta)
+        else:
+            # Fallback nar ingen vag finns (t.ex. fore bake): rak linje.
+            node.position += to_p.normalized() * float(en["speed"]) * delta
+            node.face_dir(to_p, delta)
         node.set_speed(clampf(float(en["speed"]) / 5.0, 0.3, 1.0))
         if invuln <= 0.0 and to_p.length() < 1.2:
             hp -= 12
