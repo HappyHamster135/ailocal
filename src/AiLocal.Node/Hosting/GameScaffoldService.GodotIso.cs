@@ -445,7 +445,7 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 2.2 * delta)
-        world.position = Vector2(576, 270) + Vector2(randf_range(-shake, shake), randf_range(-shake, shake)) * 8.0
+        world.position = Vector2(576, 270) + Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion)) * 8.0
     if state == "title":
         # Attract-autopilot: efter 8s demonstrerar spelet sig sjalvt (sonden
         # nar spelloopen utan att kunna reglerna).

@@ -458,7 +458,7 @@ func _physics_process(delta: float) -> void:
     # C1 juice: screenshake genom att flytta varldens Node2D en avtagande offset.
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 30.0 * delta)
-        position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+        position = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
     elif position != Vector2.ZERO:
         position = Vector2.ZERO
     if car_flash > 0.0:
@@ -1274,7 +1274,7 @@ func _physics_process(delta: float) -> void:
     # C1 juice: kamerashake - lagg en avtagande slump-offset pa foljekameran.
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 2.0 * delta)
-    var sh := Vector3(randf_range(-shake, shake), randf_range(-shake, shake), 0.0)
+    var sh := Vector3(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion), 0.0)
     # v2.29: narmare kamera an de gamla 14/14. Spelaren ar inte langre en
     # 1x1-kub utan en 1,7 m hog figur med ansikte och gangcykel - pa
     # 14 enheters avstand blev den ~50 px och all detalj foll bort.
@@ -1981,7 +1981,7 @@ func _physics_process(delta: float) -> void:
 	# forskjutning som avtar. Snapper tillbaka till noll nar den slocknat.
 	if shake > 0.0:
 		shake = move_toward(shake, 0.0, 32.0 * delta)
-		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		position = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 	elif position != Vector2.ZERO:
 		position = Vector2.ZERO
 	var dir := Vector2(
@@ -2737,7 +2737,7 @@ func _physics_process(delta: float) -> void:
 	# (v2.13-autopilotfyndet - genomfall genom marken vid varje skak).
 	if shake > 0.0:
 		shake = move_toward(shake, 0.0, 32.0 * delta)
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 	elif cam.offset != Vector2.ZERO:
 		cam.offset = Vector2.ZERO
 	# ---- rorelse: acceleration ger tyngd, coyote + buffert ger valvilja ----
@@ -3467,7 +3467,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if shake > 0.0:
 		shake = move_toward(shake, 0.0, 30.0 * delta)
-		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		position = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 	elif position != Vector2.ZERO:
 		position = Vector2.ZERO
 	recoil = move_toward(recoil, 0.0, 24.0 * delta)
@@ -4459,7 +4459,7 @@ func _physics_process(delta: float) -> void:
     # C1 juice: screenshake
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 30.0 * delta)
-        position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+        position = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
     elif position != Vector2.ZERO:
         position = Vector2.ZERO
 
@@ -6377,7 +6377,7 @@ func _update_hud() -> void:
 func _physics_process(delta: float) -> void:
     if shake > 0.0:
         shake = move_toward(shake, 0.0, 2.5 * delta)
-        cam.position = Vector3(0, 16, 15) + Vector3(randf_range(-shake, shake), randf_range(-shake, shake), 0)
+        cam.position = Vector3(0, 16, 15) + Vector3(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion), 0)
     if state != "board":
         return
     if moving_steps > 0:
@@ -7010,7 +7010,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -7072,7 +7072,10 @@ func _draw() -> void:
 	for t in towers:
 		Art.orb(self, Vector2(t["x"], t["y"]), 20, Color(0.6, 0.4, 0.2))
 	for e in enemies:
-		Art.orb(self, Vector2(e["x"], e["y"]), 10, Color(1, 0.2, 0.2))
+		# v2.36: Art.threat, inte Art.orb - taggarna gor att fienden gar att
+		# skilja fran torn och foremal aven for den som inte ser skillnad pa
+		# rott och gront. Mening far aldrig bara pa farg allena.
+		Art.threat(self, Vector2(e["x"], e["y"]), 10, Color(1, 0.2, 0.2))
 		var hp_pct: float = float(e["hp"]) / float(e["max_hp"])
 		Art.bar(self, Rect2(e["x"] - 12, e["y"] - 18, 24, 4), hp_pct,
 			Color(0, 0, 0, 0.5), Color(0.25, 0.9, 0.3))
@@ -7380,7 +7383,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -7688,7 +7691,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -8019,7 +8022,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -8282,7 +8285,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -8590,7 +8593,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -8947,7 +8950,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -9238,7 +9241,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -9626,7 +9629,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -9745,7 +9748,9 @@ func _draw() -> void:
 			continue
 		var ex = (e["x"] - cam_x) * TILE + ox
 		var ey = (e["y"] - cam_y) * TILE + oy
-		Art.tile(self, Rect2(ex + 4, ey + 4, TILE - 8, TILE - 8), Color(0.8, 0.2, 0.2))
+		# v2.36: taggad form - foremalet ar en slat orb, spelaren en ringad
+		# token, fienden en taggig. Skiljer sig utan att fargen behovs.
+		Art.threat(self, Vector2(ex + TILE/2, ey + TILE/2), TILE/2 - 5, Color(0.8, 0.2, 0.2))
 	# Player
 	var px2 = (player.x - cam_x) * TILE + ox
 	var py2 = (player.y - cam_y) * TILE + oy
@@ -10019,7 +10024,7 @@ func _screenshake(intensity: float) -> void:
 	shake = intensity
 	var cam := get_viewport().get_camera_2d()
 	if cam:
-		cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		cam.offset = Vector2(randf_range(-shake * Shell.motion, shake * Shell.motion), randf_range(-shake * Shell.motion, shake * Shell.motion))
 		var t := create_tween()
 		t.tween_interval(0.3)
 		t.tween_callback(func(): if cam: cam.offset = Vector2.ZERO)
@@ -10100,7 +10105,8 @@ func _draw() -> void:
 		var ex = (e["x"] - cam_x) * TILE + ox
 		var ey = (e["y"] - cam_y) * TILE + oy
 		# v2.35: Art.gd - marken forblir platt, figurerna far djup.
-		Art.orb(self, Vector2(ex + TILE/2, ey + TILE/2), 10, Color(1, 0.2, 0.2))
+		# v2.36: taggad form sa fienden skiljs fran NPC:n utan farg.
+		Art.threat(self, Vector2(ex + TILE/2, ey + TILE/2), 10, Color(1, 0.2, 0.2))
 	for npc in npcs:
 		var nx = (npc["x"] - cam_x) * TILE + ox
 		var ny = (npc["y"] - cam_y) * TILE + oy

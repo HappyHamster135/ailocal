@@ -217,9 +217,21 @@ class_name Shell
 # Player text in ENGLISH (house rule).
 
 const SETTINGS_PATH := "user://shell_settings.save"
+# v2.36: Art bar tillganglighetsfiltret men kan inte lasa installningar sjalv.
+# preload, inte class_name - se Art.gd:s egen hjalptext om varfor.
+const Art = preload("res://Art.gd")
+
+# Rorelseskala for skarmskakning (0.0 = av, 1.0 = full). Kiten multiplicerar
+# sin skakning med den har: `randf_range(-shake * Shell.motion, ...)`. Ett
+# ENDA stalle i varje kit tar ut skakningen, sa hela flaggan kostar en rad.
+# Skakning ar en verklig tillganglighetsfraga - den utloser illamaende hos
+# rorelsekansliga spelare, och da ar valet mellan att sla av den eller att
+# lata bli att spela.
+static var motion := 1.0
 
 static func load_settings() -> Dictionary:
-	var data := {"volume": 1.0, "muted": false, "fullscreen": false}
+	var data := {"volume": 1.0, "muted": false, "fullscreen": false,
+		"colorblind": 0, "shake": true}
 	if FileAccess.file_exists(SETTINGS_PATH):
 		var f := FileAccess.open(SETTINGS_PATH, FileAccess.READ)
 		if f:
@@ -242,6 +254,10 @@ static func apply_settings(data: Dictionary) -> void:
 	var is_full: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 	if want_full != is_full:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if want_full else DisplayServer.WINDOW_MODE_WINDOWED)
+	# v2.36: tillgangligheten. Art.cb_mode ar statisk och delas av hela spelet,
+	# sa ETT varde far varenda ritning att byta palett.
+	Art.cb_mode = clampi(int(data.get("colorblind", 0)), 0, 3)
+	motion = 1.0 if bool(data.get("shake", true)) else 0.0
 
 static func startup() -> Dictionary:
 	var data := load_settings()
@@ -341,6 +357,37 @@ static func options_panel(parent: Node, on_back: Callable) -> Control:
 		apply_settings(data)
 		save_settings(data))
 	box.add_child(full)
+
+	# v2.36: tillganglighet. Samma vinst som Controls/Credits - allt som
+	# hangs in HAR nar 20 av 21 kit utan en enda kit-andring.
+	var cb_row := HBoxContainer.new()
+	cb_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cb_row.add_theme_constant_override("separation", 12)
+	box.add_child(cb_row)
+	var cb_label := Label.new()
+	cb_label.text = "Colorblind"
+	cb_label.custom_minimum_size = Vector2(110, 0)
+	cb_row.add_child(cb_label)
+	var cb_pick := OptionButton.new()
+	for name in ["Off", "Protanopia", "Deuteranopia", "Tritanopia"]:
+		cb_pick.add_item(name)
+	cb_pick.selected = clampi(int(data.get("colorblind", 0)), 0, 3)
+	cb_pick.custom_minimum_size = Vector2(240, 34)
+	cb_pick.item_selected.connect(func(i: int):
+		data["colorblind"] = i
+		apply_settings(data)
+		save_settings(data))
+	cb_row.add_child(cb_pick)
+
+	var shake := CheckButton.new()
+	shake.text = "Screen shake"
+	shake.button_pressed = bool(data.get("shake", true))
+	shake.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	shake.toggled.connect(func(on: bool):
+		data["shake"] = on
+		apply_settings(data)
+		save_settings(data))
+	box.add_child(shake)
 
 	# v2.34: styrning och credits nas HARIFRAN. 20 av 21 kit anropar redan
 	# options_panel, sa de far bada skarmarna utan en enda kit-andring -
@@ -945,9 +992,48 @@ const SHADOW := Color(0.0, 0.0, 0.0, 0.28)
 const OUTLINE_DARKEN := 0.45
 const HILITE := Color(1.0, 1.0, 1.0, 0.35)
 
+# ---------- tillganglighet: fargblindlage ----------
+# v2.36: kiten kodar mening i FARG - rod fiende, gron sak, gron halsomatare.
+# For roughly var tolfte man ar rott och gront samma farg, och da ar spelet
+# inte svarare utan OLASLIGT.
+# Det har ar INTE en klinisk daltoniseringsmatris (de SIMULERAR synfelet, vilket
+# ar precis fel sak att gora at en spelare). Det ar hue-separation: de tonarter
+# som faller ihop dras isar sa de gar att skilja pa. Filtret sitter i VARJE
+# ritfunktion har, sa hela spelet byter palett i ett svep - och agentbyggd kod
+# som foljer husregeln "rita via Art" far det gratis.
+# 0 = av, 1 = protanopi, 2 = deuteranopi, 3 = tritanopi
+static var cb_mode := 0
+
+static func cb(col: Color) -> Color:
+    if cb_mode == 0 or col.s < 0.12:
+        return col
+    var h := col.h * 360.0
+    var s := col.s
+    var v := col.v
+    if cb_mode == 3:
+        # Bla/gul faller ihop: bla -> turkos, gul -> rosa.
+        if h >= 190.0 and h <= 265.0:
+            h = 178.0
+        elif h >= 40.0 and h <= 70.0:
+            h = 325.0
+            s = minf(1.0, s * 1.1)
+    else:
+        # Rod/gron faller ihop: gront dras mot bla, rott mot orange, och
+        # ljusheten separeras sa de skiljer sig aven i gratoner.
+        if h >= 70.0 and h <= 175.0:
+            h = 196.0
+            v = minf(1.0, v * 1.08)
+        elif h >= 330.0 or h <= 22.0:
+            h = 33.0
+            s = minf(1.0, s * 1.05)
+            v = maxf(0.0, v * 0.86)
+    return Color.from_hsv(h / 360.0, s, v, col.a)
+
 # Gradientbakgrund (vertikala band) med mork vinjett upptill/nedtill -
 # aldrig en platt enfargsyta bakom spelet.
-static func bg(c: CanvasItem, rect: Rect2, top: Color, bottom: Color) -> void:
+static func bg(c: CanvasItem, rect: Rect2, top_raw: Color, bottom_raw: Color) -> void:
+    var top := cb(top_raw)
+    var bottom := cb(bottom_raw)
     var bands := 24
     for i in range(bands):
         var t := float(i) / float(bands - 1)
@@ -958,7 +1044,8 @@ static func bg(c: CanvasItem, rect: Rect2, top: Color, bottom: Color) -> void:
     c.draw_rect(Rect2(rect.position + Vector2(0, rect.size.y - 46.0), Vector2(rect.size.x, 46.0)), Color(0, 0, 0, 0.14))
 
 # Panel/kort: skugga bakom, fyllning, ljuskant upptill, kontur.
-static func panel(c: CanvasItem, rect: Rect2, fill: Color) -> void:
+static func panel(c: CanvasItem, rect: Rect2, fill_raw: Color) -> void:
+    var fill := cb(fill_raw)
     c.draw_rect(Rect2(rect.position + Vector2(0, 4), rect.size), SHADOW)
     c.draw_rect(rect, fill)
     c.draw_rect(Rect2(rect.position, Vector2(rect.size.x, maxf(3.0, rect.size.y * 0.14))), HILITE)
@@ -971,10 +1058,11 @@ static func tile(c: CanvasItem, rect: Rect2, fill: Color, symbol: String = "", s
         var fs := int(rect.size.y * 0.5)
         c.draw_string(ThemeDB.fallback_font,
             Vector2(rect.position.x, rect.position.y + rect.size.y * 0.5 + float(fs) * 0.36),
-            symbol, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, symbol_col)
+            symbol, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, cb(symbol_col))
 
 # Orb: skuggad cirkel med ljushighlight och kontur - aldrig en platt cirkel.
-static func orb(c: CanvasItem, pos: Vector2, r: float, col: Color) -> void:
+static func orb(c: CanvasItem, pos: Vector2, r: float, col_raw: Color) -> void:
+    var col := cb(col_raw)
     c.draw_circle(pos + Vector2(0, r * 0.18), r, SHADOW)
     c.draw_circle(pos, r, col)
     c.draw_circle(pos + Vector2(-r * 0.3, -r * 0.3), r * 0.35, HILITE)
@@ -985,8 +1073,21 @@ static func token(c: CanvasItem, pos: Vector2, r: float, col: Color) -> void:
     orb(c, pos, r, col)
     c.draw_arc(pos, r + 2.5, 0.0, TAU, 24, Color(1, 1, 1, 0.9), 2.0)
 
+# Fiende/fara: orb med taggar. FORMEN, inte fargen, sager att den ar farlig -
+# husregeln ar att mening aldrig far bara pa farg allena. En rod cirkel och en
+# gron cirkel ar SAMMA cirkel for var tolfte man; taggarna funkar for alla,
+# ocksa i gratoner och ocksa for den som spelar med ljudet av.
+static func threat(c: CanvasItem, pos: Vector2, r: float, col: Color) -> void:
+    var spike := cb(col).darkened(0.55)
+    for i in range(8):
+        var a := TAU * float(i) / 8.0
+        var d := Vector2(cos(a), sin(a))
+        c.draw_line(pos + d * (r * 0.75), pos + d * (r * 1.45), spike, maxf(2.0, r * 0.16))
+    orb(c, pos, r, col)
+
 # Bana/koppling mellan punkter (t.ex. bradrutor) - dubbellinje ger djup.
-static func connect_path(c: CanvasItem, points: PackedVector2Array, col: Color, closed: bool = true) -> void:
+static func connect_path(c: CanvasItem, points: PackedVector2Array, col_raw: Color, closed: bool = true) -> void:
+    var col := cb(col_raw)
     if points.size() < 2:
         return
     var n := points.size() if closed else points.size() - 1
@@ -997,7 +1098,9 @@ static func connect_path(c: CanvasItem, points: PackedVector2Array, col: Color, 
         c.draw_line(a, b, col, 2.5)
 
 # Matare/progressbar med kontur.
-static func bar(c: CanvasItem, rect: Rect2, frac: float, back: Color, fill: Color) -> void:
+static func bar(c: CanvasItem, rect: Rect2, frac: float, back_raw: Color, fill_raw: Color) -> void:
+    var back := cb(back_raw)
+    var fill := cb(fill_raw)
     c.draw_rect(Rect2(rect.position + Vector2(0, 2), rect.size), SHADOW)
     c.draw_rect(rect, back)
     c.draw_rect(Rect2(rect.position, Vector2(rect.size.x * clampf(frac, 0.0, 1.0), rect.size.y)), fill)
@@ -1007,7 +1110,7 @@ static func bar(c: CanvasItem, rect: Rect2, frac: float, back: Color, fill: Colo
 static func label(c: CanvasItem, pos: Vector2, text: String, size: int, col: Color, width: float = 1152.0) -> void:
     var f := ThemeDB.fallback_font
     c.draw_string_outline(f, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, size, 4, Color(0, 0, 0, 0.55))
-    c.draw_string(f, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, size, col)
+    c.draw_string(f, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, size, cb(col))
 """;
 
     /// <summary>v2.4: BAKGRUNDSMUSIK i varje Godot-kit. ChiptuneComposer har

@@ -11,6 +11,12 @@ namespace AiLocal.Core.Tests;
 /// trasigt och får felsöka husets kod i stället för att bygga spelet.
 /// Ingen modul har någonsin parse-verifierats mot riktig Godot.
 /// </summary>
+// v2.36: alla klasser som STARTAR godot delar samma xunit-samling och
+// kor darfor aldrig parallellt. Fonstersonden foll slumpvis i full svit
+// men var gron riktad: dess WaitForVisibleWindow pa 15 s hann inte nar
+// atton andra godot-processer slogs om cpu:n. Riktad gron + full svit
+// rod = parallellkrock, aldrig logikfel.
+[Collection("GodotProcess")]
 public class GameModuleGodotTests
 {
     public static TheoryData<string> GodotModuler() =>

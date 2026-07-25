@@ -9,6 +9,12 @@ namespace AiLocal.Core.Tests;
 /// v1.46.0: fönstersonden (motorspelens interaktiva QA) och regissörens
 /// spelkänsla-kriterier för godot/unity-kontrakt.
 /// </summary>
+// v2.36: alla klasser som STARTAR godot delar samma xunit-samling och
+// kor darfor aldrig parallellt. Fonstersonden foll slumpvis i full svit
+// men var gron riktad: dess WaitForVisibleWindow pa 15 s hann inte nar
+// atton andra godot-processer slogs om cpu:n. Riktad gron + full svit
+// rod = parallellkrock, aldrig logikfel.
+[Collection("GodotProcess")]
 public class WindowProbeAndFeelTests
 {
     // ---- Pixeljämförelsen --------------------------------------------------

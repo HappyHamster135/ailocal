@@ -18,6 +18,12 @@ namespace AiLocal.Core.Tests;
 /// riktig Godot och mäter att bildruteräknaren slutar ticka - en skärmdump
 /// eller en parse-koll hade sett likadan ut med den gamla trasiga flaggan.
 /// </summary>
+// v2.36: alla klasser som STARTAR godot delar samma xunit-samling och
+// kor darfor aldrig parallellt. Fonstersonden foll slumpvis i full svit
+// men var gron riktad: dess WaitForVisibleWindow pa 15 s hann inte nar
+// atton andra godot-processer slogs om cpu:n. Riktad gron + full svit
+// rod = parallellkrock, aldrig logikfel.
+[Collection("GodotProcess")]
 public class ShellPauseControlsTests
 {
     // Normaliserad: filerna har CRLF, och ett test som soker "]\n" far -1

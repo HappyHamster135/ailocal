@@ -12,6 +12,12 @@ namespace AiLocal.Core.Tests;
 /// separat med riktig `godot --headless` (miljöberoende - dokumenterat i
 /// releaseprocessen), inte här.
 /// </summary>
+// v2.36: alla klasser som STARTAR godot delar samma xunit-samling och
+// kor darfor aldrig parallellt. Fonstersonden foll slumpvis i full svit
+// men var gron riktad: dess WaitForVisibleWindow pa 15 s hann inte nar
+// atton andra godot-processer slogs om cpu:n. Riktad gron + full svit
+// rod = parallellkrock, aldrig logikfel.
+[Collection("GodotProcess")]
 public class GodotKitTests
 {
     private static (string Root, string[] Files) ScaffoldTo(string prompt)
